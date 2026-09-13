@@ -336,12 +336,12 @@ CREATE INDEX event_outbox_pending_idx ON event_outbox (created_at) WHERE publish
 **Interfaces:**
 - Produces: `message.Outbox{repo, manager, writer, log, workers int, lock *instance.Locker}` com `Run(ctx)`; `StartRecovery` chamando `RequeueStuck` no boot (threshold 5min).
 - `message.Sender` interface `{Send(ctx, sess session.Session, msg session.OutboundMessage) (string, error)}`; implementações `textSender`, `locationSender`, `contactSender` (dispatched por `Type`).
-- Erros de sessão: `session.ErrTransient` (retry), `session.ErrNotConnected` (falha definitiva, status `error`), `session.ErrInvalidRecipient` (falha definitiva).
+- Erros de sessão: `session.ErrTransient` (retry), `session.ErrNotConnected` (falha definitiva, status `failed` — a spec não tem estado `error` de mensagem), `session.ErrInvalidRecipient` (falha definitiva).
 - `ClaimQueued` respeita `next_attempt_at`; falha transitória atualiza `next_attempt_at = now + 2^retries segundos` (teto 2min) e volta `queued`; `retries >= 5` → `failed`.
 - Evento `message.status` gravado no outbox em `sent` e `failed`.
 
 - [ ] **Step 1: Testes do worker** com repo/manager fakes: processa lote, marca `sending→sent`; erro transitório reagenda com `next_attempt_at` crescente; após 5 tentativas vira `failed`; instância desconectada falha definitivo; recuperação devolve `sending` antigo para `queued`.
-- [ ] **Step 2: Testes dos senders (texto/localização/contato)** com sessão fake: monta `OutboundMessage` correto por tipo, incluindo `quoted` quando houver.
+- [ ] **Step 2: Testes dos senders (texto/localização/contato)** com sessão fake: monta `OutboundMessage` correto por tipo (sem `quoted` — fora do escopo da v1).
 - [ ] **Step 3: Falhar → implementar → passar.**
 - [ ] **Step 4: Ligar `Outbox` no `main.go`** (workers da config) e verificar `go build ./...`.
 - [ ] **Step 5: Commit** — `git commit -am "feat(wzap): add outbox workers, senders and recovery"`.
