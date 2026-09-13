@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\MeController;
+use App\Http\Controllers\Api\MonitoringArtifactDownloadController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -9,3 +10,8 @@ Route::get('/user', function (Request $request) {
 })->middleware('auth:sanctum');
 
 Route::middleware('auth:sanctum')->get('/me', MeController::class);
+
+Route::middleware(['auth:sanctum', 'signed'])
+    ->get('/monitoring/artifacts/{ref}/download', MonitoringArtifactDownloadController::class)
+    ->where('ref', '[A-Za-z0-9_-]+')
+    ->name('monitoring.artifacts.download');
