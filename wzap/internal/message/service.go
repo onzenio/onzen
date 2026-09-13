@@ -23,8 +23,17 @@ const (
 	TypeMedia    = "media"
 )
 
-// StatusQueued is the initial state of an accepted message.
-const StatusQueued = "queued"
+// Message statuses persisted in message_queue.status.
+const (
+	// StatusQueued is the initial state of an accepted message.
+	StatusQueued = "queued"
+	// StatusSending means a worker claimed the message for delivery.
+	StatusSending = "sending"
+	// StatusSent means WhatsApp accepted the message.
+	StatusSent = "sent"
+	// StatusFailed means the message was not delivered and will not be retried.
+	StatusFailed = "failed"
+)
 
 // Errors reported by the service and mapped to HTTP status codes by the handler
 // layer.

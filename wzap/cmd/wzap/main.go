@@ -21,6 +21,7 @@ import (
 	"onefisc/wzap/internal/events"
 	"onefisc/wzap/internal/httpapi"
 	"onefisc/wzap/internal/instance"
+	"onefisc/wzap/internal/instancelock"
 	"onefisc/wzap/internal/message"
 	"onefisc/wzap/internal/session/whatsmeow"
 	"onefisc/wzap/internal/storage/postgres"
@@ -135,15 +136,18 @@ func serve() error {
 	numbers := message.NewJIDResolver(sessions, postgres.NewJIDCacheRepository(pool), log)
 	messages := message.NewService(instances, numbers, messageRepo)
 
-	// Restore the persisted sessions before serving. Per-instance failures are
-	// reflected in instances.status by the manager; only an aborted restore is
-	// reported here, and serving proceeds either way.
+	// Restore the persisted sessions before serving and before the outbox
+	// starts claiming messages. Per-instance failures are reflected in
+	// instances.status by the manager; only an aborted restore is reported
+	// here, and serving proceeds either way.
 	restoreCtx, cancelRestore := context.WithTimeout(ctx, restoreTimeout)
 	restoreErr := service.Restore(restoreCtx)
 	cancelRestore()
 	if restoreErr != nil {
 		log.Warn("restore sessions not completed", "error", restoreErr)
 	}
+
+	outboxWorker := message.NewOutbox(messageRepo, sessions, events.NewWriter(outbox), log, cfg.OutboxWorkers, instancelock.New())
 
 	srv := httpapi.New(cfg, log, httpapi.Deps{
 		ReadyChecker: checker,
@@ -152,6 +156,14 @@ func serve() error {
 		Messages:     messages,
 		Idempotency:  idempotencyRepo,
 	})
+
+	outboxCtx, stopOutbox := context.WithCancel(ctx)
+	defer stopOutbox()
+	outboxDone := make(chan struct{})
+	go func() {
+		defer close(outboxDone)
+		outboxWorker.Run(outboxCtx)
+	}()
 
 	relayCtx, stopRelay := context.WithCancel(ctx)
 	defer stopRelay()
@@ -172,6 +184,8 @@ func serve() error {
 
 	select {
 	case err := <-serveErr:
+		stopOutbox()
+		<-outboxDone
 		stopRelay()
 		<-relayDone
 		return fmt.Errorf("serve http: %w", err)
@@ -183,13 +197,18 @@ func serve() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
+		stopOutbox()
+		<-outboxDone
 		stopRelay()
 		<-relayDone
 		return fmt.Errorf("shutdown http server: %w", err)
 	}
 
 	// The HTTP server drains first so in-flight requests finish; only then the
-	// relay stops, after publishing the events those requests enqueued.
+	// outbox stops sending, and the relay stops last, after publishing the
+	// events those requests and the outbox enqueued.
+	stopOutbox()
+	<-outboxDone
 	stopRelay()
 	<-relayDone
 
