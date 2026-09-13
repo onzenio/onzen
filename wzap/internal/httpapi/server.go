@@ -6,6 +6,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"onefisc/wzap/internal/config"
@@ -54,11 +55,47 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *http.Server {
 	api.HandleFunc("GET /api/v1/instances/{id}/messages", handleListMessages(deps.Messages))
 	api.HandleFunc("GET /api/v1/instances/{id}/messages/{message_id}", handleGetMessage(deps.Messages))
 	api.HandleFunc("GET /api/v1/media/{id}", handleGetMedia(deps.Media))
-	mux.Handle("/api/v1/", Auth(cfg.ServiceToken)(api))
+	mux.Handle("/api/v1/", Auth(cfg.ServiceToken)(envelopeFallback(api)))
 
 	return &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           RequestID(Logging(log)(Recover(log)(mux))),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+}
+
+// envelopeFallback turns the plain-text 404 and 405 responses of the API mux
+// into the shared error envelope. A request whose path is registered with other
+// methods answers 405 with the Allow header naming them; every other unrouted
+// request answers 404.
+func envelopeFallback(mux *http.ServeMux) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, pattern := mux.Handler(r); pattern != "" {
+			mux.ServeHTTP(w, r)
+			return
+		}
+		if allowed := allowedMethods(mux, r); len(allowed) > 0 {
+			w.Header().Set("Allow", strings.Join(allowed, ", "))
+			Error(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+			return
+		}
+		Error(w, r, http.StatusNotFound, "not_found", "route not found")
+	})
+}
+
+// allowedMethods reports the methods the mux registers for the path of r. The
+// mux does not expose its route table, so each method is probed in turn; a
+// method-less request never reaches this helper.
+func allowedMethods(mux *http.ServeMux, r *http.Request) []string {
+	var allowed []string
+	for _, method := range []string{
+		http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete,
+	} {
+		probe := r.Clone(r.Context())
+		probe.Method = method
+		if _, pattern := mux.Handler(probe); pattern != "" {
+			allowed = append(allowed, method)
+		}
+	}
+	return allowed
 }

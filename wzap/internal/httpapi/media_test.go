@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -92,6 +93,7 @@ func TestGetMediaReturnsContent(t *testing.T) {
 		return io.NopCloser(bytes.NewReader(payload)), &model.Media{
 			ID:        id,
 			Mimetype:  "image/jpeg",
+			Filename:  "foto da praia.jpg",
 			SizeBytes: int64(len(payload)),
 		}, nil
 	}}
@@ -104,11 +106,80 @@ func TestGetMediaReturnsContent(t *testing.T) {
 	if ct := rec.Header().Get("Content-Type"); ct != "image/jpeg" {
 		t.Errorf("Content-Type = %q, want image/jpeg", ct)
 	}
+	if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Errorf("X-Content-Type-Options = %q, want nosniff", got)
+	}
+	if got := rec.Header().Get("Content-Disposition"); got != `attachment; filename="foto da praia.jpg"` {
+		t.Errorf("Content-Disposition = %q, want the attachment with the filename", got)
+	}
 	if cl := rec.Header().Get("Content-Length"); cl != strconv.Itoa(len(payload)) {
 		t.Errorf("Content-Length = %q, want %d", cl, len(payload))
 	}
 	if !bytes.Equal(rec.Body.Bytes(), payload) {
 		t.Errorf("body = %q, want %q", rec.Body.Bytes(), payload)
+	}
+}
+
+func TestGetMediaSanitizesSenderFilename(t *testing.T) {
+	tests := []struct {
+		name      string
+		filename  string
+		wantIn    string
+		wantExact string
+	}{
+		{
+			name:      "path traversal",
+			filename:  "../../etc/passwd",
+			wantExact: "attachment; filename=passwd",
+		},
+		{
+			name:     "control characters and header injection",
+			filename: "report\r\nX-Evil: 1.pdf",
+			wantIn:   "reportX-Evil: 1.pdf",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			id := uuid.New()
+			store := &fakeMediaStore{openFn: func(context.Context, uuid.UUID) (io.ReadCloser, *model.Media, error) {
+				return io.NopCloser(strings.NewReader("x")), &model.Media{
+					ID: id, Mimetype: "application/pdf", Filename: tt.filename, SizeBytes: 1,
+				}, nil
+			}}
+
+			rec := serve(t, mediaServer(t, store), http.MethodGet, "/api/v1/media/"+id.String(), testToken)
+
+			disposition := rec.Header().Get("Content-Disposition")
+			if !strings.HasPrefix(disposition, "attachment") {
+				t.Fatalf("Content-Disposition = %q, want an attachment", disposition)
+			}
+			if strings.ContainsAny(disposition, "\r\n") {
+				t.Fatalf("Content-Disposition = %q, want no control characters", disposition)
+			}
+			if tt.wantExact != "" && disposition != tt.wantExact {
+				t.Errorf("Content-Disposition = %q, want %q", disposition, tt.wantExact)
+			}
+			if tt.wantIn != "" && !strings.Contains(disposition, tt.wantIn) {
+				t.Errorf("Content-Disposition = %q, want it to contain %q", disposition, tt.wantIn)
+			}
+		})
+	}
+}
+
+func TestGetMediaFilenameFallsBackToID(t *testing.T) {
+	id := uuid.New()
+	store := &fakeMediaStore{openFn: func(context.Context, uuid.UUID) (io.ReadCloser, *model.Media, error) {
+		return io.NopCloser(strings.NewReader("x")), &model.Media{
+			ID: id, Mimetype: "application/pdf", SizeBytes: 1,
+		}, nil
+	}}
+
+	rec := serve(t, mediaServer(t, store), http.MethodGet, "/api/v1/media/"+id.String(), testToken)
+
+	want := "attachment; filename=" + id.String()
+	if got := rec.Header().Get("Content-Disposition"); got != want {
+		t.Errorf("Content-Disposition = %q, want %q", got, want)
 	}
 }
 

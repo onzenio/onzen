@@ -210,6 +210,23 @@ func TestInstancesCreateRejectsInvalidBody(t *testing.T) {
 	}
 }
 
+func TestInstancesCreateRejectsOversizedBody(t *testing.T) {
+	svc := &fakeInstanceService{}
+	oversized := `{"name":"` + strings.Repeat("a", maxJSONBodyBytes+1) + `"}`
+
+	rec := serveJSON(t, instancesServer(t, svc), http.MethodPost, "/api/v1/instances", oversized)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusRequestEntityTooLarge)
+	}
+	if code := errorCode(t, rec.Body.Bytes()); code != "request_too_large" {
+		t.Errorf("error code = %q, want %q", code, "request_too_large")
+	}
+	if len(svc.createInputs) != 0 {
+		t.Errorf("Create calls = %v, want none on an oversized body", svc.createInputs)
+	}
+}
+
 func TestInstancesList(t *testing.T) {
 	first := model.Instance{
 		ID: uuid.New(), Name: "a", ExternalRef: "ref-a", Status: "disconnected",

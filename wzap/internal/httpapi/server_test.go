@@ -97,6 +97,46 @@ func TestNewAPIGroupRequiresAuth(t *testing.T) {
 	})
 }
 
+func TestAPIFallbackAnswersErrorEnvelope(t *testing.T) {
+	srv := newTestServer(t)
+
+	t.Run("unknown path", func(t *testing.T) {
+		rec := serve(t, srv, http.MethodGet, "/api/v1/unknown", testToken)
+
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
+		}
+		if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+			t.Errorf("Content-Type = %q, want application/json", ct)
+		}
+		if code := errorCode(t, rec.Body.Bytes()); code != "not_found" {
+			t.Errorf("error code = %q, want %q", code, "not_found")
+		}
+	})
+
+	t.Run("unknown path without token is unauthorized", func(t *testing.T) {
+		rec := serve(t, srv, http.MethodGet, "/api/v1/unknown", "")
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+		}
+	})
+
+	t.Run("wrong method on a known path", func(t *testing.T) {
+		rec := serve(t, srv, http.MethodDelete, "/api/v1/instances", testToken)
+
+		if rec.Code != http.StatusMethodNotAllowed {
+			t.Fatalf("status = %d, want %d", rec.Code, http.StatusMethodNotAllowed)
+		}
+		if code := errorCode(t, rec.Body.Bytes()); code != "method_not_allowed" {
+			t.Errorf("error code = %q, want %q", code, "method_not_allowed")
+		}
+		if allow := rec.Header().Get("Allow"); allow != "GET, POST" {
+			t.Errorf("Allow = %q, want %q", allow, "GET, POST")
+		}
+	})
+}
+
 func TestNewReturnsConfiguredServer(t *testing.T) {
 	srv := New(config.Config{HTTPAddr: "127.0.0.1:9999", ServiceToken: testToken}, discardLogger(), Deps{})
 

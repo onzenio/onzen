@@ -19,6 +19,8 @@ const (
 	defaultInstancesLimit = 50
 	// maxInstancesLimit caps the page size a client can request.
 	maxInstancesLimit = 100
+	// maxJSONBodyBytes caps the JSON request bodies every handler decodes.
+	maxJSONBodyBytes = 1 << 20
 )
 
 // InstanceService is the instance management contract consumed by the handlers.
@@ -73,8 +75,8 @@ type updateInstanceRequest struct {
 func handleCreateInstance(instances InstanceService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var request createInstanceRequest
-		if err := decodeJSONBody(r, &request); err != nil {
-			Error(w, r, http.StatusBadRequest, "invalid_request", "invalid request body")
+		if err := decodeJSONBody(w, r, &request); err != nil {
+			writeJSONBodyError(w, r, err)
 			return
 		}
 
@@ -135,8 +137,8 @@ func handleUpdateInstance(instances InstanceService) http.HandlerFunc {
 		}
 
 		var request updateInstanceRequest
-		if err := decodeJSONBody(r, &request); err != nil {
-			Error(w, r, http.StatusBadRequest, "invalid_request", "invalid request body")
+		if err := decodeJSONBody(w, r, &request); err != nil {
+			writeJSONBodyError(w, r, err)
 			return
 		}
 
@@ -195,9 +197,23 @@ func parseLimit(raw string, fallback, maxLimit int) int {
 	return min(limit, maxLimit)
 }
 
-// decodeJSONBody decodes the request body into target.
-func decodeJSONBody(r *http.Request, target any) error {
+// decodeJSONBody decodes the request body into target, refusing bodies above
+// maxJSONBodyBytes before they are buffered.
+func decodeJSONBody(w http.ResponseWriter, r *http.Request, target any) error {
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
 	return json.NewDecoder(r.Body).Decode(target)
+}
+
+// writeJSONBodyError maps a body decoding failure to its HTTP status: an
+// oversized body answers 413 and anything else a malformed 400.
+func writeJSONBodyError(w http.ResponseWriter, r *http.Request, err error) {
+	var maxErr *http.MaxBytesError
+	if errors.As(err, &maxErr) {
+		Error(w, r, http.StatusRequestEntityTooLarge, "request_too_large",
+			"request body exceeds the 1 MiB limit")
+		return
+	}
+	Error(w, r, http.StatusBadRequest, "invalid_request", "invalid request body")
 }
 
 // newInstanceResponse maps a stored instance to its JSON representation.

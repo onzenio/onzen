@@ -101,8 +101,8 @@ func handleSendText(messages MessageService) http.HandlerFunc {
 		}
 
 		var request sendTextRequest
-		if err := decodeJSONBody(r, &request); err != nil {
-			Error(w, r, http.StatusBadRequest, "invalid_request", "invalid request body")
+		if err := decodeJSONBody(w, r, &request); err != nil {
+			writeJSONBodyError(w, r, err)
 			return
 		}
 
@@ -128,8 +128,8 @@ func handleSendLocation(messages MessageService) http.HandlerFunc {
 		}
 
 		var request sendLocationRequest
-		if err := decodeJSONBody(r, &request); err != nil {
-			Error(w, r, http.StatusBadRequest, "invalid_request", "invalid request body")
+		if err := decodeJSONBody(w, r, &request); err != nil {
+			writeJSONBodyError(w, r, err)
 			return
 		}
 		if request.Latitude == nil || request.Longitude == nil {
@@ -160,8 +160,8 @@ func handleSendContact(messages MessageService) http.HandlerFunc {
 		}
 
 		var request sendContactRequest
-		if err := decodeJSONBody(r, &request); err != nil {
-			Error(w, r, http.StatusBadRequest, "invalid_request", "invalid request body")
+		if err := decodeJSONBody(w, r, &request); err != nil {
+			writeJSONBodyError(w, r, err)
 			return
 		}
 

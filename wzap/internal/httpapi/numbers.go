@@ -45,8 +45,8 @@ func handleCheckNumber(instances InstanceService, numbers NumberResolver) http.H
 		}
 
 		var request numberCheckRequest
-		if err := decodeJSONBody(r, &request); err != nil {
-			Error(w, r, http.StatusBadRequest, "invalid_request", "invalid request body")
+		if err := decodeJSONBody(w, r, &request); err != nil {
+			writeJSONBodyError(w, r, err)
 			return
 		}
 		phone := strings.TrimSpace(request.Phone)
