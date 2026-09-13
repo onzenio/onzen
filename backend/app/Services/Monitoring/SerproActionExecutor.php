@@ -23,6 +23,7 @@ use App\Models\Account;
 use App\Models\Client;
 use App\Models\MonitoringEnrollment;
 use App\Models\ParcelmentInstallment;
+use App\Models\ParcelmentOrder;
 use App\Models\SerproContract;
 use App\Models\SerproRequestAuthor;
 use App\Models\SerproServiceRequest;
@@ -73,6 +74,10 @@ final class SerproActionExecutor
     public const ERROR_ENROLLMENT_INACTIVE = 'enrollment_inactive';
 
     public const ERROR_INSTALLMENT_REQUIRED = 'installment_required';
+
+    public const ERROR_INSTALLMENT_MISSING = 'installment_missing';
+
+    public const ERROR_INSTALLMENT_MISMATCH = 'installment_mismatch';
 
     public const ERROR_MODALITY_UNAVAILABLE = 'parcelment_modality_unavailable';
 
@@ -235,6 +240,12 @@ final class SerproActionExecutor
             return $this->fail($action, self::ERROR_ENROLLMENT_INACTIVE);
         }
 
+        $installmentRefusal = $this->installmentRefusal($action);
+
+        if ($installmentRefusal !== null) {
+            return $this->fail($action, $installmentRefusal);
+        }
+
         $procuration = $this->missingProcuration($client, (string) $action->operation_code, $enrollment);
 
         if ($procuration !== null) {
@@ -242,7 +253,10 @@ final class SerproActionExecutor
         }
 
         if ($this->gate->isGated()) {
-            return $this->fail($action, self::ERROR_GATED);
+            // The gate is transient: park the action back in Pending with
+            // backoff instead of a terminal rejection, so a later retry can
+            // still emit. Other factual blockers stay terminal.
+            return $this->retry($action, self::ERROR_GATED);
         }
 
         $environment = $this->environmentFor($action);
@@ -458,6 +472,51 @@ final class SerproActionExecutor
         }
 
         return $this->procuration->reasonForMissing($client, $missing);
+    }
+
+    /**
+     * Worker-time revalidation of the parcelment linkage (the installment
+     * counterpart of the missing/inactive-enrollment path).
+     *
+     * A parcelment action is bound to the installment claimed at request
+     * time. If the row is gone — deleted (the nullOnDelete FK already nulled
+     * the binding) or moved out of the Account scope — the parcel is missing.
+     * If the row still exists but its Client linkage or its pedido/modality
+     * linkage no longer matches the claim, it mismatches. Either way the
+     * action is refused before any emission, so an emission can never land on
+     * the wrong parcel or float without one.
+     */
+    private function installmentRefusal(SerproServiceRequest $action): ?string
+    {
+        if ($action->modality === null && $action->installment_id === null) {
+            return null;
+        }
+
+        $installment = $this->installmentFor($action);
+
+        if ($installment === null) {
+            return self::ERROR_INSTALLMENT_MISSING;
+        }
+
+        if ((int) $installment->client_id !== (int) $action->client_id) {
+            return self::ERROR_INSTALLMENT_MISMATCH;
+        }
+
+        $order = ParcelmentOrder::query()
+            ->withoutGlobalScope('account')
+            ->where('account_id', $action->account_id)
+            ->whereKey($installment->order_id)
+            ->first();
+
+        $expected = $order === null || (int) $order->client_id !== (int) $action->client_id
+            ? null
+            : ConsultCatalog::gerardasForModality((string) $order->modality);
+
+        if ($expected === null || $expected !== (string) $action->operation_code) {
+            return self::ERROR_INSTALLMENT_MISMATCH;
+        }
+
+        return null;
     }
 
     /**

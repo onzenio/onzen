@@ -502,6 +502,149 @@ final class SerproActionTest extends TestCase
         $this->assertSame([], $transport->callCalls);
     }
 
+    public function test_execute_refuses_a_deleted_installment_without_any_call(): void
+    {
+        Queue::fake();
+
+        $account = $this->createAccount();
+        $client = Client::factory()->for($account, 'account')->create(['monitoring_enabled' => true]);
+        $order = ParcelmentOrder::factory()->create([
+            'account_id' => $account->id,
+            'client_id' => $client->id,
+            'modality' => 'PARCSN',
+        ]);
+        $installment = ParcelmentInstallment::factory()->create([
+            'account_id' => $account->id,
+            'client_id' => $client->id,
+            'order_id' => $order->id,
+        ]);
+        $this->grantProcuration($client, '00076');
+        $transport = $this->openTransport($account, []);
+
+        $action = $this->executor()->request(
+            $client,
+            'GERARDAS161',
+            'action-deleted-installment-key',
+            true,
+            [],
+            null,
+            $installment,
+        );
+
+        $installment->delete();
+
+        $refused = $this->executor()->execute($action);
+
+        $this->assertSame(SerproActionStatus::Rejected, $refused->status);
+        $this->assertSame('installment_missing', $refused->metadata['error_code']);
+        $this->assertNull($refused->document_ref);
+        $this->assertSame([], $transport->callCalls);
+    }
+
+    public function test_execute_refuses_a_moved_installment_without_any_call(): void
+    {
+        Queue::fake();
+
+        $account = $this->createAccount();
+        $client = Client::factory()->for($account, 'account')->create(['monitoring_enabled' => true]);
+        $order = ParcelmentOrder::factory()->create([
+            'account_id' => $account->id,
+            'client_id' => $client->id,
+            'modality' => 'PARCSN',
+        ]);
+        $installment = ParcelmentInstallment::factory()->create([
+            'account_id' => $account->id,
+            'client_id' => $client->id,
+            'order_id' => $order->id,
+        ]);
+        $otherOrder = ParcelmentOrder::factory()->create([
+            'account_id' => $account->id,
+            'client_id' => $client->id,
+            'modality' => 'PERTSN',
+        ]);
+        $this->grantProcuration($client, '00076');
+        $transport = $this->openTransport($account, []);
+
+        $action = $this->executor()->request(
+            $client,
+            'GERARDAS161',
+            'action-moved-installment-key',
+            true,
+            [],
+            null,
+            $installment,
+        );
+
+        $installment->update(['order_id' => $otherOrder->id]);
+
+        $refused = $this->executor()->execute($action);
+
+        $this->assertSame(SerproActionStatus::Rejected, $refused->status);
+        $this->assertSame('installment_mismatch', $refused->metadata['error_code']);
+        $this->assertNull($refused->document_ref);
+        $this->assertSame([], $transport->callCalls);
+    }
+
+    public function test_a_gate_closed_at_worker_time_parks_the_action_pending_for_retry(): void
+    {
+        Queue::fake();
+        Storage::fake('local');
+
+        [$account, $client, $enrollment] = $this->context();
+        $this->grantProcuration($client, '00146');
+
+        $pdf = '%PDF-1.4 gated-retry-das-canary';
+        $transport = $this->openTransport($account, [[
+            'status' => 200,
+            'body' => ['pdf' => base64_encode($pdf)],
+        ]]);
+
+        $action = $this->executor()->request(
+            $client,
+            'GERARDAS12',
+            'action-gated-retry-key',
+            true,
+            ['periodo_apuracao' => '202601'],
+            $enrollment,
+        );
+
+        SerproSettings::current()->update(['transport_approved' => false]);
+
+        $waiting = $this->executor()->execute($action);
+
+        $this->assertSame(SerproActionStatus::Pending, $waiting->status);
+        $this->assertSame('serpro_gated', $waiting->metadata['error_code']);
+        $this->assertNotNull($waiting->metadata['retry_after']);
+        $this->assertNotNull($waiting->metadata['next_attempt_at']);
+        $this->assertSame([], $transport->callCalls);
+
+        $audit = AuditLog::query()->where('action', 'monitoring.das.finished')->sole();
+        $this->assertSame('pending', $audit->metadata['status']);
+        $this->assertSame('serpro_gated', $audit->metadata['error_code']);
+
+        // The same key still replays the parked action instead of refusing.
+        $replay = $this->executor()->request(
+            $client,
+            'GERARDAS12',
+            'action-gated-retry-key',
+            true,
+            ['periodo_apuracao' => '202601'],
+            $enrollment,
+        );
+        $this->assertSame($action->id, $replay->id);
+        $this->assertSame(1, SerproServiceRequest::query()->count());
+
+        // Once the gate reopens, the same action retries and emits.
+        SerproSettings::current()->update(['transport_approved' => true]);
+        $this->travel(16)->seconds();
+
+        $done = $this->executor()->execute($waiting);
+
+        $this->assertSame(SerproActionStatus::Succeeded, $done->status);
+        $this->assertCount(1, $transport->callCalls);
+        $this->assertSame($pdf, app(ArtifactStore::class)->get((string) $done->document_ref));
+    }
+
     public function test_execute_polls_the_protocol_instead_of_resending_the_emission(): void
     {
         Queue::fake();
