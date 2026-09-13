@@ -22,6 +22,7 @@ use Illuminate\Contracts\Console\Kernel as ConsoleKernel;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Artisan;
+use RuntimeException;
 use Tests\Support\FakeSerproTransport;
 use Tests\TestCase;
 
@@ -183,6 +184,76 @@ final class WarmProcuracoesCommandTest extends TestCase
         $this->assertSame([], $transport->tokenCalls);
         $this->assertSame([], $transport->callCalls);
         $this->assertSame(MonitoringEnrollment::STATUS_PAUSED, $enrollment->refresh()->status);
+    }
+
+    public function test_a_failed_definition_keeps_committed_work_counted_and_the_next_client_processed(): void
+    {
+        // Client 1: the first definition (lowest id) explodes on the wire; the
+        // second one commits a resume that must still be reported.
+        $account = $this->createAccount();
+        $this->authorFor($account, $this->certificateFor($account), [
+            'document' => self::AUTHOR_DOCUMENT,
+            'metadata' => ['token_expires_at' => now()->addDays(5)->toIso8601String()],
+        ]);
+        $this->contractWithCredential();
+
+        $client = Client::factory()->for($account, 'account')->create([
+            'cnpj' => self::CLIENT_CNPJ,
+            'monitoring_enabled' => true,
+        ]);
+        $this->validGrant($client, '00103');
+
+        $failing = $this->definition('failing-'.uniqid());
+        MonitoringEnrollment::factory()->create([
+            'account_id' => $account->id,
+            'client_id' => $client->id,
+            'definition_id' => $failing->id,
+            'status' => MonitoringEnrollment::STATUS_ACTIVE,
+            'version' => 1,
+            'last_change_at' => now(),
+        ]);
+
+        $committing = $this->definition('committing-'.uniqid());
+        $paused = MonitoringEnrollment::factory()->create([
+            'account_id' => $account->id,
+            'client_id' => $client->id,
+            'definition_id' => $committing->id,
+            'status' => MonitoringEnrollment::STATUS_PAUSED,
+            'pause_reason' => 'outorga pendente',
+            'version' => 2,
+            'last_change_at' => now(),
+        ]);
+
+        // Client 2: a healthy paused association that must still be verified.
+        [, $otherClient, , $otherPaused] = $this->pausedContext();
+        $this->validGrant($otherClient, '00103');
+
+        $this->openTransport();
+
+        $calls = 0;
+        $transport = new FakeSerproTransport;
+        $transport->onCall = function () use (&$calls): array {
+            $calls++;
+
+            if ($calls === 1) {
+                throw new RuntimeException('wire exploded');
+            }
+
+            return ['status' => 200, 'body' => ['dados' => [[
+                'dtexpiracao' => '20271127',
+                'nrsistemas' => 1,
+                'sistemas' => ['Acessar o sistema DCTFWeb'],
+            ]]]];
+        };
+        $this->app->instance(SerproTransport::class, $transport);
+
+        $this->artisan('monitoring:warm-procuracoes --confirm')
+            ->expectsOutputToContain($this->expected(['reverified' => 2, 'resumed' => 2, 'failed' => 1]))
+            ->assertSuccessful();
+
+        $this->assertSame(3, $calls);
+        $this->assertSame(MonitoringEnrollment::STATUS_ACTIVE, $paused->refresh()->status);
+        $this->assertSame(MonitoringEnrollment::STATUS_ACTIVE, $otherPaused->refresh()->status);
     }
 
     public function test_preview_reports_due_items_without_any_call_or_change(): void
@@ -351,12 +422,7 @@ final class WarmProcuracoesCommandTest extends TestCase
             'monitoring_enabled' => true,
         ]);
 
-        $definition = MonitoringDefinition::factory()->create([
-            'id' => 'dctfweb-'.uniqid(),
-            'operations' => ['CONSDECLARACAO13'],
-            'requires_procuracao' => true,
-            'procuration_codes' => ['00103'],
-        ]);
+        $definition = $this->definition('dctfweb-'.uniqid());
 
         $enrollment = MonitoringEnrollment::factory()->create([
             'account_id' => $account->id,
@@ -369,6 +435,16 @@ final class WarmProcuracoesCommandTest extends TestCase
         ]);
 
         return [$account, $client, $definition, $enrollment];
+    }
+
+    private function definition(string $id): MonitoringDefinition
+    {
+        return MonitoringDefinition::factory()->create([
+            'id' => $id,
+            'operations' => ['CONSDECLARACAO13'],
+            'requires_procuracao' => true,
+            'procuration_codes' => ['00103'],
+        ]);
     }
 
     private function grantTransport(): FakeSerproTransport
@@ -441,10 +517,10 @@ final class WarmProcuracoesCommandTest extends TestCase
             'contratante_doc' => self::CONTRATANTE_DOCUMENT,
         ]);
 
-        return SerproContract::factory()->create([
-            'environment' => 'homologacao',
-            'credential_ref' => $ref,
-        ]);
+        return SerproContract::query()->updateOrCreate(
+            ['environment' => 'homologacao'],
+            ['credential_ref' => $ref],
+        );
     }
 
     private function openTransport(): void

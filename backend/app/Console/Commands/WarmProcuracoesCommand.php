@@ -33,9 +33,11 @@ use Throwable;
  *
  * Preview por padrão (`--confirm` para tocar a rede); com o transporte
  * fechado o comando não faz nenhuma chamada externa e reporta `gated` +
- * contagens de pulados. Uma falha de um autor/Client não interrompe a rotina:
- * o erro é contabilizado em `failed` e o próximo item continua. A saída é um
- * JSON de contagens; nenhum token, credencial ou conteúdo é emitido.
+ * contagens de pulados. Uma falha de um autor, de uma definição ou de um
+ * Client não interrompe a rotina: o erro é contabilizado em `failed`, o
+ * trabalho já confirmado segue contabilizado e o próximo item continua. A
+ * saída é um JSON de contagens; nenhum token, credencial ou conteúdo é
+ * emitido.
  */
 class WarmProcuracoesCommand extends Command
 {
@@ -98,18 +100,28 @@ class WarmProcuracoesCommand extends Command
                 continue;
             }
 
-            try {
-                $pausedBefore = $this->pausedByOutorga($client);
+            $pausedCount = $this->pausedByOutorga($client);
+            $verifiedAny = false;
 
-                foreach ($definitions as $definition) {
+            // Per-definition resilience: a throw on one definition must not
+            // hide the resume/verification already committed for this Client
+            // nor stop the remaining definitions and Clients.
+            foreach ($definitions as $definition) {
+                try {
                     $gate->verifyForClient($client, $definition);
+                    $verifiedAny = true;
+                } catch (Throwable $exception) {
+                    $counts['failed']++;
+                    $this->warnFailure('client', $exception);
                 }
 
+                $current = $this->pausedByOutorga($client);
+                $counts['resumed'] += max(0, $pausedCount - $current);
+                $pausedCount = $current;
+            }
+
+            if ($verifiedAny) {
                 $counts['reverified']++;
-                $counts['resumed'] += max(0, $pausedBefore - $this->pausedByOutorga($client));
-            } catch (Throwable $exception) {
-                $counts['failed']++;
-                $this->warnFailure('client', $exception);
             }
         }
 
@@ -188,6 +200,7 @@ class WarmProcuracoesCommand extends Command
             ->where('account_id', $client->account_id)
             ->where('client_id', $client->id)
             ->whereIn('status', [MonitoringEnrollment::STATUS_ACTIVE, MonitoringEnrollment::STATUS_PAUSED])
+            ->orderBy('id')
             ->with('definition')
             ->get()
             ->pluck('definition')
