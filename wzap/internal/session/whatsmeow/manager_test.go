@@ -27,6 +27,9 @@ import (
 	"onefisc/wzap/internal/session"
 )
 
+// testMediaLimit is the inbound media cap used by the translation tests.
+const testMediaLimit = 1 << 20
+
 func TestBuildOutboundMessage(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -235,7 +238,7 @@ func TestInboundMessageFromEvent(t *testing.T) {
 		Message: &waE2E.Message{Conversation: proto.String("bom dia")},
 	}
 
-	got := inboundMessage(instanceID, textEvent, nil)
+	got := inboundMessage(instanceID, textEvent, nil, testMediaLimit)
 	if got.InstanceID != instanceID || got.MessageID != "3EB0ABC" {
 		t.Fatalf("identity = %v/%q", got.InstanceID, got.MessageID)
 	}
@@ -251,6 +254,9 @@ func TestInboundMessageFromEvent(t *testing.T) {
 	if got.MediaAvailable {
 		t.Fatal("text message reported media")
 	}
+	if got.MediaLength != 0 {
+		t.Fatalf("text message announced media length %d, want 0", got.MediaLength)
+	}
 
 	groupEvent := &events.Message{
 		Info: types.MessageInfo{
@@ -264,15 +270,19 @@ func TestInboundMessageFromEvent(t *testing.T) {
 		},
 		Message: &waE2E.Message{
 			ImageMessage: &waE2E.ImageMessage{
-				Mimetype: proto.String("image/jpeg"),
-				Caption:  proto.String("olha isso"),
+				Mimetype:   proto.String("image/jpeg"),
+				Caption:    proto.String("olha isso"),
+				FileLength: proto.Uint64(4096),
 			},
 		},
 	}
 
-	got = inboundMessage(instanceID, groupEvent, nil)
+	got = inboundMessage(instanceID, groupEvent, nil, testMediaLimit)
 	if !got.IsGroup || !got.MediaAvailable || got.MediaMime != "image/jpeg" {
 		t.Fatalf("group media = (group=%v, available=%v, mime=%q)", got.IsGroup, got.MediaAvailable, got.MediaMime)
+	}
+	if got.MediaLength != 4096 {
+		t.Fatalf("group media length = %d, want 4096", got.MediaLength)
 	}
 	if got.Text != "olha isso" {
 		t.Fatalf("media caption = %q, want olha isso", got.Text)
@@ -295,7 +305,7 @@ func TestInboundMessageFromEvent(t *testing.T) {
 		},
 	}
 
-	got = inboundMessage(instanceID, documentEvent, nil)
+	got = inboundMessage(instanceID, documentEvent, nil, testMediaLimit)
 	if !got.MediaAvailable || got.MediaFilename != "contrato.pdf" || got.MediaMime != "application/pdf" {
 		t.Fatalf("document = (available=%v, filename=%q, mime=%q)", got.MediaAvailable, got.MediaFilename, got.MediaMime)
 	}
@@ -386,7 +396,7 @@ func TestParsePresence(t *testing.T) {
 }
 
 func TestNewSessionRejectsNilDevice(t *testing.T) {
-	if _, err := newSession(uuid.New(), nil, nil, nil); err == nil {
+	if _, err := newSession(uuid.New(), nil, nil, nil, testMediaLimit); err == nil {
 		t.Fatal("newSession accepted a nil device")
 	}
 }
@@ -508,7 +518,7 @@ func TestCreateMissingDeviceReturnsErrNoDevice(t *testing.T) {
 }
 
 func TestConnectDeletedDeviceReturnsErrNoDevice(t *testing.T) {
-	sess, err := newSession(uuid.New(), &store.Device{Deleted: true}, nil, nil)
+	sess, err := newSession(uuid.New(), &store.Device{Deleted: true}, nil, nil, testMediaLimit)
 	if err != nil {
 		t.Fatalf("newSession: %v", err)
 	}
@@ -679,7 +689,7 @@ func newTestManager(t *testing.T) *Manager {
 		}
 	})
 
-	manager, err := NewManager(ctx, dsnWithSearchPath(t, dsn, schema), nil, slog.Default(), nil)
+	manager, err := NewManager(ctx, dsnWithSearchPath(t, dsn, schema), nil, slog.Default(), nil, testMediaLimit)
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}

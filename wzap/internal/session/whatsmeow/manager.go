@@ -39,10 +39,11 @@ const (
 // Manager owns the whatsmeow client of every instance and persists the
 // sessions in the Postgres device store.
 type Manager struct {
-	devices   *sqlstore.Container
-	instances storage.InstanceRepository
-	log       *slog.Logger
-	sink      session.EventSink
+	devices       *sqlstore.Container
+	instances     storage.InstanceRepository
+	log           *slog.Logger
+	sink          session.EventSink
+	maxMediaBytes int64
 
 	// restoreConnect brings a restored session online; tests replace it to
 	// avoid the network handshake.
@@ -56,8 +57,9 @@ var _ session.Manager = (*Manager)(nil)
 
 // NewManager opens the whatsmeow device store in the Postgres database
 // addressed by databaseURL. instances lets RestoreAll map persisted devices
-// back to their instance and sink receives the session events.
-func NewManager(ctx context.Context, databaseURL string, instances storage.InstanceRepository, log *slog.Logger, sink session.EventSink) (*Manager, error) {
+// back to their instance, sink receives the session events and maxMediaBytes
+// caps how much inbound media a download may buffer.
+func NewManager(ctx context.Context, databaseURL string, instances storage.InstanceRepository, log *slog.Logger, sink session.EventSink, maxMediaBytes int64) (*Manager, error) {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -66,11 +68,12 @@ func NewManager(ctx context.Context, databaseURL string, instances storage.Insta
 		return nil, err
 	}
 	manager := &Manager{
-		devices:   devices,
-		instances: instances,
-		log:       log,
-		sink:      sink,
-		sessions:  make(map[uuid.UUID]*instanceSession),
+		devices:       devices,
+		instances:     instances,
+		log:           log,
+		sink:          sink,
+		maxMediaBytes: maxMediaBytes,
+		sessions:      make(map[uuid.UUID]*instanceSession),
 	}
 	manager.restoreConnect = func(ctx context.Context, sess *instanceSession) error {
 		return sess.connectExisting(ctx)
@@ -116,7 +119,7 @@ func (m *Manager) Create(instance *model.Instance) (session.Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	sess, err := newSession(instance.ID, device, m.log, m.sink)
+	sess, err := newSession(instance.ID, device, m.log, m.sink, m.maxMediaBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -228,7 +231,7 @@ func (m *Manager) restore(ctx context.Context, instance model.Instance) error {
 // a no-op, so a client that is not in the manager is never connected: two live
 // clients on the same device would fight over the session.
 func (m *Manager) attachAndConnect(ctx context.Context, instanceID uuid.UUID, device *store.Device) error {
-	sess, err := newSession(instanceID, device, m.log, m.sink)
+	sess, err := newSession(instanceID, device, m.log, m.sink, m.maxMediaBytes)
 	if err != nil {
 		return err
 	}
@@ -316,10 +319,11 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 
 // instanceSession is the session.Session implementation for one instance.
 type instanceSession struct {
-	instanceID uuid.UUID
-	client     *whatsmeow.Client
-	sink       session.EventSink
-	log        *slog.Logger
+	instanceID    uuid.UUID
+	client        *whatsmeow.Client
+	sink          session.EventSink
+	log           *slog.Logger
+	maxMediaBytes int64
 
 	// sleep and backoff drive the auto-reconnect; tests replace them to assert
 	// the retry transitions without real waits.
@@ -353,8 +357,9 @@ type qrResult struct {
 }
 
 // newSession wraps device in a connected-aware session and registers the event
-// translation.
-func newSession(instanceID uuid.UUID, device *store.Device, log *slog.Logger, sink session.EventSink) (*instanceSession, error) {
+// translation. maxMediaBytes caps how much inbound media a download may
+// buffer.
+func newSession(instanceID uuid.UUID, device *store.Device, log *slog.Logger, sink session.EventSink, maxMediaBytes int64) (*instanceSession, error) {
 	if device == nil {
 		return nil, errors.New("new session: nil device")
 	}
@@ -362,11 +367,12 @@ func newSession(instanceID uuid.UUID, device *store.Device, log *slog.Logger, si
 		log = slog.Default()
 	}
 	sess := &instanceSession{
-		instanceID: instanceID,
-		sink:       sink,
-		log:        log,
-		status:     session.StatusDisconnected,
-		sleep:      sleepCtx,
+		instanceID:    instanceID,
+		sink:          sink,
+		log:           log,
+		maxMediaBytes: maxMediaBytes,
+		status:        session.StatusDisconnected,
+		sleep:         sleepCtx,
 		backoff: reconnectPolicy{
 			base:   reconnectBaseDelay,
 			max:    reconnectMaxDelay,

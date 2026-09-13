@@ -67,6 +67,10 @@ type InboundMessage struct {
 	MediaAvailable bool
 	MediaMime      string
 	MediaFilename  string
+	// MediaLength is the size in bytes announced by the source, or zero when
+	// it is unknown. It lets the consumer reject oversized media before
+	// downloading it.
+	MediaLength int64
 	// MediaDownload fetches the media bytes on demand. It is nil when the
 	// message carries no downloadable media.
 	MediaDownload func(ctx context.Context) ([]byte, error)

@@ -75,7 +75,6 @@ type decodedMessagePayload struct {
 	Text         string           `json:"text"`
 	Media        *decodedMedia    `json:"media"`
 	MediaOmitted *decodedOmission `json:"media_omitted"`
-	ReplyTo      string           `json:"reply_to"`
 }
 
 // decodedMedia is the media reference of an inbound message event.
@@ -179,7 +178,7 @@ func TestRuntimeOnMessageTextPublishesMessageEvent(t *testing.T) {
 		t.Errorf("payload.media_omitted = %+v, want none for a text message", payload.MediaOmitted)
 	}
 	if _, ok := raw["reply_to"]; ok {
-		t.Errorf("payload has reply_to %s, want it omitted while the source does not expose it", raw["reply_to"])
+		t.Errorf("payload has reply_to %s, want it dropped from the v1 contract", raw["reply_to"])
 	}
 }
 
@@ -339,6 +338,74 @@ func TestRuntimeOnMessageMediaAboveLimitIsOmitted(t *testing.T) {
 	}
 	if payload.MediaOmitted.Reason != "media exceeds the size limit" {
 		t.Errorf("payload.media_omitted.reason = %q, want %q", payload.MediaOmitted.Reason, "media exceeds the size limit")
+	}
+}
+
+func TestRuntimeOnMessageMediaLengthAboveLimitIsOmitted(t *testing.T) {
+	store := &fakeMediaStore{}
+	writer := &fakeWriter{}
+	runtime := NewRuntime(newRuntimeRepo(), writer, nil, store, "https://wzap.example.com", 8, nil)
+	downloads := 0
+	msg := session.InboundMessage{
+		InstanceID: uuid.New(), MessageID: "wamid.knownbig", Type: "video",
+		Timestamp: time.Now().UTC(), MediaAvailable: true, MediaMime: "video/mp4",
+		MediaLength: 9,
+		MediaDownload: func(context.Context) ([]byte, error) {
+			downloads++
+			return []byte("12345678"), nil
+		},
+	}
+
+	if err := runtime.handleInbound(context.Background(), msg); err != nil {
+		t.Fatalf("over-limit media must not fail the flow: %v", err)
+	}
+
+	if downloads != 0 {
+		t.Errorf("download calls = %d, want none when MediaLength is above the limit", downloads)
+	}
+	if len(store.saves) != 0 {
+		t.Errorf("media saves = %+v, want none for over-limit media", store.saves)
+	}
+	payload, _ := decodeMessagePayload(t, writer.events[0])
+	if payload.Media != nil {
+		t.Errorf("payload.media = %+v, want none for over-limit media", payload.Media)
+	}
+	if payload.MediaOmitted == nil {
+		t.Fatalf("payload.media_omitted = nil, want a reason: %s", writer.events[0].Payload)
+	}
+	if payload.MediaOmitted.Reason != "media exceeds the size limit" {
+		t.Errorf("payload.media_omitted.reason = %q, want %q", payload.MediaOmitted.Reason, "media exceeds the size limit")
+	}
+}
+
+func TestRuntimeOnMessageMediaStreamOverCapIsOmitted(t *testing.T) {
+	store := &fakeMediaStore{}
+	writer := &fakeWriter{}
+	runtime := NewRuntime(newRuntimeRepo(), writer, nil, store, "https://wzap.example.com", 8, nil)
+	msg := session.InboundMessage{
+		InstanceID: uuid.New(), MessageID: "wamid.stream", Type: "video",
+		Timestamp: time.Now().UTC(), MediaAvailable: true, MediaMime: "video/mp4",
+		MediaDownload: func(context.Context) ([]byte, error) {
+			return nil, errors.New("media download exceeds the size limit")
+		},
+	}
+
+	if err := runtime.handleInbound(context.Background(), msg); err != nil {
+		t.Fatalf("an over-cap stream must not fail the flow: %v", err)
+	}
+
+	if len(store.saves) != 0 {
+		t.Errorf("media saves = %+v, want none for an over-cap stream", store.saves)
+	}
+	payload, _ := decodeMessagePayload(t, writer.events[0])
+	if payload.Media != nil {
+		t.Errorf("payload.media = %+v, want none for an over-cap stream", payload.Media)
+	}
+	if payload.MediaOmitted == nil {
+		t.Fatalf("payload.media_omitted = nil, want the cap failure: %s", writer.events[0].Payload)
+	}
+	if payload.MediaOmitted.Reason != "download failed: media download exceeds the size limit" {
+		t.Errorf("payload.media_omitted.reason = %q, want the download cap failure", payload.MediaOmitted.Reason)
 	}
 }
 

@@ -133,7 +133,7 @@ func serve() error {
 		instances, eventWriter, message.NewReceipts(messageRepo, eventWriter),
 		mediaStorage, cfg.PublicURL, cfg.MaxMediaBytes, log,
 	)
-	sessions, err := whatsmeow.NewManager(ctx, cfg.DatabaseURL, instances, log, runtime)
+	sessions, err := whatsmeow.NewManager(ctx, cfg.DatabaseURL, instances, log, runtime, cfg.MaxMediaBytes)
 	if err != nil {
 		return fmt.Errorf("session manager: %w", err)
 	}

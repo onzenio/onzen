@@ -321,7 +321,7 @@ func TestTerminalTransitionCancelsPendingReconnect(t *testing.T) {
 }
 
 func TestNewSessionDisablesLibraryAutoReconnect(t *testing.T) {
-	sess, err := newSession(uuid.New(), &store.Device{}, nil, nil)
+	sess, err := newSession(uuid.New(), &store.Device{}, nil, nil, testMediaLimit)
 	if err != nil {
 		t.Fatalf("newSession: %v", err)
 	}
@@ -332,7 +332,7 @@ func TestNewSessionDisablesLibraryAutoReconnect(t *testing.T) {
 
 func TestDisconnectClearsIdentityAndEmitsEvent(t *testing.T) {
 	sink := &recordingSink{}
-	sess, err := newSession(uuid.New(), &store.Device{}, nil, sink)
+	sess, err := newSession(uuid.New(), &store.Device{}, nil, sink, testMediaLimit)
 	if err != nil {
 		t.Fatalf("newSession: %v", err)
 	}
@@ -366,7 +366,7 @@ func TestDisconnectClearsIdentityAndEmitsEvent(t *testing.T) {
 
 func TestRemoveEmitsWhenItChangesStatus(t *testing.T) {
 	sink := &recordingSink{}
-	sess, err := newSession(uuid.New(), &store.Device{}, nil, sink)
+	sess, err := newSession(uuid.New(), &store.Device{}, nil, sink, testMediaLimit)
 	if err != nil {
 		t.Fatalf("newSession: %v", err)
 	}

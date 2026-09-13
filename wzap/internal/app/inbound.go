@@ -70,6 +70,10 @@ func (r *Runtime) handleInbound(ctx context.Context, msg session.InboundMessage)
 // payload.MediaOmitted with a reason when the content cannot be stored. The
 // error is returned only when the storage itself failed, after the download.
 func (r *Runtime) attachMedia(ctx context.Context, payload *messagePayload, msg session.InboundMessage) error {
+	if msg.MediaLength > r.maxMediaBytes {
+		payload.MediaOmitted = &mediaOmission{Reason: "media exceeds the size limit"}
+		return nil
+	}
 	if msg.MediaDownload == nil {
 		payload.MediaOmitted = &mediaOmission{Reason: "media download unavailable"}
 		return nil
@@ -113,9 +117,8 @@ func (r *Runtime) mediaURL(id uuid.UUID) string {
 	return strings.TrimSuffix(r.publicURL, "/") + "/api/v1/media/" + id.String()
 }
 
-// messagePayload is the JSON body of an inbound message event. ReplyTo is
-// carried for the quoted message id; the session contract does not expose it
-// in v1, so it stays absent until the source provides one.
+// messagePayload is the JSON body of an inbound message event. Reply/quoting
+// is out of scope for v1 and stays absent until a future change adds it.
 type messagePayload struct {
 	FromJID      string         `json:"from_jid"`
 	ChatJID      string         `json:"chat_jid"`
@@ -126,7 +129,6 @@ type messagePayload struct {
 	Text         string         `json:"text,omitempty"`
 	Media        *mediaPayload  `json:"media,omitempty"`
 	MediaOmitted *mediaOmission `json:"media_omitted,omitempty"`
-	ReplyTo      string         `json:"reply_to,omitempty"`
 }
 
 // mediaPayload references stored media: the opaque id, the metadata and the

@@ -3,6 +3,7 @@ package whatsmeow
 import (
 	"context"
 	"fmt"
+	"math"
 
 	"github.com/google/uuid"
 	"go.mau.fi/whatsmeow"
@@ -21,7 +22,7 @@ func (s *instanceSession) dispatch(evt any) {
 		if e.Info.IsFromMe || e.Message == nil || s.sink == nil {
 			return
 		}
-		s.sink.OnMessage(context.Background(), inboundMessage(s.instanceID, e, s.client))
+		s.sink.OnMessage(context.Background(), inboundMessage(s.instanceID, e, s.client, s.maxMediaBytes))
 	case *events.Receipt:
 		if s.sink == nil {
 			return
@@ -69,8 +70,9 @@ func connectionUpdate(evt any) (session.Status, string, bool) {
 }
 
 // inboundMessage translates a received message, extracting the text and, when
-// present, the media metadata plus its lazy download callback.
-func inboundMessage(instanceID uuid.UUID, evt *events.Message, client *whatsmeow.Client) session.InboundMessage {
+// present, the media metadata plus its lazy download callback. maxMediaBytes
+// caps the bytes the callback buffers.
+func inboundMessage(instanceID uuid.UUID, evt *events.Message, client *whatsmeow.Client, maxMediaBytes int64) session.InboundMessage {
 	msg := session.InboundMessage{
 		InstanceID: instanceID,
 		MessageID:  evt.Info.ID,
@@ -82,14 +84,15 @@ func inboundMessage(instanceID uuid.UUID, evt *events.Message, client *whatsmeow
 		Timestamp:  evt.Info.Timestamp,
 	}
 
-	mime, filename, downloadable := messageMedia(evt.Message)
+	mime, filename, length, downloadable := messageMedia(evt.Message)
 	if downloadable != nil {
 		msg.MediaAvailable = true
 		msg.MediaMime = mime
 		msg.MediaFilename = filename
+		msg.MediaLength = length
 		if client != nil {
 			msg.MediaDownload = func(ctx context.Context) ([]byte, error) {
-				return client.Download(ctx, downloadable)
+				return downloadLimited(ctx, client, downloadable, maxMediaBytes)
 			}
 		}
 	}
@@ -131,17 +134,28 @@ func messageText(msg *waE2E.Message) string {
 }
 
 // messageMedia returns the media metadata and the downloadable attachment of a
-// message, when it carries media.
-func messageMedia(msg *waE2E.Message) (mime, filename string, downloadable whatsmeow.DownloadableMessage) {
+// message, when it carries media. The length is the size announced by the
+// source, or zero when the proto omits it.
+func messageMedia(msg *waE2E.Message) (mime, filename string, length int64, downloadable whatsmeow.DownloadableMessage) {
 	switch {
 	case msg.GetImageMessage() != nil:
-		return msg.GetImageMessage().GetMimetype(), "", msg.GetImageMessage()
+		return msg.GetImageMessage().GetMimetype(), "", mediaLength(msg.GetImageMessage().GetFileLength()), msg.GetImageMessage()
 	case msg.GetVideoMessage() != nil:
-		return msg.GetVideoMessage().GetMimetype(), "", msg.GetVideoMessage()
+		return msg.GetVideoMessage().GetMimetype(), "", mediaLength(msg.GetVideoMessage().GetFileLength()), msg.GetVideoMessage()
 	case msg.GetAudioMessage() != nil:
-		return msg.GetAudioMessage().GetMimetype(), "", msg.GetAudioMessage()
+		return msg.GetAudioMessage().GetMimetype(), "", mediaLength(msg.GetAudioMessage().GetFileLength()), msg.GetAudioMessage()
 	case msg.GetDocumentMessage() != nil:
-		return msg.GetDocumentMessage().GetMimetype(), msg.GetDocumentMessage().GetFileName(), msg.GetDocumentMessage()
+		return msg.GetDocumentMessage().GetMimetype(), msg.GetDocumentMessage().GetFileName(), mediaLength(msg.GetDocumentMessage().GetFileLength()), msg.GetDocumentMessage()
 	}
-	return "", "", nil
+	return "", "", 0, nil
+}
+
+// mediaLength converts the unsigned announced size into a signed byte count,
+// clamping values that do not fit so an oversized length never wraps into a
+// small one and slips past the consumer's pre-check.
+func mediaLength(fileLength uint64) int64 {
+	if fileLength > math.MaxInt64 {
+		return math.MaxInt64
+	}
+	return int64(fileLength)
 }
