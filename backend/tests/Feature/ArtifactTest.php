@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Contracts\ArtifactStore;
+use App\Enums\UserRole;
 use App\Exceptions\ArtifactStorageUnavailableException;
 use App\Models\Account;
 use App\Models\AuditLog;
@@ -148,7 +149,7 @@ class ArtifactTest extends TestCase
     {
         Storage::fake('local');
         $account = $this->createAccount();
-        $user = $this->createUser($account);
+        $user = $this->createUser($account, ['role' => UserRole::Admin]);
         $result = $this->createArtifact($account, 'lost-file-canary');
 
         $artifact = MonitoringArtifact::query()->where('ref', $result['ref'])->sole();
@@ -174,7 +175,7 @@ class ArtifactTest extends TestCase
     {
         Storage::fake('local');
         $account = $this->createAccount();
-        $user = $this->createUser($account);
+        $user = $this->createUser($account, ['role' => UserRole::Admin]);
         $contents = '%PDF-1.4 download-canary-content';
         $result = $this->createArtifact($account, $contents);
 
@@ -192,6 +193,60 @@ class ArtifactTest extends TestCase
         $this->assertSame($result['hash_sha256'], $log->metadata['hash_sha256']);
         $this->assertNotNull($log->created_at);
         $this->assertStringNotContainsString('download-canary-content', (string) json_encode($log->metadata));
+    }
+
+    public function test_admin_download_succeeds(): void
+    {
+        Storage::fake('local');
+        $account = $this->createAccount();
+        $admin = $this->createUser($account, ['role' => UserRole::Admin]);
+        $result = $this->createArtifact($account, '%PDF-1.4 admin-canary');
+
+        $response = $this->actingAs($admin)->get($this->signedDownloadUrl($result['ref']));
+
+        $response->assertOk();
+        $this->assertSame('%PDF-1.4 admin-canary', $response->streamedContent());
+    }
+
+    public function test_operator_download_succeeds(): void
+    {
+        Storage::fake('local');
+        $account = $this->createAccount();
+        $operator = $this->createUser($account, ['role' => UserRole::Operator]);
+        $result = $this->createArtifact($account, '%PDF-1.4 operator-canary');
+
+        $response = $this->actingAs($operator)->get($this->signedDownloadUrl($result['ref']));
+
+        $response->assertOk();
+        $this->assertSame('%PDF-1.4 operator-canary', $response->streamedContent());
+    }
+
+    public function test_user_of_the_same_account_gets_403_and_no_audit_row(): void
+    {
+        Storage::fake('local');
+        $account = $this->createAccount();
+        $user = $this->createUser($account, ['role' => UserRole::User]);
+        $result = $this->createArtifact($account, 'role-denied-canary');
+
+        $this->actingAs($user)
+            ->get($this->signedDownloadUrl($result['ref']))
+            ->assertForbidden();
+
+        $this->assertDatabaseMissing('audit_logs', ['action' => 'monitoring.artifact.downloaded']);
+    }
+
+    public function test_super_admin_does_not_bypass_the_artifact_role_matrix(): void
+    {
+        Storage::fake('local');
+        $account = $this->createAccount();
+        $superAdmin = $this->createUser($account, ['role' => UserRole::SuperAdmin]);
+        $result = $this->createArtifact($account, 'super-admin-canary');
+
+        $this->actingAs($superAdmin)
+            ->get($this->signedDownloadUrl($result['ref']))
+            ->assertForbidden();
+
+        $this->assertDatabaseMissing('audit_logs', ['action' => 'monitoring.artifact.downloaded']);
     }
 
     public function test_download_of_another_accounts_artifact_returns_an_indistinguishable_404(): void
@@ -246,7 +301,7 @@ class ArtifactTest extends TestCase
     {
         Storage::fake('local');
         $account = $this->createAccount();
-        $user = $this->createUser($account);
+        $user = $this->createUser($account, ['role' => UserRole::Admin]);
         $result = $this->createArtifact($account, 'unavailable-canary');
 
         $this->app->instance(ArtifactStore::class, new class implements ArtifactStore
@@ -292,7 +347,7 @@ class ArtifactTest extends TestCase
     {
         Storage::fake('local');
         $account = $this->createAccount();
-        $user = $this->createUser($account);
+        $user = $this->createUser($account, ['role' => UserRole::Admin]);
         $result = $this->createArtifact($account, 'listed-canary');
 
         $this->app->instance(ArtifactStore::class, new class implements ArtifactStore

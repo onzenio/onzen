@@ -9,6 +9,7 @@ use App\Models\MonitoringArtifact;
 use App\Models\User;
 use App\Services\AuditService;
 use App\Support\CurrentAccount;
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -19,9 +20,12 @@ use Symfony\Component\HttpFoundation\Response;
  *
  * The opaque `ref` never encodes the Account: an unknown ref and a ref from
  * another Account answer the same 404, so existence is not distinguishable.
+ * Members of the Account that lack the download Role get a 403.
  */
 class MonitoringArtifactDownloadController extends Controller
 {
+    use AuthorizesRequests;
+
     public function __invoke(Request $request, string $ref, ArtifactStore $store, AuditService $audit): Response
     {
         /** @var User|null $user */
@@ -41,6 +45,8 @@ class MonitoringArtifactDownloadController extends Controller
         if ($artifact === null) {
             return $this->notFound();
         }
+
+        $this->authorize('download', $artifact);
 
         try {
             $contents = $store->get($ref);

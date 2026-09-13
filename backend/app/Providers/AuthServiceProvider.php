@@ -6,11 +6,13 @@ use App\Models\Account;
 use App\Models\AuditLog;
 use App\Models\Client;
 use App\Models\Invitation;
+use App\Models\MonitoringArtifact;
 use App\Models\Plan;
 use App\Policies\AccountPolicy;
 use App\Policies\AuditLogPolicy;
 use App\Policies\ClientPolicy;
 use App\Policies\InvitationPolicy;
+use App\Policies\MonitoringArtifactPolicy;
 use App\Policies\PlanPolicy;
 use Illuminate\Foundation\Support\Providers\AuthServiceProvider as ServiceProvider;
 
@@ -25,6 +27,7 @@ class AuthServiceProvider extends ServiceProvider
         Invitation::class => InvitationPolicy::class,
         Plan::class => PlanPolicy::class,
         AuditLog::class => AuditLogPolicy::class,
+        MonitoringArtifact::class => MonitoringArtifactPolicy::class,
     ];
 
     public function boot(): void
