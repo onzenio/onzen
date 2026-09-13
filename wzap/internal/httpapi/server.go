@@ -18,9 +18,10 @@ type ReadyChecker interface {
 }
 
 // Deps carries the dependencies consumed by HTTP handlers. It grows as later
-// tasks register handlers; today it only reserves the readiness checker.
+// tasks register handlers.
 type Deps struct {
 	ReadyChecker ReadyChecker
+	Instances    InstanceService
 }
 
 // New builds the HTTP server with the middleware chain, the health endpoints
@@ -31,6 +32,11 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *http.Server {
 	mux.HandleFunc("GET /readyz", handleReadyz(deps.ReadyChecker, log))
 
 	api := http.NewServeMux()
+	api.HandleFunc("POST /api/v1/instances", handleCreateInstance(deps.Instances))
+	api.HandleFunc("GET /api/v1/instances", handleListInstances(deps.Instances))
+	api.HandleFunc("GET /api/v1/instances/{id}", handleGetInstance(deps.Instances))
+	api.HandleFunc("PATCH /api/v1/instances/{id}", handleUpdateInstance(deps.Instances))
+	api.HandleFunc("DELETE /api/v1/instances/{id}", handleDeleteInstance(deps.Instances))
 	mux.Handle("/api/v1/", Auth(cfg.ServiceToken)(api))
 
 	return &http.Server{

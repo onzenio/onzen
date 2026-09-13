@@ -14,7 +14,10 @@ import (
 func newTestServer(t *testing.T) *http.Server {
 	t.Helper()
 	return New(config.Config{HTTPAddr: "127.0.0.1:0", ServiceToken: testToken}, discardLogger(),
-		Deps{ReadyChecker: checkFunc(func(context.Context) error { return nil })})
+		Deps{
+			ReadyChecker: checkFunc(func(context.Context) error { return nil }),
+			Instances:    &fakeInstanceService{},
+		})
 }
 
 func serve(t *testing.T, srv *http.Server, method, path, token string) *httptest.ResponseRecorder {
@@ -85,11 +88,11 @@ func TestNewAPIGroupRequiresAuth(t *testing.T) {
 		}
 	})
 
-	t.Run("valid token reaches empty group", func(t *testing.T) {
+	t.Run("valid token reaches instance handlers", func(t *testing.T) {
 		rec := serve(t, srv, http.MethodGet, "/api/v1/instances", testToken)
 
-		if rec.Code != http.StatusNotFound {
-			t.Fatalf("status = %d, want %d (no handlers registered yet)", rec.Code, http.StatusNotFound)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 		}
 	})
 }
