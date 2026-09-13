@@ -1,6 +1,6 @@
 ## Purpose
 
-Define a carteira de Clients (CNPJs) isolada por Account, seus dados cadastrais e o estado de monitoramento por Client.
+Define a carteira de Clients (CNPJs) isolada por Account, seus dados cadastrais e o Monitoring Status por Client.
 
 ## ADDED Requirements
 
@@ -15,8 +15,8 @@ Cada Account SHALL possuir sua própria carteira de Clients; o mesmo CNPJ MAY ex
 
 #### Scenario: Isolamento de acesso
 
-- **WHEN** um usuário tenta visualizar, editar ou excluir um Client de outra Account
-- **THEN** o acesso SHALL ser negado, exceto via seletor do super_admin
+- **WHEN** um User tenta visualizar, editar ou excluir um Client de outra Account
+- **THEN** o acesso SHALL ser negado, exceto via Account Switcher do super_admin
 
 ### Requirement: Dados do Client
 
@@ -24,7 +24,7 @@ Cada Client SHALL conter CNPJ válido, razão social, regime tributário e conta
 
 #### Scenario: Cadastro completo
 
-- **WHEN** um admin ou operador cadastra um Client com os quatro dados, sendo o CNPJ válido
+- **WHEN** um admin ou operator cadastra um Client com os quatro dados, sendo o CNPJ válido
 - **THEN** ele SHALL ficar ativo na carteira da Account
 
 #### Scenario: Cadastro incompleto ou CNPJ inválido
@@ -39,33 +39,33 @@ Cada Client SHALL conter CNPJ válido, razão social, regime tributário e conta
 
 ### Requirement: Gestão da carteira
 
-O admin e o operador SHALL listar, buscar, cadastrar, editar e excluir Clients da sua Account, respeitando os limites do Plan.
+O admin e o operator SHALL listar, buscar, cadastrar, editar e excluir Clients da sua Account, respeitando os limites do Plan.
 
 #### Scenario: Busca e listagem
 
-- **WHEN** um admin ou operador lista a carteira, podendo filtrar por busca, razão social ou regime
+- **WHEN** um admin ou operator lista a carteira, podendo filtrar por busca, razão social ou regime
 - **THEN** ele SHALL ver apenas Clients da Account efetiva, de forma paginada
 
 #### Scenario: Edição
 
-- **WHEN** um admin ou operador edita um Client da sua Account
+- **WHEN** um admin ou operator edita um Client da sua Account
 - **THEN** as alterações SHALL ser persistidas
 
 #### Scenario: Exclusão
 
-- **WHEN** um admin ou operador exclui um Client da sua Account
-- **THEN** o registro SHALL ser removido e o evento SHALL constar na auditoria
+- **WHEN** um admin ou operator exclui um Client da sua Account
+- **THEN** o registro SHALL ser removido e o evento SHALL constar no Audit
 
-### Requirement: Estado de monitoramento por Client
+### Requirement: Monitoring Status por Client
 
-Cada Client SHALL ter um estado de monitoramento configurável, exibido na carteira. A execução de consultas via SERPRO e o consumo de volume ficam para a integração fiscal de change futuro.
+Cada Client SHALL ter um Monitoring Status configurável, exibido na carteira. A execução de consultas via SERPRO e o consumo de volume ficam para a integração fiscal de change futuro.
 
-#### Scenario: Monitoramento ativado
+#### Scenario: Monitoring Status ativado
 
-- **WHEN** um admin ou operador ativa o monitoramento de um Client
+- **WHEN** um admin ou operator ativa o Monitoring Status de um Client
 - **THEN** o estado SHALL ser persistido e exibido como ativo na carteira
 
-#### Scenario: Monitoramento desativado
+#### Scenario: Monitoring Status desativado
 
-- **WHEN** um admin ou operador desativa o monitoramento de um Client
+- **WHEN** um admin ou operator desativa o Monitoring Status de um Client
 - **THEN** o estado SHALL ser persistido e exibido como inativo na carteira

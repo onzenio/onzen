@@ -1,0 +1,131 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-13",
+  "title": "Design System: OneFisc",
+  "extensions": {
+    "colorMeta": {
+      "primary": {
+        "role": "primary",
+        "displayName": "Verde Operacional",
+        "canonical": "#00C16A",
+        "tonalRamp": ["#EFFDF5", "#D9FBE8", "#B3F5D1", "#75EDAE", "#00DC82", "#00C16A", "#00A155", "#007F45", "#016538", "#0A5331", "#052E16"]
+      },
+      "primary-soft": {
+        "role": "primary",
+        "displayName": "Verde de Contexto",
+        "canonical": "#D9FBE8"
+      },
+      "primary-hover": {
+        "role": "primary",
+        "displayName": "Verde Hover",
+        "canonical": "#00A155"
+      },
+      "primary-deep": {
+        "role": "primary",
+        "displayName": "Verde Profundo",
+        "canonical": "#007F45"
+      }
+    },
+    "typographyMeta": {
+      "title": {
+        "displayName": "Título",
+        "purpose": "Títulos de página e valores de destaque; tamanho varia por contexto."
+      },
+      "body": {
+        "displayName": "Corpo",
+        "purpose": "Conteúdo, células de tabela e descrição operacional."
+      },
+      "label": {
+        "displayName": "Rótulo",
+        "purpose": "Metadados, eyebrows de cartão e títulos de estatística, geralmente em caixa alta."
+      }
+    },
+    "shadows": [],
+    "motion": [
+      {
+        "name": "state-short",
+        "value": "transform 200ms",
+        "purpose": "Micro-transições de estado (ex.: giro de chevron em gatilhos abertos); dados nunca animam por decoração."
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Ação principal inequívoca da região.",
+      "html": "<button class=\"ds-btn-primary\">Criar cliente</button>",
+      "css": ".ds-btn-primary { background: #00C16A; color: #FFFFFF; font-family: 'Public Sans', sans-serif; font-size: 0.875rem; font-weight: 500; padding: 0.5rem 1rem; border: none; border-radius: 0.5rem; cursor: pointer; transition: background 200ms; } .ds-btn-primary:hover { background: #00A155; } .ds-btn-primary:focus-visible { outline: 2px solid #00C16A; outline-offset: 2px; }"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Ações de ícone e gatilhos; fundo só em hover/aberto.",
+      "html": "<button class=\"ds-btn-ghost\" aria-label=\"Notificações\">◉</button>",
+      "css": ".ds-btn-ghost { background: transparent; color: inherit; font-family: 'Public Sans', sans-serif; padding: 0.5rem; border: none; border-radius: 0.5rem; cursor: pointer; } .ds-btn-ghost:hover { background: rgba(0,193,106,0.08); } .ds-btn-ghost:focus-visible { outline: 2px solid #00C16A; outline-offset: 2px; }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input-default",
+      "description": "Busca e campos de formulário; erro via semântica.",
+      "html": "<input class=\"ds-input\" type=\"text\" placeholder=\"Buscar por CNPJ ou razão social\" />",
+      "css": ".ds-input { background: #FFFFFF; color: #18181B; font-family: 'Public Sans', sans-serif; font-size: 0.875rem; padding: 0.5rem 0.75rem; border: 1px solid #E4E4E7; border-radius: 0.5rem; } .ds-input::placeholder { color: #71717A; } .ds-input:focus-visible { outline: 2px solid #00C16A; outline-offset: 0; border-color: #00C16A; }"
+    },
+    {
+      "name": "Status Badge",
+      "kind": "chip",
+      "refersTo": "badge-status",
+      "description": "Estado capitalizado com texto sempre legível; cor nunca explica sozinha.",
+      "html": "<span class=\"ds-badge\">Ativo</span>",
+      "css": ".ds-badge { display: inline-block; background: #D9FBE8; color: #007F45; font-family: 'Public Sans', sans-serif; font-size: 0.75rem; font-weight: 500; padding: 0.125rem 0.5rem; border-radius: 9999px; }"
+    },
+    {
+      "name": "Stat Card",
+      "kind": "card",
+      "refersTo": "card-subtle",
+      "description": "Eyebrow atenuada em caixa alta + valor semibold + variação.",
+      "html": "<div class=\"ds-stat\"><span class=\"ds-stat-eyebrow\">Clientes</span><strong>128</strong></div>",
+      "css": ".ds-stat { background: #FFFFFF; border: 1px solid #E4E4E7; border-radius: 0.5rem; padding: 1rem; font-family: 'Public Sans', sans-serif; } .ds-stat-eyebrow { display: block; font-size: 0.75rem; font-weight: 400; text-transform: uppercase; color: #71717A; margin-bottom: 0.375rem; } .ds-stat strong { font-size: 1.5rem; font-weight: 600; color: #18181B; }"
+    },
+    {
+      "name": "Table Header",
+      "kind": "custom",
+      "refersTo": "table-header",
+      "description": "Cabeçalho tonal com pills nas extremidades; células compactas.",
+      "html": "<table class=\"ds-table\"><thead><tr><th>CNPJ</th><th>Razão social</th></tr></thead></table>",
+      "css": ".ds-table { width: 100%; border-collapse: separate; border-spacing: 0; font-family: 'Public Sans', sans-serif; font-size: 0.875rem; } .ds-table th { background: rgba(0,0,0,0.04); color: #71717A; font-weight: 500; text-align: left; padding: 0.5rem 0.75rem; border-top: 1px solid #E4E4E7; border-bottom: 1px solid #E4E4E7; } .ds-table th:first-child { border-radius: 0.5rem 0 0 0.5rem; border-left: 1px solid #E4E4E7; } .ds-table th:last-child { border-radius: 0 0.5rem 0.5rem 0; border-right: 1px solid #E4E4E7; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "Central Operacional",
+    "overview": "O OneFisc deve parecer um ambiente de trabalho contínuo e confiável, não uma coleção de dashboards promocionais. A composição é precisa e discreta: hierarquia por shell, alinhamento, densidade moderada e estados semânticos; o conteúdo fiscal recebe prioridade sobre decoração.",
+    "keyCharacteristics": ["Shell operacional consistente e responsivo.", "Verde reservado para ação, foco e estado positivo.", "Neutros zinc via semântica do Nuxt UI, em claro e escuro.", "Densidade moderada, adequada a listas, formulários e acompanhamento diário.", "Movimento curto, funcional e sempre redutível."],
+    "rules": [
+      {
+        "name": "The One-Green Rule",
+        "body": "Verde é a única voz cromática da marca nas superfícies operacionais; aviso e erro usam as cores semânticas do Nuxt UI, nunca novos acentos decorativos.",
+        "section": "colors"
+      },
+      {
+        "name": "The Single-Family Rule",
+        "body": "Public Sans em toda a aplicação; peso, tamanho e tom resolvem a hierarquia sem fonte de destaque.",
+        "section": "typography"
+      },
+      {
+        "name": "The Legacy-First Rule",
+        "body": "Antes de criar um padrão, portar o equivalente de shared/ do _legacy; referências externas conferem API, mas não substituem decisões locais consolidadas.",
+        "section": "colors"
+      },
+      {
+        "name": "The Flat-by-Default Rule",
+        "body": "Painéis, cartões e overlays não flutuam; borda e tom resolvem a separação.",
+        "section": "elevation"
+      }
+    ],
+    "dos": ["Do começar pelo porte de shared/ do _legacy ou por uma tela existente do mesmo domínio.", "Do usar tokens semânticos do Nuxt UI para preservar claro/escuro e estados.", "Do manter busca à esquerda, ações à direita e feedback junto da ação.", "Do escrever toda copy nova em PT-BR; o inglês atual é ficção de template.", "Do validar foco, teclado, redução de movimento e responsividade antes de concluir uma superfície."],
+    "donts": ["Don't copiar fixtures, personas, métricas, links demo ou testemunhos do template para o produto.", "Don't introduzir outro shell, paleta, escala ou família tipográfica quando existir equivalente neste documento.", "Don't usar cartões, sombras ou acentos decorativos para preencher espaço sem função operacional.", "Don't prometer sincronização ou execução fiscal na UI; expor apenas estado.", "Don't esconder erro, autorização, estado pendente ou consequência fiscal atrás de feedback genérico."]
+  }
+}

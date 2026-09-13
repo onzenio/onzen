@@ -1,21 +1,21 @@
 ## Purpose
 
-Define como usuários entram e mantêm sessão na plataforma, autenticando contra o backend Laravel por meio do BFF do frontend Nuxt, sem auto-cadastro público.
+Define como Users entram e mantêm sessão na plataforma, autenticando contra o backend Laravel por meio do BFF do frontend Nuxt, sem auto-cadastro público.
 
 ## ADDED Requirements
 
 ### Requirement: Autenticação por credenciais
 
-O sistema SHALL autenticar usuários por e-mail e senha, criando uma sessão de servidor válida para as requisições seguintes.
+O sistema SHALL autenticar Users por e-mail e senha, criando uma sessão de servidor válida para as requisições seguintes.
 
 #### Scenario: Login válido
 
-- **WHEN** um usuário informa e-mail e senha corretos
-- **THEN** uma sessão SHALL ser criada e o usuário SHALL acessar a plataforma autenticado
+- **WHEN** um User informa e-mail e senha corretos
+- **THEN** uma sessão SHALL ser criada e o User SHALL acessar a plataforma autenticado
 
 #### Scenario: Login inválido
 
-- **WHEN** um usuário informa senha incorreta ou e-mail inexistente
+- **WHEN** um User informa senha incorreta ou e-mail inexistente
 - **THEN** a autenticação SHALL ser negada com mensagem genérica que não revela se o e-mail existe
 
 ### Requirement: Sessão intermediada pelo BFF
@@ -24,8 +24,8 @@ O browser SHALL interagir apenas com a origem do frontend; as server routes do N
 
 #### Scenario: Sessão ativa
 
-- **WHEN** o frontend consulta o usuário atual com sessão válida
-- **THEN** o sistema SHALL responder com identificação do usuário, papel e Account vinculada
+- **WHEN** o frontend consulta o User atual com sessão válida
+- **THEN** o sistema SHALL responder com identificação do User, Role e Account vinculada
 
 #### Scenario: Requisição sem sessão
 
@@ -34,7 +34,7 @@ O browser SHALL interagir apenas com a origem do frontend; as server routes do N
 
 #### Scenario: Logout
 
-- **WHEN** um usuário autenticado encerra a sessão
+- **WHEN** um User autenticado encerra a sessão
 - **THEN** a sessão SHALL ser invalidada e o cookie de autenticação removido
 
 ### Requirement: Recuperação de senha
@@ -58,14 +58,14 @@ O sistema SHALL permitir redefinir a senha por e-mail com token de uso único e 
 
 ### Requirement: Ausência de auto-cadastro
 
-O sistema SHALL NOT oferecer registro público; contas de usuário surgem apenas pelo onboarding da primeira Account ou pelo aceite de convite.
+O sistema SHALL NOT oferecer registro público; contas de User surgem apenas pelo Onboarding da primeira Account ou pelo aceite de Invite.
 
 #### Scenario: Registro público negado
 
 - **WHEN** um visitante tenta acessar um fluxo de auto-cadastro
-- **THEN** o sistema SHALL negar o acesso e orientar a entrada por onboarding ou convite
+- **THEN** o sistema SHALL negar o acesso e orientar a entrada por Onboarding ou Invite
 
-#### Scenario: Visitante sem convite
+#### Scenario: Visitante sem Invite
 
-- **WHEN** um visitante sem convite válido tenta criar uma conta de usuário
+- **WHEN** um visitante sem Invite válido tenta criar uma conta de User
 - **THEN** o sistema SHALL negar a criação

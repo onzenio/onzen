@@ -1,50 +1,50 @@
 ## Purpose
 
-Define o seletor de Accounts do super_admin para configuração, suporte e manutenção nas demais Accounts, sem trocar de credenciais.
+Define o Account Switcher do super_admin para configuração, suporte e manutenção nas demais Accounts, sem trocar de credenciais.
 
 ## ADDED Requirements
 
-### Requirement: Seletor exclusivo do super_admin
+### Requirement: Account Switcher exclusivo do super_admin
 
-Somente usuários super_admin SHALL usar o seletor de Accounts.
+Somente Users super_admin SHALL usar o Account Switcher.
 
-#### Scenario: Acesso ao seletor
+#### Scenario: Acesso ao Account Switcher
 
-- **WHEN** um super_admin lista as Accounts no seletor
+- **WHEN** um super_admin lista as Accounts no Account Switcher
 - **THEN** ele SHALL poder selecionar qualquer Account para atuar
 
-#### Scenario: Seletor negado
+#### Scenario: Account Switcher negado
 
-- **WHEN** um admin, operador ou user tenta usar o seletor
+- **WHEN** um admin, operator ou user tenta usar o Account Switcher
 - **THEN** a operação SHALL ser negada
 
-#### Scenario: Seletor invisível
+#### Scenario: Account Switcher invisível
 
-- **WHEN** um admin, operador ou user acessa o shell
-- **THEN** o seletor SHALL NOT aparecer na interface
+- **WHEN** um admin, operator ou user acessa o shell
+- **THEN** o Account Switcher SHALL NOT aparecer na interface
 
 ### Requirement: Atuação na Account alvo
 
-Atuando via seletor, o super_admin SHALL ter poderes de plataforma na Account alvo, com as ações registradas em nome dessa Account.
+Atuando via Account Switcher, o super_admin SHALL ter poderes de plataforma na Account alvo, com as ações registradas em nome dessa Account.
 
-#### Scenario: Ação via seletor
+#### Scenario: Ação via Account Switcher
 
-- **WHEN** o super_admin via seletor cria usuário, troca Plan ou ajusta configuração na Account alvo
-- **THEN** a ação SHALL ser executada no contexto da Account alvo, constando o ator e a Account alvo na auditoria
+- **WHEN** o super_admin via Account Switcher cria User, troca Plan ou ajusta configuração na Account alvo
+- **THEN** a ação SHALL ser executada no contexto da Account alvo, constando o ator e a Account alvo no Audit
 
 #### Scenario: Dados escopados à alvo
 
-- **WHEN** o super_admin atua via seletor
+- **WHEN** o super_admin atua via Account Switcher
 - **THEN** listagens e operações SHALL enxergar os dados da Account alvo, não os da Account A
 
 #### Scenario: Retorno à origem
 
-- **WHEN** o super_admin encerra a atuação via seletor
+- **WHEN** o super_admin encerra a atuação via Account Switcher
 - **THEN** ele SHALL voltar ao contexto da Account A
 
 ### Requirement: Sinalização de atuação
 
-Enquanto estiver atuando via seletor, o sistema SHALL exibir sinalização persistente identificando a Account alvo, com ação explícita de saída.
+Enquanto estiver atuando via Account Switcher, o sistema SHALL exibir sinalização persistente identificando a Account alvo, com ação explícita de saída.
 
 #### Scenario: Sinalização visível
 
@@ -53,18 +53,18 @@ Enquanto estiver atuando via seletor, o sistema SHALL exibir sinalização persi
 
 ### Requirement: Vínculo preservado
 
-O uso do seletor SHALL NOT alterar o vínculo do usuário nem suas credenciais; o super_admin SHALL permanecer vinculado à Account A.
+O uso do Account Switcher SHALL NOT alterar o vínculo do User nem suas credenciais; o super_admin SHALL permanecer vinculado à Account A.
 
 #### Scenario: Vínculo inalterado
 
-- **WHEN** o super_admin usa o seletor
-- **THEN** seu usuário SHALL continuar vinculado à Account A e autenticado com as mesmas credenciais
+- **WHEN** o super_admin usa o Account Switcher
+- **THEN** seu User SHALL continuar vinculado à Account A e autenticado com as mesmas credenciais
 
-### Requirement: Auditoria do seletor
+### Requirement: Audit do Account Switcher
 
-Toda entrada, ação e saída via seletor SHALL ser registrada com ator, Account de origem, Account alvo, ação e momento.
+Toda entrada, ação e saída via Account Switcher SHALL ser registrada com ator, Account de origem, Account alvo, ação e momento.
 
 #### Scenario: Trilha auditável
 
 - **WHEN** o super_admin entra, age e sai de uma Account alvo
-- **THEN** cada evento SHALL constar na auditoria com ator, origem, alvo, ação e momento
+- **THEN** cada evento SHALL constar no Audit com ator, origem, alvo, ação e momento

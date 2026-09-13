@@ -25,26 +25,26 @@ A Account A SHALL gerenciar o catálogo de Plans, que SHALL iniciar com 3 planos
 
 ### Requirement: Dimensões limitadas
 
-Cada Plan SHALL limitar número de usuários, número de Clients, módulos liberados e volume mensal de consultas.
+Cada Plan SHALL limitar número de Users, número de Clients, Modules liberados e volume mensal de consultas.
 
 #### Scenario: Limite respeitado
 
-- **WHEN** uma Account dentro dos limites cria usuário, Client ou usa módulo liberado
+- **WHEN** uma Account dentro dos limites cria User, Client ou usa Module liberado
 - **THEN** a operação SHALL ser permitida
 
-#### Scenario: Convites pendentes contam como usuários
+#### Scenario: Invites pendentes contam como Users
 
-- **WHEN** a soma de usuários ativos e convites pendentes válidos atinge o limite de usuários do Plan
-- **THEN** novos convites SHALL ser bloqueados
+- **WHEN** a soma de Users ativos e Invites pendentes válidos atinge o limite de Users do Plan
+- **THEN** novos Invites SHALL ser bloqueados
 
-#### Scenario: Convites expirados não contam
+#### Scenario: Invites expirados não contam
 
-- **WHEN** existem convites expirados na Account
-- **THEN** eles SHALL NOT contar para o limite de usuários
+- **WHEN** existem Invites expirados na Account
+- **THEN** eles SHALL NOT contar para o limite de Users
 
 #### Scenario: Aceite no limite exato
 
-- **WHEN** o aceite de um convite leva a Account ao limite de usuários, excluindo o próprio convite da contagem
+- **WHEN** o aceite de um Invite leva a Account ao limite de Users, excluindo o próprio Invite da contagem
 - **THEN** o aceite SHALL ser permitido
 
 ### Requirement: Estouro de limite
@@ -53,7 +53,7 @@ Quando uma operação excederia qualquer dimensão do Plan, ela SHALL ser bloque
 
 #### Scenario: Limite estourado
 
-- **WHEN** criar usuário, Client ou usar módulo excederia o Plan vigente
+- **WHEN** criar User, Client ou usar Module excederia o Plan vigente
 - **THEN** a operação SHALL ser bloqueada com aviso de upgrade
 
 #### Scenario: Verificação no backend
@@ -61,18 +61,18 @@ Quando uma operação excederia qualquer dimensão do Plan, ela SHALL ser bloque
 - **WHEN** a operação é solicitada diretamente ao backend, ignorando o frontend
 - **THEN** o bloqueio SHALL ocorrer da mesma forma
 
-### Requirement: Módulos liberados
+### Requirement: Modules liberados
 
-O acesso a um módulo SHALL depender de o Plan vigente liberá-lo.
+O acesso a um Module SHALL depender de o Plan vigente liberá-lo.
 
-#### Scenario: Módulo liberado
+#### Scenario: Module liberado
 
-- **WHEN** um usuário acessa um módulo presente no Plan da sua Account
-- **THEN** o acesso SHALL ser permitido conforme seu papel
+- **WHEN** um User acessa um Module presente no Plan da sua Account
+- **THEN** o acesso SHALL ser permitido conforme seu Role
 
-#### Scenario: Módulo bloqueado
+#### Scenario: Module bloqueado
 
-- **WHEN** um usuário acessa um módulo ausente do Plan da sua Account
+- **WHEN** um User acessa um Module ausente do Plan da sua Account
 - **THEN** o acesso SHALL ser negado com aviso de upgrade
 
 ### Requirement: Troca de Plan pela A
