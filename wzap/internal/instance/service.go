@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -24,7 +25,18 @@ var (
 	ErrExternalRefTaken = errors.New("external ref already taken")
 	// ErrInvalidCursor reports that a list cursor is not a valid identifier.
 	ErrInvalidCursor = errors.New("invalid cursor")
+	// ErrAlreadyConnected reports that a pairing request hit an instance whose
+	// session is already connected.
+	ErrAlreadyConnected = errors.New("instance already connected")
 )
+
+// ConnectResult is the outcome of a pairing request: the resulting status and,
+// while pairing, the QR code and its validity.
+type ConnectResult struct {
+	Status      session.Status
+	QRCode      string
+	QRExpiresAt *time.Time
+}
 
 // MediaRemover deletes the media files and rows of an instance. It is declared
 // here, at the consumer, and will be satisfied by the media package (Task 16).
@@ -115,6 +127,110 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, input UpdateInput) (
 		return nil, mapError("update instance", err)
 	}
 	return updated, nil
+}
+
+// Connect starts the pairing of a non-connected instance and answers the QR
+// code with its validity. An instance whose session is already connected is a
+// no-op that answers with its status and no QR, while an instance already
+// pairing answers the current code instead of opening a second channel: both
+// keep the operation idempotent. The pairing state is persisted before
+// returning.
+func (s *Service) Connect(ctx context.Context, id uuid.UUID) (ConnectResult, error) {
+	instance, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return ConnectResult{}, mapError("connect instance", err)
+	}
+
+	sess, err := s.sessions.Create(instance)
+	if err != nil {
+		return ConnectResult{}, fmt.Errorf("connect instance: create session: %w", err)
+	}
+
+	switch sess.Status() {
+	case session.StatusConnected:
+		return ConnectResult{Status: session.StatusConnected}, nil
+	case session.StatusPairing:
+		result, err := pairingResult(ctx, sess)
+		if err != nil {
+			return ConnectResult{}, fmt.Errorf("connect instance: %w", err)
+		}
+		return result, nil
+	}
+
+	qr, expiresAt, err := sess.Connect(ctx)
+	if err != nil {
+		return ConnectResult{}, fmt.Errorf("connect instance: %w", err)
+	}
+	if qr == "" {
+		// The instance has stored credentials: connecting it online needs no
+		// pairing, and the event sink persists the connected status.
+		return ConnectResult{Status: session.StatusConnected}, nil
+	}
+
+	if err := s.markPairing(ctx, instance); err != nil {
+		return ConnectResult{}, fmt.Errorf("connect instance: %w", err)
+	}
+	return ConnectResult{Status: session.StatusPairing, QRCode: qr, QRExpiresAt: &expiresAt}, nil
+}
+
+// QR returns the current pairing QR code of a non-connected instance. It
+// starts the pairing when none is active, so an expired code is replaced. A
+// connected instance is a conflict: it has no QR to scan.
+func (s *Service) QR(ctx context.Context, id uuid.UUID) (ConnectResult, error) {
+	instance, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return ConnectResult{}, mapError("get qr", err)
+	}
+
+	sess, err := s.sessions.Create(instance)
+	if err != nil {
+		return ConnectResult{}, fmt.Errorf("get qr: create session: %w", err)
+	}
+
+	switch sess.Status() {
+	case session.StatusConnected:
+		return ConnectResult{}, fmt.Errorf("get qr: %w", ErrAlreadyConnected)
+	case session.StatusPairing:
+		result, err := pairingResult(ctx, sess)
+		if err != nil {
+			return ConnectResult{}, fmt.Errorf("get qr: %w", err)
+		}
+		return result, nil
+	}
+
+	qr, expiresAt, err := sess.Connect(ctx)
+	if err != nil {
+		return ConnectResult{}, fmt.Errorf("get qr: %w", err)
+	}
+	if qr == "" {
+		// Stored credentials mean the instance is paired already; there is no
+		// QR to hand out.
+		return ConnectResult{}, fmt.Errorf("get qr: %w", ErrAlreadyConnected)
+	}
+
+	if err := s.markPairing(ctx, instance); err != nil {
+		return ConnectResult{}, fmt.Errorf("get qr: %w", err)
+	}
+	return ConnectResult{Status: session.StatusPairing, QRCode: qr, QRExpiresAt: &expiresAt}, nil
+}
+
+// pairingResult reads the current code of an open pairing.
+func pairingResult(ctx context.Context, sess session.Session) (ConnectResult, error) {
+	qr, expiresAt, err := sess.QR(ctx)
+	if err != nil {
+		return ConnectResult{}, err
+	}
+	return ConnectResult{Status: session.StatusPairing, QRCode: qr, QRExpiresAt: &expiresAt}, nil
+}
+
+// markPairing persists the pairing state of instance so the status endpoint
+// reflects it and a restart can resume it.
+func (s *Service) markPairing(ctx context.Context, instance *model.Instance) error {
+	instance.Status = string(session.StatusPairing)
+	if _, err := s.repo.Update(ctx, *instance); err != nil {
+		return mapError("update instance", err)
+	}
+	return nil
 }
 
 // Delete tears the session down, deletes the instance media and finally removes

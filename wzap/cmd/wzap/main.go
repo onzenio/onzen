@@ -16,9 +16,12 @@ import (
 
 	"github.com/nats-io/nats.go"
 
+	"onefisc/wzap/internal/app"
 	"onefisc/wzap/internal/config"
 	"onefisc/wzap/internal/events"
 	"onefisc/wzap/internal/httpapi"
+	"onefisc/wzap/internal/instance"
+	"onefisc/wzap/internal/session/whatsmeow"
 	"onefisc/wzap/internal/storage/postgres"
 	"onefisc/wzap/internal/version"
 )
@@ -112,11 +115,20 @@ func serve() error {
 		log.Warn("event stream not ready at startup", "error", ensureErr)
 	}
 
+	instances := postgres.NewInstanceRepository(pool)
 	outbox := postgres.NewEventOutboxRepository(pool)
 	relay := events.NewRelay(outbox, publisher, log, cfg.EventRetentionDays)
 	checker := httpapi.NewChecker(pool, httpapi.NamedProbe{Name: "nats", Run: publisher.Ready})
 
-	srv := httpapi.New(cfg, log, httpapi.Deps{ReadyChecker: checker})
+	runtime := app.NewRuntime(instances, events.NewWriter(outbox), log)
+	sessions, err := whatsmeow.NewManager(ctx, cfg.DatabaseURL, instances, log, runtime)
+	if err != nil {
+		return fmt.Errorf("session manager: %w", err)
+	}
+	defer func() { _ = sessions.Close() }()
+
+	service := instance.NewService(instances, sessions, nil)
+	srv := httpapi.New(cfg, log, httpapi.Deps{ReadyChecker: checker, Instances: service})
 
 	relayCtx, stopRelay := context.WithCancel(ctx)
 	defer stopRelay()

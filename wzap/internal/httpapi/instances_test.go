@@ -20,16 +20,20 @@ import (
 // configure each outcome and the recorded fields expose the calls the handlers
 // made.
 type fakeInstanceService struct {
-	createFn func(ctx context.Context, input instance.CreateInput) (*model.Instance, error)
-	getFn    func(ctx context.Context, id uuid.UUID) (*model.Instance, error)
-	listFn   func(ctx context.Context, limit int, cursor string) ([]model.Instance, string, error)
-	updateFn func(ctx context.Context, id uuid.UUID, input instance.UpdateInput) (*model.Instance, error)
-	deleteFn func(ctx context.Context, id uuid.UUID) error
+	createFn  func(ctx context.Context, input instance.CreateInput) (*model.Instance, error)
+	getFn     func(ctx context.Context, id uuid.UUID) (*model.Instance, error)
+	listFn    func(ctx context.Context, limit int, cursor string) ([]model.Instance, string, error)
+	updateFn  func(ctx context.Context, id uuid.UUID, input instance.UpdateInput) (*model.Instance, error)
+	deleteFn  func(ctx context.Context, id uuid.UUID) error
+	connectFn func(ctx context.Context, id uuid.UUID) (instance.ConnectResult, error)
+	qrFn      func(ctx context.Context, id uuid.UUID) (instance.ConnectResult, error)
 
 	createInputs []instance.CreateInput
 	updateInputs []instance.UpdateInput
 	getIDs       []uuid.UUID
 	deleteIDs    []uuid.UUID
+	connectIDs   []uuid.UUID
+	qrIDs        []uuid.UUID
 	listLimit    int
 	listCursor   string
 }
@@ -81,6 +85,28 @@ func (f *fakeInstanceService) Delete(ctx context.Context, id uuid.UUID) error {
 		return f.deleteFn(ctx, id)
 	}
 	return nil
+}
+
+// Connect records the id and returns the configured result, defaulting to a
+// fresh pairing result.
+func (f *fakeInstanceService) Connect(ctx context.Context, id uuid.UUID) (instance.ConnectResult, error) {
+	f.connectIDs = append(f.connectIDs, id)
+	if f.connectFn != nil {
+		return f.connectFn(ctx, id)
+	}
+	expiresAt := time.Now().Add(time.Minute)
+	return instance.ConnectResult{Status: "pairing", QRCode: "qr-code", QRExpiresAt: &expiresAt}, nil
+}
+
+// QR records the id and returns the configured result, defaulting to the same
+// pairing result as Connect.
+func (f *fakeInstanceService) QR(ctx context.Context, id uuid.UUID) (instance.ConnectResult, error) {
+	f.qrIDs = append(f.qrIDs, id)
+	if f.qrFn != nil {
+		return f.qrFn(ctx, id)
+	}
+	expiresAt := time.Now().Add(time.Minute)
+	return instance.ConnectResult{Status: "pairing", QRCode: "qr-code", QRExpiresAt: &expiresAt}, nil
 }
 
 // instancesServer builds the server under test with svc as the instance service.

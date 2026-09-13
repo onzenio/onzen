@@ -37,6 +37,9 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *http.Server {
 	api.HandleFunc("GET /api/v1/instances/{id}", handleGetInstance(deps.Instances))
 	api.HandleFunc("PATCH /api/v1/instances/{id}", handleUpdateInstance(deps.Instances))
 	api.HandleFunc("DELETE /api/v1/instances/{id}", handleDeleteInstance(deps.Instances))
+	api.HandleFunc("POST /api/v1/instances/{id}/connect", handleConnectInstance(deps.Instances))
+	api.HandleFunc("GET /api/v1/instances/{id}/qr", handleQRInstance(deps.Instances))
+	api.HandleFunc("GET /api/v1/instances/{id}/status", handleInstanceStatus(deps.Instances))
 	mux.Handle("/api/v1/", Auth(cfg.ServiceToken)(api))
 
 	return &http.Server{

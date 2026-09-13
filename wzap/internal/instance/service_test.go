@@ -412,3 +412,218 @@ func TestServiceDeleteStopsWhenMediaDeletionFails(t *testing.T) {
 		t.Error("instance row removed even though the media deletion failed")
 	}
 }
+
+func TestServiceConnectStartsPairing(t *testing.T) {
+	id := uuid.New()
+	repo := newFakeRepo(model.Instance{ID: id, Name: "loja", Status: "disconnected"})
+	sessions := sessiontest.New(nil)
+	svc := NewService(repo, sessions, &fakeMedia{})
+
+	result, err := svc.Connect(context.Background(), id)
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	if result.Status != session.StatusPairing {
+		t.Errorf("Status = %q, want %q", result.Status, session.StatusPairing)
+	}
+	wantQR := "fake-qr-" + id.String()
+	if result.QRCode != wantQR {
+		t.Errorf("QRCode = %q, want %q", result.QRCode, wantQR)
+	}
+	if result.QRExpiresAt == nil {
+		t.Fatal("QRExpiresAt = nil, want the QR validity")
+	}
+	if result.QRExpiresAt.IsZero() {
+		t.Error("QRExpiresAt is the zero time, want the QR validity")
+	}
+
+	stored := repo.instances[id]
+	if stored.Status != string(session.StatusPairing) {
+		t.Errorf("stored status = %q, want %q", stored.Status, session.StatusPairing)
+	}
+	calls := sessions.CreateCalls()
+	if len(calls) != 1 || calls[0].ID != id {
+		t.Errorf("session Create calls = %+v, want the instance %s", calls, id)
+	}
+}
+
+func TestServiceConnectAlreadyConnectedSkipsQR(t *testing.T) {
+	id := uuid.New()
+	repo := newFakeRepo(model.Instance{ID: id, Name: "loja", Status: string(session.StatusConnected)})
+	sessions := sessiontest.New(nil)
+	sess := sessiontest.NewSession(id, nil)
+	sess.SetStatus(session.StatusConnected)
+	sess.SetJID("5511999999999@s.whatsapp.net")
+	sessions.Put(id, sess)
+	svc := NewService(repo, sessions, &fakeMedia{})
+
+	result, err := svc.Connect(context.Background(), id)
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	if result.Status != session.StatusConnected {
+		t.Errorf("Status = %q, want %q", result.Status, session.StatusConnected)
+	}
+	if result.QRCode != "" {
+		t.Errorf("QRCode = %q, want empty for a connected instance", result.QRCode)
+	}
+	if result.QRExpiresAt != nil {
+		t.Errorf("QRExpiresAt = %v, want nil for a connected instance", result.QRExpiresAt)
+	}
+	if got := sess.ConnectCalls(); got != 0 {
+		t.Errorf("session Connect calls = %d, want 0 for a connected instance", got)
+	}
+	if len(repo.updateCalls) != 0 {
+		t.Errorf("repo Update calls = %+v, want none", repo.updateCalls)
+	}
+}
+
+func TestServiceConnectWhilePairingReturnsCurrentQR(t *testing.T) {
+	id := uuid.New()
+	repo := newFakeRepo(model.Instance{ID: id, Name: "loja", Status: string(session.StatusPairing)})
+	sessions := sessiontest.New(nil)
+	sess := sessiontest.NewSession(id, nil)
+	sessions.Put(id, sess)
+	if _, _, err := sess.Connect(context.Background()); err != nil {
+		t.Fatalf("setup session Connect: %v", err)
+	}
+	svc := NewService(repo, sessions, &fakeMedia{})
+
+	result, err := svc.Connect(context.Background(), id)
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	wantQR := "fake-qr-" + id.String()
+	if result.QRCode != wantQR {
+		t.Errorf("QRCode = %q, want the open pairing code %q", result.QRCode, wantQR)
+	}
+	if result.Status != session.StatusPairing {
+		t.Errorf("Status = %q, want %q", result.Status, session.StatusPairing)
+	}
+	if got := sess.ConnectCalls(); got != 1 {
+		t.Errorf("session Connect calls = %d, want 1 (the setup call only)", got)
+	}
+}
+
+func TestServiceConnectNotFound(t *testing.T) {
+	svc := NewService(newFakeRepo(), sessiontest.New(nil), &fakeMedia{})
+
+	_, err := svc.Connect(context.Background(), uuid.New())
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Connect error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestServiceConnectSessionFailure(t *testing.T) {
+	id := uuid.New()
+	repo := newFakeRepo(model.Instance{ID: id, Name: "loja", Status: "disconnected"})
+	sessions := sessiontest.New(nil)
+	sessions.CreateErr = errors.New("open device store failed")
+	svc := NewService(repo, sessions, &fakeMedia{})
+
+	_, err := svc.Connect(context.Background(), id)
+	if err == nil {
+		t.Fatal("Connect error = nil, want the session failure")
+	}
+	if len(repo.updateCalls) != 0 {
+		t.Errorf("repo Update calls = %+v, want none after the session failure", repo.updateCalls)
+	}
+}
+
+func TestServiceQRReturnsCurrentCode(t *testing.T) {
+	id := uuid.New()
+	repo := newFakeRepo(model.Instance{ID: id, Name: "loja", Status: string(session.StatusPairing)})
+	sessions := sessiontest.New(nil)
+	sess := sessiontest.NewSession(id, nil)
+	sessions.Put(id, sess)
+	if _, _, err := sess.Connect(context.Background()); err != nil {
+		t.Fatalf("setup session Connect: %v", err)
+	}
+	svc := NewService(repo, sessions, &fakeMedia{})
+
+	result, err := svc.QR(context.Background(), id)
+	if err != nil {
+		t.Fatalf("QR: %v", err)
+	}
+
+	wantQR := "fake-qr-" + id.String()
+	if result.QRCode != wantQR {
+		t.Errorf("QRCode = %q, want %q", result.QRCode, wantQR)
+	}
+	if result.Status != session.StatusPairing {
+		t.Errorf("Status = %q, want %q", result.Status, session.StatusPairing)
+	}
+	if result.QRExpiresAt == nil || result.QRExpiresAt.IsZero() {
+		t.Errorf("QRExpiresAt = %v, want the QR validity", result.QRExpiresAt)
+	}
+	if got := sess.ConnectCalls(); got != 1 {
+		t.Errorf("session Connect calls = %d, want 1 (the setup call only)", got)
+	}
+}
+
+func TestServiceQRStartsPairingWhenNoCode(t *testing.T) {
+	id := uuid.New()
+	repo := newFakeRepo(model.Instance{ID: id, Name: "loja", Status: "disconnected"})
+	sessions := sessiontest.New(nil)
+	svc := NewService(repo, sessions, &fakeMedia{})
+
+	result, err := svc.QR(context.Background(), id)
+	if err != nil {
+		t.Fatalf("QR: %v", err)
+	}
+
+	if result.Status != session.StatusPairing {
+		t.Errorf("Status = %q, want %q", result.Status, session.StatusPairing)
+	}
+	if result.QRCode == "" {
+		t.Error("QRCode is empty, want a fresh code")
+	}
+	if stored := repo.instances[id]; stored.Status != string(session.StatusPairing) {
+		t.Errorf("stored status = %q, want %q", stored.Status, session.StatusPairing)
+	}
+}
+
+func TestServiceQRWhilePairingWithoutCodeFails(t *testing.T) {
+	id := uuid.New()
+	repo := newFakeRepo(model.Instance{ID: id, Name: "loja", Status: string(session.StatusPairing)})
+	sessions := sessiontest.New(nil)
+	sess := sessiontest.NewSession(id, nil)
+	sess.SetStatus(session.StatusPairing)
+	sessions.Put(id, sess)
+	svc := NewService(repo, sessions, &fakeMedia{})
+
+	_, err := svc.QR(context.Background(), id)
+	if err == nil {
+		t.Fatal("QR error = nil, want the missing code failure")
+	}
+	if got := sess.ConnectCalls(); got != 0 {
+		t.Errorf("session Connect calls = %d, want 0 while a pairing is open", got)
+	}
+}
+
+func TestServiceQRAlreadyConnected(t *testing.T) {
+	id := uuid.New()
+	repo := newFakeRepo(model.Instance{ID: id, Name: "loja", Status: string(session.StatusConnected)})
+	sessions := sessiontest.New(nil)
+	sess := sessiontest.NewSession(id, nil)
+	sess.SetStatus(session.StatusConnected)
+	sessions.Put(id, sess)
+	svc := NewService(repo, sessions, &fakeMedia{})
+
+	_, err := svc.QR(context.Background(), id)
+	if !errors.Is(err, ErrAlreadyConnected) {
+		t.Fatalf("QR error = %v, want ErrAlreadyConnected", err)
+	}
+}
+
+func TestServiceQRNotFound(t *testing.T) {
+	svc := NewService(newFakeRepo(), sessiontest.New(nil), &fakeMedia{})
+
+	_, err := svc.QR(context.Background(), uuid.New())
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("QR error = %v, want ErrNotFound", err)
+	}
+}

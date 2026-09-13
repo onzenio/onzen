@@ -28,6 +28,8 @@ type InstanceService interface {
 	List(ctx context.Context, limit int, cursor string) ([]model.Instance, string, error)
 	Update(ctx context.Context, id uuid.UUID, input instance.UpdateInput) (*model.Instance, error)
 	Delete(ctx context.Context, id uuid.UUID) error
+	Connect(ctx context.Context, id uuid.UUID) (instance.ConnectResult, error)
+	QR(ctx context.Context, id uuid.UUID) (instance.ConnectResult, error)
 }
 
 // The service satisfies the handler contract; the assertion catches signature
@@ -216,6 +218,8 @@ func writeInstanceError(w http.ResponseWriter, r *http.Request, err error) {
 		Error(w, r, http.StatusConflict, "conflict", "external ref already taken")
 	case errors.Is(err, instance.ErrInvalidCursor):
 		Error(w, r, http.StatusBadRequest, "invalid_request", "invalid cursor")
+	case errors.Is(err, instance.ErrAlreadyConnected):
+		Error(w, r, http.StatusConflict, "conflict", "instance already connected")
 	default:
 		Error(w, r, http.StatusInternalServerError, "internal_error", "internal server error")
 	}
