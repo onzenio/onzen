@@ -133,6 +133,40 @@ final class SnapshotProjectorTest extends TestCase
         $this->assertSame(1, MonitoringAlert::query()->count());
     }
 
+    public function test_a_reversion_to_a_previous_result_publishes_a_new_version(): void
+    {
+        [$account, $client, $enrollment] = $this->context();
+        $projector = $this->projector();
+        $firstRun = $this->runFor($enrollment, 'RELATORIOSITFIS92', 'run-1');
+        $secondRun = $this->runFor($enrollment, 'RELATORIOSITFIS92', 'run-2');
+        $thirdRun = $this->runFor($enrollment, 'RELATORIOSITFIS92', 'run-3');
+
+        $projector->project($firstRun, $this->sitfisResult('regular'));
+        $projector->project($secondRun, $this->sitfisResult('irregular'));
+        $projector->project($thirdRun, $this->sitfisResult('regular'));
+
+        $snapshots = MonitoringSnapshot::query()->orderBy('id')->get();
+        $this->assertCount(3, $snapshots);
+        [$first, $second, $third] = [$snapshots[0], $snapshots[1], $snapshots[2]];
+
+        // The reversion is a factual new version: the same fingerprint as the
+        // first publication, but a distinct row published by the third run.
+        $this->assertSame($first->fingerprint, $third->fingerprint);
+        $this->assertSame($thirdRun->id, $third->run_id);
+        $this->assertSame(MonitoringSnapshot::FRESHNESS_STALE, $second->fresh()->freshness);
+        $this->assertSame(MonitoringSnapshot::FRESHNESS_FRESH, $third->fresh()->freshness);
+
+        $changes = MonitoringChange::query()->orderBy('id')->get();
+        $this->assertCount(2, $changes);
+        $reversion = $changes[1];
+        $this->assertSame($third->id, $reversion->snapshot_id);
+        $this->assertSame($second->id, $reversion->previous_snapshot_id);
+        $this->assertSame($thirdRun->id, $reversion->run_id);
+        $this->assertSame('irregular', $reversion->data['before']['situacao']);
+        $this->assertSame('regular', $reversion->data['after']['situacao']);
+        $this->assertSame(2, MonitoringAlert::query()->count());
+    }
+
     public function test_projecting_the_same_run_twice_is_idempotent(): void
     {
         [$account, $client, $enrollment] = $this->context();
@@ -374,6 +408,27 @@ final class SnapshotProjectorTest extends TestCase
         $state = $this->projector()->stateFor($enrollment);
 
         $this->assertSame(MonitoringSnapshot::COMPLETENESS_BLOCKED, $state['completeness']);
+        $this->assertSame(MonitoringSnapshot::FRESHNESS_STALE, $state['freshness']);
+        $this->assertSame([], $state['coverage']['operations']);
+        $this->assertSame(0, MonitoringSnapshot::query()->count());
+    }
+
+    public function test_state_for_reports_incomplete_for_a_completed_run_without_a_snapshot(): void
+    {
+        [$account, $client, $enrollment] = $this->context();
+
+        MonitoringRun::factory()->create([
+            'account_id' => $account->id,
+            'enrollment_id' => $enrollment->id,
+            'operation_code' => 'RELATORIOSITFIS92',
+            'status' => MonitoringRunStatus::Completed,
+        ]);
+
+        $state = $this->projector()->stateFor($enrollment);
+
+        // Fail-closed read contract: a completed run without a published
+        // snapshot is never reported as complete.
+        $this->assertSame(MonitoringSnapshot::COMPLETENESS_INCOMPLETE, $state['completeness']);
         $this->assertSame(MonitoringSnapshot::FRESHNESS_STALE, $state['freshness']);
         $this->assertSame([], $state['coverage']['operations']);
         $this->assertSame(0, MonitoringSnapshot::query()->count());

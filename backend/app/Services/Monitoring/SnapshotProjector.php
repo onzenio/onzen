@@ -295,7 +295,9 @@ final class SnapshotProjector implements ResultProjector
         }
 
         return match ($run->status) {
-            MonitoringRunStatus::Completed => $current?->completeness ?? MonitoringSnapshot::COMPLETENESS_COMPLETE,
+            // Fail-closed: a completed run without a published snapshot is
+            // never reported as complete; only a real snapshot does.
+            MonitoringRunStatus::Completed => $current?->completeness ?? MonitoringSnapshot::COMPLETENESS_INCOMPLETE,
             MonitoringRunStatus::Pending,
             MonitoringRunStatus::Running,
             MonitoringRunStatus::AwaitingProtocol,
