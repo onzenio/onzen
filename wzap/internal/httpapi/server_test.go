@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,7 +13,8 @@ import (
 
 func newTestServer(t *testing.T) *http.Server {
 	t.Helper()
-	return New(config.Config{HTTPAddr: "127.0.0.1:0", ServiceToken: testToken}, discardLogger(), Deps{})
+	return New(config.Config{HTTPAddr: "127.0.0.1:0", ServiceToken: testToken}, discardLogger(),
+		Deps{ReadyChecker: checkFunc(func(context.Context) error { return nil })})
 }
 
 func serve(t *testing.T, srv *http.Server, method, path, token string) *httptest.ResponseRecorder {
@@ -29,10 +31,15 @@ func serve(t *testing.T, srv *http.Server, method, path, token string) *httptest
 func dataField(t *testing.T, body []byte, field string) string {
 	t.Helper()
 	var payload struct {
-		Data map[string]string `json:"data"`
+		Data map[string]json.RawMessage `json:"data"`
 	}
 	decodeJSON(t, body, &payload)
-	return payload.Data[field]
+
+	var value string
+	if err := json.Unmarshal(payload.Data[field], &value); err != nil {
+		t.Fatalf("decode data.%s of %q: %v", field, body, err)
+	}
+	return value
 }
 
 func TestNewHealthEndpoints(t *testing.T) {
