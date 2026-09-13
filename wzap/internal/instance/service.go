@@ -224,11 +224,52 @@ func pairingResult(ctx context.Context, sess session.Session) (ConnectResult, er
 }
 
 // markPairing persists the pairing state of instance so the status endpoint
-// reflects it and a restart can resume it.
+// reflects it and a restart can resume it. The write only touches the
+// connection columns: a full-row update could resurrect a stale last_error set
+// by a concurrent connection event.
 func (s *Service) markPairing(ctx context.Context, instance *model.Instance) error {
-	instance.Status = string(session.StatusPairing)
-	if _, err := s.repo.Update(ctx, *instance); err != nil {
+	if err := s.repo.SetConnection(ctx, instance.ID, string(session.StatusPairing), instance.WhatsAppJID); err != nil {
 		return mapError("update instance", err)
+	}
+	return nil
+}
+
+// Restore brings the persisted sessions back online at startup. The manager
+// bounds the concurrency and reports each outcome through the connection
+// events, which keep instances.status in sync; only listing the instances can
+// fail the call.
+func (s *Service) Restore(ctx context.Context) error {
+	if err := s.sessions.RestoreAll(ctx); err != nil {
+		return fmt.Errorf("restore sessions: %w", err)
+	}
+	return nil
+}
+
+// Disconnect ends the session of an instance definitively: it disconnects the
+// session, clears its paired identity and connection state, and deletes the
+// stored credentials so the instance cannot be brought back online without a
+// new pairing. The session emits the connection event that records the
+// transition; the partial update keeps other columns untouched. On a
+// credential removal failure the row is already cleared, so retrying finishes
+// the removal.
+func (s *Service) Disconnect(ctx context.Context, id uuid.UUID) error {
+	instance, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return mapError("disconnect instance", err)
+	}
+
+	sess, err := s.sessions.Create(instance)
+	if err != nil {
+		return fmt.Errorf("disconnect instance: create session: %w", err)
+	}
+	if err := sess.Disconnect(ctx); err != nil {
+		return fmt.Errorf("disconnect instance: %w", err)
+	}
+	if err := s.repo.SetConnection(ctx, id, string(session.StatusDisconnected), ""); err != nil {
+		return mapError("disconnect instance", err)
+	}
+	if err := s.sessions.Remove(ctx, id); err != nil {
+		return fmt.Errorf("disconnect instance: remove session: %w", err)
 	}
 	return nil
 }

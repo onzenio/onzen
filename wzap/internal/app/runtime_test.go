@@ -71,6 +71,10 @@ func (r *runtimeRepo) Delete(context.Context, uuid.UUID) error {
 	return errors.New("runtimeRepo.Delete: unexpected call")
 }
 
+func (r *runtimeRepo) SetConnection(context.Context, uuid.UUID, string, string) error {
+	return errors.New("runtimeRepo.SetConnection: unexpected call")
+}
+
 // fakeWriter records the events written to the outbox.
 type fakeWriter struct {
 	subjects []string

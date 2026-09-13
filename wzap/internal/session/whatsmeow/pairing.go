@@ -21,6 +21,7 @@ const pairingFirstQRTimeout = 30 * time.Second
 // the request context as soon as Connect returns, which must not stop the QR
 // rotation.
 func (s *instanceSession) Connect(ctx context.Context) (string, time.Time, error) {
+	s.cancelReconnect()
 	if s.client.IsConnected() && s.Status() == session.StatusConnected {
 		return "", time.Time{}, errors.New("session already connected")
 	}

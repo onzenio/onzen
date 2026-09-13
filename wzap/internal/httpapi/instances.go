@@ -28,6 +28,7 @@ type InstanceService interface {
 	List(ctx context.Context, limit int, cursor string) ([]model.Instance, string, error)
 	Update(ctx context.Context, id uuid.UUID, input instance.UpdateInput) (*model.Instance, error)
 	Delete(ctx context.Context, id uuid.UUID) error
+	Disconnect(ctx context.Context, id uuid.UUID) error
 	Connect(ctx context.Context, id uuid.UUID) (instance.ConnectResult, error)
 	QR(ctx context.Context, id uuid.UUID) (instance.ConnectResult, error)
 }

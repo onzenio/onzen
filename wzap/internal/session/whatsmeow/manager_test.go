@@ -497,6 +497,112 @@ func TestRemoveKeepsSessionWhenDeleteFails(t *testing.T) {
 	}
 }
 
+// fakeInstanceRepo feeds RestoreAll the persisted instances. Only List is
+// expected to be reached.
+type fakeInstanceRepo struct {
+	instances []model.Instance
+}
+
+func (r *fakeInstanceRepo) Create(context.Context, model.Instance) (*model.Instance, error) {
+	return nil, errors.New("fakeInstanceRepo.Create: unexpected call")
+}
+
+func (r *fakeInstanceRepo) Get(context.Context, uuid.UUID) (*model.Instance, error) {
+	return nil, errors.New("fakeInstanceRepo.Get: unexpected call")
+}
+
+func (r *fakeInstanceRepo) GetByExternalRef(context.Context, string) (*model.Instance, error) {
+	return nil, errors.New("fakeInstanceRepo.GetByExternalRef: unexpected call")
+}
+
+func (r *fakeInstanceRepo) List(context.Context, int, string) ([]model.Instance, string, error) {
+	return r.instances, "", nil
+}
+
+func (r *fakeInstanceRepo) Update(context.Context, model.Instance) (*model.Instance, error) {
+	return nil, errors.New("fakeInstanceRepo.Update: unexpected call")
+}
+
+func (r *fakeInstanceRepo) SetConnection(context.Context, uuid.UUID, string, string) error {
+	return errors.New("fakeInstanceRepo.SetConnection: unexpected call")
+}
+
+func (r *fakeInstanceRepo) Delete(context.Context, uuid.UUID) error {
+	return errors.New("fakeInstanceRepo.Delete: unexpected call")
+}
+
+func TestRestoreAllSkipsInstancesWithoutCredentials(t *testing.T) {
+	manager := &Manager{
+		instances: &fakeInstanceRepo{instances: []model.Instance{{ID: uuid.New(), Status: "disconnected"}}},
+		log:       slog.Default(),
+		sessions:  make(map[uuid.UUID]*instanceSession),
+	}
+	restored := false
+	manager.restoreConnect = func(context.Context, *instanceSession) error {
+		restored = true
+		return nil
+	}
+
+	if err := manager.RestoreAll(context.Background()); err != nil {
+		t.Fatalf("RestoreAll: %v", err)
+	}
+	if restored {
+		t.Error("RestoreAll restored an instance without a JID")
+	}
+}
+
+func TestRestoreAllReflectsFailure(t *testing.T) {
+	manager := newTestManager(t)
+	jid := saveTestDevice(t, manager.devices, "5511999999999")
+	sink := &recordingSink{}
+	manager.sink = sink
+	manager.instances = &fakeInstanceRepo{instances: []model.Instance{{
+		ID: uuid.New(), Status: "connected", WhatsAppJID: jid.String(),
+	}}}
+	manager.restoreConnect = func(context.Context, *instanceSession) error {
+		return errors.New("whatsapp unreachable")
+	}
+
+	if err := manager.RestoreAll(context.Background()); err != nil {
+		t.Fatalf("RestoreAll: %v", err)
+	}
+	event := sink.last(t)
+	if event.status != session.StatusError {
+		t.Errorf("restore failure event status = %q, want %q", event.status, session.StatusError)
+	}
+	if !strings.Contains(event.reason, "whatsapp unreachable") {
+		t.Errorf("restore failure reason = %q, want the cause", event.reason)
+	}
+	if event.jid != jid.String() {
+		t.Errorf("restore failure JID = %q, want %q", event.jid, jid.String())
+	}
+}
+
+func TestRestoreAllReflectsCancellation(t *testing.T) {
+	sink := &recordingSink{}
+	instance := model.Instance{ID: uuid.New(), Status: "connected", WhatsAppJID: "5511999999999@s.whatsapp.net"}
+	manager := &Manager{
+		instances: &fakeInstanceRepo{instances: []model.Instance{instance}},
+		log:       slog.Default(),
+		sessions:  make(map[uuid.UUID]*instanceSession),
+		sink:      sink,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := manager.RestoreAll(ctx); err != nil {
+		t.Fatalf("RestoreAll: %v", err)
+	}
+
+	event := sink.last(t)
+	if event.status != session.StatusError {
+		t.Errorf("cancelled restore event status = %q, want %q", event.status, session.StatusError)
+	}
+	if !strings.Contains(event.reason, "restore cancelled") {
+		t.Errorf("cancelled restore reason = %q, want it to mention the cancellation", event.reason)
+	}
+}
+
 // newTestManager returns a Manager backed by a fresh, uniquely named schema of
 // the WZAP_TEST_DATABASE_URL database, so integration tests never touch the
 // shared public schema. The test is skipped when the variable is unset.

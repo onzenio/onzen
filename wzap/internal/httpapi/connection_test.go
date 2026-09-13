@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"testing"
 	"time"
@@ -203,6 +204,7 @@ func TestInstancesConnectionRejectsMalformedID(t *testing.T) {
 		{name: "connect", method: http.MethodPost, path: "/api/v1/instances/not-a-uuid/connect"},
 		{name: "qr", method: http.MethodGet, path: "/api/v1/instances/not-a-uuid/qr"},
 		{name: "status", method: http.MethodGet, path: "/api/v1/instances/not-a-uuid/status"},
+		{name: "disconnect", method: http.MethodPost, path: "/api/v1/instances/not-a-uuid/disconnect"},
 	}
 
 	for _, tt := range tests {
@@ -217,10 +219,62 @@ func TestInstancesConnectionRejectsMalformedID(t *testing.T) {
 			if code := errorCode(t, rec.Body.Bytes()); code != "not_found" {
 				t.Errorf("error code = %q, want %q", code, "not_found")
 			}
-			if len(svc.connectIDs) != 0 || len(svc.qrIDs) != 0 || len(svc.getIDs) != 0 {
-				t.Errorf("service called with a malformed id: connect=%v qr=%v get=%v",
-					svc.connectIDs, svc.qrIDs, svc.getIDs)
+			if len(svc.connectIDs) != 0 || len(svc.qrIDs) != 0 || len(svc.getIDs) != 0 || len(svc.disconnectIDs) != 0 {
+				t.Errorf("service called with a malformed id: connect=%v qr=%v get=%v disconnect=%v",
+					svc.connectIDs, svc.qrIDs, svc.getIDs, svc.disconnectIDs)
 			}
 		})
+	}
+}
+
+func TestInstancesDisconnect(t *testing.T) {
+	id := uuid.New()
+	svc := &fakeInstanceService{disconnectFn: func(_ context.Context, gotID uuid.UUID) error {
+		if gotID != id {
+			t.Errorf("Disconnect id = %s, want %s", gotID, id)
+		}
+		return nil
+	}}
+
+	rec := serveJSON(t, instancesServer(t, svc), http.MethodPost, "/api/v1/instances/"+id.String()+"/disconnect", "")
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNoContent)
+	}
+	if body := rec.Body.String(); body != "" {
+		t.Errorf("body = %q, want empty", body)
+	}
+	if len(svc.disconnectIDs) != 1 || svc.disconnectIDs[0] != id {
+		t.Errorf("Disconnect calls = %v, want [%s]", svc.disconnectIDs, id)
+	}
+}
+
+func TestInstancesDisconnectNotFound(t *testing.T) {
+	svc := &fakeInstanceService{disconnectFn: func(context.Context, uuid.UUID) error {
+		return instance.ErrNotFound
+	}}
+
+	rec := serveJSON(t, instancesServer(t, svc), http.MethodPost, "/api/v1/instances/"+uuid.NewString()+"/disconnect", "")
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+	if code := errorCode(t, rec.Body.Bytes()); code != "not_found" {
+		t.Errorf("error code = %q, want %q", code, "not_found")
+	}
+}
+
+func TestInstancesDisconnectFailure(t *testing.T) {
+	svc := &fakeInstanceService{disconnectFn: func(context.Context, uuid.UUID) error {
+		return errors.New("session still connected")
+	}}
+
+	rec := serveJSON(t, instancesServer(t, svc), http.MethodPost, "/api/v1/instances/"+uuid.NewString()+"/disconnect", "")
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+	if code := errorCode(t, rec.Body.Bytes()); code != "internal_error" {
+		t.Errorf("error code = %q, want %q", code, "internal_error")
 	}
 }

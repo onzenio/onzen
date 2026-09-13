@@ -31,6 +31,7 @@ const (
 	healthcheckTimeout  = 5 * time.Second
 	natsConnectTimeout  = 5 * time.Second
 	streamEnsureTimeout = 5 * time.Second
+	restoreTimeout      = 30 * time.Second
 )
 
 func main() {
@@ -128,6 +129,17 @@ func serve() error {
 	defer func() { _ = sessions.Close() }()
 
 	service := instance.NewService(instances, sessions, nil)
+
+	// Restore the persisted sessions before serving. Per-instance failures are
+	// reflected in instances.status by the manager; only an aborted restore is
+	// reported here, and serving proceeds either way.
+	restoreCtx, cancelRestore := context.WithTimeout(ctx, restoreTimeout)
+	restoreErr := service.Restore(restoreCtx)
+	cancelRestore()
+	if restoreErr != nil {
+		log.Warn("restore sessions not completed", "error", restoreErr)
+	}
+
 	srv := httpapi.New(cfg, log, httpapi.Deps{ReadyChecker: checker, Instances: service})
 
 	relayCtx, stopRelay := context.WithCancel(ctx)

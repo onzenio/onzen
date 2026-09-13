@@ -136,6 +136,24 @@ func (r *InstanceRepository) Update(ctx context.Context, instance model.Instance
 	return updated, nil
 }
 
+// SetConnection updates the connection columns of an instance and clears the
+// stored JID when whatsappJID is empty. It leaves the other columns untouched.
+func (r *InstanceRepository) SetConnection(ctx context.Context, id uuid.UUID, status, whatsappJID string) error {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE instances
+		SET status = $2, whatsapp_jid = NULLIF($3, ''), updated_at = now()
+		WHERE id = $1`,
+		id, status, whatsappJID,
+	)
+	if err != nil {
+		return fmt.Errorf("set instance connection: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("set instance connection: %w", storage.ErrNotFound)
+	}
+	return nil
+}
+
 // Delete removes the instance and its dependent rows, or storage.ErrNotFound.
 func (r *InstanceRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	tag, err := r.pool.Exec(ctx, `DELETE FROM instances WHERE id = $1`, id)

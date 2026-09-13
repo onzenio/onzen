@@ -20,22 +20,24 @@ import (
 // configure each outcome and the recorded fields expose the calls the handlers
 // made.
 type fakeInstanceService struct {
-	createFn  func(ctx context.Context, input instance.CreateInput) (*model.Instance, error)
-	getFn     func(ctx context.Context, id uuid.UUID) (*model.Instance, error)
-	listFn    func(ctx context.Context, limit int, cursor string) ([]model.Instance, string, error)
-	updateFn  func(ctx context.Context, id uuid.UUID, input instance.UpdateInput) (*model.Instance, error)
-	deleteFn  func(ctx context.Context, id uuid.UUID) error
-	connectFn func(ctx context.Context, id uuid.UUID) (instance.ConnectResult, error)
-	qrFn      func(ctx context.Context, id uuid.UUID) (instance.ConnectResult, error)
+	createFn     func(ctx context.Context, input instance.CreateInput) (*model.Instance, error)
+	getFn        func(ctx context.Context, id uuid.UUID) (*model.Instance, error)
+	listFn       func(ctx context.Context, limit int, cursor string) ([]model.Instance, string, error)
+	updateFn     func(ctx context.Context, id uuid.UUID, input instance.UpdateInput) (*model.Instance, error)
+	deleteFn     func(ctx context.Context, id uuid.UUID) error
+	disconnectFn func(ctx context.Context, id uuid.UUID) error
+	connectFn    func(ctx context.Context, id uuid.UUID) (instance.ConnectResult, error)
+	qrFn         func(ctx context.Context, id uuid.UUID) (instance.ConnectResult, error)
 
-	createInputs []instance.CreateInput
-	updateInputs []instance.UpdateInput
-	getIDs       []uuid.UUID
-	deleteIDs    []uuid.UUID
-	connectIDs   []uuid.UUID
-	qrIDs        []uuid.UUID
-	listLimit    int
-	listCursor   string
+	createInputs  []instance.CreateInput
+	updateInputs  []instance.UpdateInput
+	getIDs        []uuid.UUID
+	deleteIDs     []uuid.UUID
+	disconnectIDs []uuid.UUID
+	connectIDs    []uuid.UUID
+	qrIDs         []uuid.UUID
+	listLimit     int
+	listCursor    string
 }
 
 // Create records the input and returns the configured instance, defaulting to a
@@ -83,6 +85,15 @@ func (f *fakeInstanceService) Delete(ctx context.Context, id uuid.UUID) error {
 	f.deleteIDs = append(f.deleteIDs, id)
 	if f.deleteFn != nil {
 		return f.deleteFn(ctx, id)
+	}
+	return nil
+}
+
+// Disconnect records the id and returns the configured error.
+func (f *fakeInstanceService) Disconnect(ctx context.Context, id uuid.UUID) error {
+	f.disconnectIDs = append(f.disconnectIDs, id)
+	if f.disconnectFn != nil {
+		return f.disconnectFn(ctx, id)
 	}
 	return nil
 }

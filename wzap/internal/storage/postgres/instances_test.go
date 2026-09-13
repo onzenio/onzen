@@ -364,6 +364,59 @@ func TestInstanceRepositoryUpdateNotFound(t *testing.T) {
 	}
 }
 
+func TestInstanceRepositorySetConnection(t *testing.T) {
+	ctx := context.Background()
+	pool := newTestPool(t)
+	repo := NewInstanceRepository(pool)
+
+	instance := createTestInstance(t, repo, "original", "original-ref")
+	connectedAt := time.Now().Add(-time.Minute).UTC()
+	instance.Status = "connected"
+	instance.WhatsAppJID = "5511999999999@s.whatsapp.net"
+	instance.LastError = "previous failure"
+	instance.LastConnectedAt = &connectedAt
+	if _, err := repo.Update(ctx, *instance); err != nil {
+		t.Fatalf("Update seed: %v", err)
+	}
+
+	if err := repo.SetConnection(ctx, instance.ID, "disconnected", ""); err != nil {
+		t.Fatalf("SetConnection: %v", err)
+	}
+
+	got, err := repo.Get(ctx, instance.ID)
+	if err != nil {
+		t.Fatalf("Get after SetConnection: %v", err)
+	}
+	if got.Status != "disconnected" {
+		t.Errorf("status = %q, want disconnected", got.Status)
+	}
+	if got.WhatsAppJID != "" {
+		t.Errorf("whatsapp_jid = %q, want empty", got.WhatsAppJID)
+	}
+	if got.Name != "original" || got.ExternalRef != "original-ref" {
+		t.Errorf("SetConnection touched identity fields: %+v", got)
+	}
+	if got.LastError != "previous failure" {
+		t.Errorf("last_error = %q, want the stored previous failure", got.LastError)
+	}
+	requireTimePtrNear(t, "SetConnection: LastConnectedAt", got.LastConnectedAt, connectedAt)
+
+	if err := repo.SetConnection(ctx, instance.ID, "connected", "5511888888888@s.whatsapp.net"); err != nil {
+		t.Fatalf("SetConnection(connected): %v", err)
+	}
+	got, err = repo.Get(ctx, instance.ID)
+	if err != nil {
+		t.Fatalf("Get after SetConnection(connected): %v", err)
+	}
+	if got.Status != "connected" || got.WhatsAppJID != "5511888888888@s.whatsapp.net" {
+		t.Errorf("connected state = %+v, want the new status and JID", got)
+	}
+
+	if err := repo.SetConnection(ctx, uuid.New(), "disconnected", ""); !errors.Is(err, storage.ErrNotFound) {
+		t.Errorf("SetConnection(unknown) error = %v, want ErrNotFound", err)
+	}
+}
+
 func TestInstanceRepositoryDelete(t *testing.T) {
 	ctx := context.Background()
 	pool := newTestPool(t)

@@ -36,6 +36,11 @@ type InstanceRepository interface {
 	GetByExternalRef(ctx context.Context, externalRef string) (*model.Instance, error)
 	List(ctx context.Context, limit int, cursor string) ([]model.Instance, string, error)
 	Update(ctx context.Context, instance model.Instance) (*model.Instance, error)
+	// SetConnection updates the status and whatsapp_jid of an instance in
+	// place, clearing the JID when whatsappJID is empty. Unlike Update it never
+	// touches the other columns, so a concurrent writer cannot be overwritten
+	// with stale values.
+	SetConnection(ctx context.Context, id uuid.UUID, status, whatsappJID string) error
 	Delete(ctx context.Context, id uuid.UUID) error
 }
 

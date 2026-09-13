@@ -173,14 +173,20 @@ func (m *Manager) RestoreAll(ctx context.Context) error {
 		wg.Add(1)
 		go func(instance model.Instance) {
 			defer wg.Done()
+			if err := ctx.Err(); err != nil {
+				m.restoreAborted(instance, err)
+				return
+			}
 			select {
 			case sem <- struct{}{}:
 			case <-ctx.Done():
+				m.restoreAborted(instance, ctx.Err())
 				return
 			}
 			defer func() { <-sem }()
 
 			if err := sleepCtx(ctx, time.Duration(rand.Int64N(int64(restoreJitter)))); err != nil {
+				m.restoreAborted(instance, err)
 				return
 			}
 			if err := m.restore(ctx, instance); err != nil {
@@ -191,6 +197,14 @@ func (m *Manager) RestoreAll(ctx context.Context) error {
 	}
 	wg.Wait()
 	return nil
+}
+
+// restoreAborted reports a restore that the context ended before it could run,
+// so the instance status reflects that it was not restored.
+func (m *Manager) restoreAborted(instance model.Instance, err error) {
+	reason := "restore cancelled: " + err.Error()
+	m.log.Warn("restore session cancelled", "instance_id", instance.ID, "jid", instance.WhatsAppJID, "error", err)
+	m.emitConnection(instance.ID, session.StatusError, instance.WhatsAppJID, reason)
 }
 
 // restore attaches the persisted device of instance and brings it online.
@@ -307,14 +321,25 @@ type instanceSession struct {
 	sink       session.EventSink
 	log        *slog.Logger
 
-	mu          sync.RWMutex
-	status      session.Status
-	jid         string
-	qrCode      string
-	qrExpiresAt time.Time
-	firstQR     chan qrResult
-	qrCancel    context.CancelFunc
-	lastReason  string
+	// sleep and backoff drive the auto-reconnect; tests replace them to assert
+	// the retry transitions without real waits.
+	sleep   sleepFunc
+	backoff reconnectPolicy
+	// reconnectFn brings the session online during an auto-reconnect. It
+	// defaults to connectExisting and is replaced in the transition tests.
+	reconnectFn func(ctx context.Context) error
+
+	mu           sync.RWMutex
+	status       session.Status
+	jid          string
+	paired       bool
+	terminal     bool
+	qrCode       string
+	qrExpiresAt  time.Time
+	firstQR      chan qrResult
+	qrCancel     context.CancelFunc
+	lastReason   string
+	reconnectRun *reconnectRun
 }
 
 var _ session.Session = (*instanceSession)(nil)
@@ -336,13 +361,29 @@ func newSession(instanceID uuid.UUID, device *store.Device, log *slog.Logger, si
 	if log == nil {
 		log = slog.Default()
 	}
-	sess := &instanceSession{instanceID: instanceID, sink: sink, log: log, status: session.StatusDisconnected}
+	sess := &instanceSession{
+		instanceID: instanceID,
+		sink:       sink,
+		log:        log,
+		status:     session.StatusDisconnected,
+		sleep:      sleepCtx,
+		backoff: reconnectPolicy{
+			base:   reconnectBaseDelay,
+			max:    reconnectMaxDelay,
+			jitter: defaultJitter,
+		},
+	}
 	client := whatsmeow.NewClient(device, newWALogger(log))
+	// wzap drives its own exponential backoff; the library reconnect would
+	// otherwise race it with a linear, uncapped schedule.
+	client.EnableAutoReconnect = false
 	if device.ID != nil && !device.ID.IsEmpty() {
 		sess.jid = device.ID.String()
+		sess.paired = true
 	}
 	client.AddEventHandler(sess.dispatch)
 	sess.client = client
+	sess.reconnectFn = sess.connectExisting
 	return sess, nil
 }
 
@@ -360,19 +401,28 @@ func (s *instanceSession) JID() string {
 	return s.jid
 }
 
-// setStatus updates the lifecycle state and reports it to the sink only when
-// it actually changed, so a pairing success followed by a reconnect does not
-// emit duplicate connection events.
+// setStatus updates the lifecycle state, reports it to the sink when it
+// changed and applies the reconnect policy of the transition. A paired JID
+// marks the session as reconnectable, so a connected event after a pairing
+// turns later drops into retries. Terminal states (error and every
+// disconnected transition carrying a reason) stick: the socket close that
+// follows a restriction or a logout must not turn it into a retry.
 func (s *instanceSession) setStatus(status session.Status, jid, reason string) {
 	s.mu.Lock()
+	if status == session.StatusDisconnected && reason == "" && s.terminal {
+		s.mu.Unlock()
+		return
+	}
 	if s.status == status && s.lastReason == reason {
 		s.mu.Unlock()
 		return
 	}
 	s.status = status
 	s.lastReason = reason
+	s.terminal = status == session.StatusError || (status == session.StatusDisconnected && reason != "")
 	if jid != "" {
 		s.jid = jid
+		s.paired = true
 	}
 	currentJID := s.jid
 	s.mu.Unlock()
@@ -380,6 +430,7 @@ func (s *instanceSession) setStatus(status session.Status, jid, reason string) {
 	if s.sink != nil {
 		s.sink.OnConnection(context.Background(), s.instanceID, status, currentJID, reason)
 	}
+	s.applyConnectionPolicy(status, reason)
 }
 
 // Send delivers an outbound message through the whatsmeow client.
@@ -460,10 +511,18 @@ func (s *instanceSession) SendPresence(ctx context.Context, chatJID, state strin
 	return s.client.SendPresence(ctx, target.user)
 }
 
-// Disconnect closes the connection without deleting the credentials.
+// Disconnect closes the connection without deleting the credentials, stops any
+// pending auto-reconnect and clears the paired identity of the session.
 func (s *instanceSession) Disconnect(context.Context) error {
 	s.cancelQR()
+	s.cancelReconnect()
 	s.client.Disconnect()
+
+	s.mu.Lock()
+	s.jid = ""
+	s.paired = false
+	s.mu.Unlock()
+
 	s.setStatus(session.StatusDisconnected, "", "disconnected by request")
 	return nil
 }
@@ -471,19 +530,27 @@ func (s *instanceSession) Disconnect(context.Context) error {
 // remove disconnects the client and deletes its stored credentials.
 func (s *instanceSession) remove(ctx context.Context) error {
 	s.cancelQR()
+	s.cancelReconnect()
 	s.client.Disconnect()
 	if s.client.Store.ID != nil {
 		if err := s.client.Store.Delete(ctx); err != nil {
 			return fmt.Errorf("delete device: %w", err)
 		}
 	}
-	s.setStatus(session.StatusDisconnected, "", "session removed")
+	// A session already disconnected through the API emitted its own event;
+	// only report the removal when it actually changed the state.
+	if s.Status() != session.StatusDisconnected {
+		s.setStatus(session.StatusDisconnected, "", "session removed")
+	}
 	return nil
 }
 
 // connectExisting brings an already paired device online.
 func (s *instanceSession) connectExisting(ctx context.Context) error {
 	if err := s.client.ConnectContext(ctx); err != nil {
+		if errors.Is(err, whatsmeow.ErrAlreadyConnected) {
+			return nil
+		}
 		return classifySessionError(err)
 	}
 	return nil

@@ -82,6 +82,23 @@ func handleInstanceStatus(instances InstanceService) http.HandlerFunc {
 	}
 }
 
+// handleDisconnectInstance ends the session of an instance, clearing its
+// paired identity and connection state, and answers 204.
+func handleDisconnectInstance(instances InstanceService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, ok := instanceID(w, r)
+		if !ok {
+			return
+		}
+
+		if err := instances.Disconnect(r.Context(), id); err != nil {
+			writeInstanceError(w, r, err)
+			return
+		}
+		JSON(w, http.StatusNoContent, nil)
+	}
+}
+
 // newConnectResponse maps a pairing result to its JSON representation.
 func newConnectResponse(result instance.ConnectResult) connectResponse {
 	return connectResponse{

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -26,21 +27,30 @@ var (
 type fakeRepo struct {
 	instances map[uuid.UUID]model.Instance
 
-	createErr error
-	updateErr error
-	deleteErr error
-	listErr   error
+	createErr        error
+	updateErr        error
+	setConnectionErr error
+	deleteErr        error
+	listErr          error
 
 	listResult []model.Instance
 	nextCursor string
 	listLimit  int
 	listCursor string
 
-	createCalls []model.Instance
-	updateCalls []model.Instance
-	deleteCalls []uuid.UUID
+	createCalls        []model.Instance
+	updateCalls        []model.Instance
+	setConnectionCalls []setConnectionCall
+	deleteCalls        []uuid.UUID
 
 	order *[]string
+}
+
+// setConnectionCall is one recorded SetConnection invocation.
+type setConnectionCall struct {
+	id     uuid.UUID
+	status string
+	jid    string
 }
 
 func newFakeRepo(instances ...model.Instance) *fakeRepo {
@@ -104,6 +114,23 @@ func (r *fakeRepo) Update(_ context.Context, instance model.Instance) (*model.In
 	r.instances[instance.ID] = instance
 	stored := instance
 	return &stored, nil
+}
+
+// SetConnection applies the partial update, or returns the forced error when
+// set.
+func (r *fakeRepo) SetConnection(_ context.Context, id uuid.UUID, status, jid string) error {
+	r.setConnectionCalls = append(r.setConnectionCalls, setConnectionCall{id: id, status: status, jid: jid})
+	if r.setConnectionErr != nil {
+		return r.setConnectionErr
+	}
+	instance, ok := r.instances[id]
+	if !ok {
+		return fmt.Errorf("set instance connection: %w", storage.ErrNotFound)
+	}
+	instance.Status = status
+	instance.WhatsAppJID = jid
+	r.instances[id] = instance
+	return nil
 }
 
 // Delete removes instance, or returns storage.ErrNotFound.
@@ -442,6 +469,12 @@ func TestServiceConnectStartsPairing(t *testing.T) {
 	if stored.Status != string(session.StatusPairing) {
 		t.Errorf("stored status = %q, want %q", stored.Status, session.StatusPairing)
 	}
+	if len(repo.setConnectionCalls) != 1 || repo.setConnectionCalls[0].status != string(session.StatusPairing) {
+		t.Errorf("SetConnection calls = %+v, want one pairing update", repo.setConnectionCalls)
+	}
+	if len(repo.updateCalls) != 0 {
+		t.Errorf("repo Update calls = %+v, want none (partial update preferred)", repo.updateCalls)
+	}
 	calls := sessions.CreateCalls()
 	if len(calls) != 1 || calls[0].ID != id {
 		t.Errorf("session Create calls = %+v, want the instance %s", calls, id)
@@ -625,5 +658,171 @@ func TestServiceQRNotFound(t *testing.T) {
 	_, err := svc.QR(context.Background(), uuid.New())
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("QR error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestServiceRestoreCallsRestoreAll(t *testing.T) {
+	sessions := sessiontest.New(nil)
+	svc := NewService(newFakeRepo(), sessions, &fakeMedia{})
+
+	if err := svc.Restore(context.Background()); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if got := sessions.RestoreCalls(); got != 1 {
+		t.Errorf("RestoreAll calls = %d, want 1", got)
+	}
+}
+
+func TestServiceRestorePropagatesFailure(t *testing.T) {
+	sessions := sessiontest.New(nil)
+	sessions.RestoreAllErr = errors.New("listing instances failed")
+	svc := NewService(newFakeRepo(), sessions, &fakeMedia{})
+
+	err := svc.Restore(context.Background())
+	if err == nil {
+		t.Fatal("Restore error = nil, want the restore failure")
+	}
+	if !strings.Contains(err.Error(), "listing instances failed") {
+		t.Errorf("Restore error = %v, want it to carry the cause", err)
+	}
+}
+
+func TestServiceDisconnectClearsIdentity(t *testing.T) {
+	id := uuid.New()
+	repo := newFakeRepo(model.Instance{
+		ID: id, Name: "loja", Status: string(session.StatusConnected),
+		WhatsAppJID: "5511999999999@s.whatsapp.net",
+	})
+	sessions := sessiontest.New(nil)
+	sess := sessiontest.NewSession(id, nil)
+	sess.SetStatus(session.StatusConnected)
+	sess.SetJID("5511999999999@s.whatsapp.net")
+	sessions.Put(id, sess)
+	svc := NewService(repo, sessions, &fakeMedia{})
+
+	if err := svc.Disconnect(context.Background(), id); err != nil {
+		t.Fatalf("Disconnect: %v", err)
+	}
+
+	if got := sess.DisconnectCalls(); got != 1 {
+		t.Errorf("session Disconnect calls = %d, want 1", got)
+	}
+	if removed := sessions.RemoveCalls(); len(removed) != 1 || removed[0] != id {
+		t.Errorf("session Remove calls = %v, want [%s] (credentials deleted)", removed, id)
+	}
+	stored := repo.instances[id]
+	if stored.Status != string(session.StatusDisconnected) {
+		t.Errorf("stored status = %q, want %q", stored.Status, session.StatusDisconnected)
+	}
+	if stored.WhatsAppJID != "" {
+		t.Errorf("stored whatsapp_jid = %q, want empty", stored.WhatsAppJID)
+	}
+	if len(repo.setConnectionCalls) != 1 {
+		t.Fatalf("SetConnection calls = %+v, want one", repo.setConnectionCalls)
+	}
+	call := repo.setConnectionCalls[0]
+	if call.id != id || call.status != string(session.StatusDisconnected) || call.jid != "" {
+		t.Errorf("SetConnection call = %+v, want disconnected with no JID", call)
+	}
+}
+
+func TestServiceDisconnectNotFound(t *testing.T) {
+	repo := newFakeRepo()
+	sessions := sessiontest.New(nil)
+	svc := NewService(repo, sessions, &fakeMedia{})
+
+	err := svc.Disconnect(context.Background(), uuid.New())
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Disconnect error = %v, want ErrNotFound", err)
+	}
+	if len(sessions.CreateCalls()) != 0 || len(repo.setConnectionCalls) != 0 {
+		t.Errorf("Disconnect on missing instance touched dependencies: create=%d set=%d",
+			len(sessions.CreateCalls()), len(repo.setConnectionCalls))
+	}
+}
+
+func TestServiceDisconnectStopsOnStatusUpdateFailure(t *testing.T) {
+	id := uuid.New()
+	repo := newFakeRepo(model.Instance{
+		ID: id, Status: string(session.StatusConnected),
+		WhatsAppJID: "5511999999999@s.whatsapp.net",
+	})
+	repo.setConnectionErr = errors.New("database down")
+	sessions := sessiontest.New(nil)
+	sess := sessiontest.NewSession(id, nil)
+	sessions.Put(id, sess)
+	svc := NewService(repo, sessions, &fakeMedia{})
+
+	err := svc.Disconnect(context.Background(), id)
+	if err == nil {
+		t.Fatal("Disconnect error = nil, want the status update failure")
+	}
+	if stored := repo.instances[id]; stored.Status != string(session.StatusConnected) {
+		t.Errorf("stored status = %q, want the unchanged %q", stored.Status, session.StatusConnected)
+	}
+	if removed := sessions.RemoveCalls(); len(removed) != 0 {
+		t.Errorf("session Remove calls = %v, want none before the row is cleared", removed)
+	}
+}
+
+func TestServiceDisconnectPropagatesCredentialRemovalFailure(t *testing.T) {
+	id := uuid.New()
+	repo := newFakeRepo(model.Instance{
+		ID: id, Status: string(session.StatusConnected),
+		WhatsAppJID: "5511999999999@s.whatsapp.net",
+	})
+	sessions := sessiontest.New(nil)
+	sess := sessiontest.NewSession(id, nil)
+	sessions.Put(id, sess)
+	sessions.RemoveErr = errors.New("delete credentials failed")
+	svc := NewService(repo, sessions, &fakeMedia{})
+
+	err := svc.Disconnect(context.Background(), id)
+	if err == nil {
+		t.Fatal("Disconnect error = nil, want the credential removal failure")
+	}
+	if stored := repo.instances[id]; stored.Status != string(session.StatusDisconnected) || stored.WhatsAppJID != "" {
+		t.Errorf("stored instance = %+v, want the cleared connection state", stored)
+	}
+}
+
+func TestServiceConnectStopsOnStatusUpdateFailure(t *testing.T) {
+	id := uuid.New()
+	repo := newFakeRepo(model.Instance{ID: id, Name: "loja", Status: "disconnected"})
+	repo.setConnectionErr = errors.New("database down")
+	svc := NewService(repo, sessiontest.New(nil), &fakeMedia{})
+
+	_, err := svc.Connect(context.Background(), id)
+	if err == nil {
+		t.Fatal("Connect error = nil, want the pairing update failure")
+	}
+}
+
+func TestServiceDisconnectStopsOnSessionFailure(t *testing.T) {
+	id := uuid.New()
+	repo := newFakeRepo(model.Instance{
+		ID: id, Status: string(session.StatusConnected),
+		WhatsAppJID: "5511999999999@s.whatsapp.net",
+	})
+	sessions := sessiontest.New(nil)
+	sess := sessiontest.NewSession(id, nil)
+	sess.SetStatus(session.StatusConnected)
+	sess.SetJID("5511999999999@s.whatsapp.net")
+	sess.DisconnectErr = errors.New("disconnect failed")
+	sessions.Put(id, sess)
+	svc := NewService(repo, sessions, &fakeMedia{})
+
+	err := svc.Disconnect(context.Background(), id)
+	if err == nil {
+		t.Fatal("Disconnect error = nil, want the session failure")
+	}
+	if len(repo.setConnectionCalls) != 0 {
+		t.Errorf("SetConnection calls = %+v, want none after the session failure", repo.setConnectionCalls)
+	}
+	if removed := sessions.RemoveCalls(); len(removed) != 0 {
+		t.Errorf("session Remove calls = %v, want none after the session failure", removed)
+	}
+	if stored := repo.instances[id]; stored.WhatsAppJID != "5511999999999@s.whatsapp.net" {
+		t.Errorf("stored whatsapp_jid = %q, want it unchanged", stored.WhatsAppJID)
 	}
 }
