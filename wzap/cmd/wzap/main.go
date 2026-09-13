@@ -129,7 +129,10 @@ func serve() error {
 	checker := httpapi.NewChecker(pool, httpapi.NamedProbe{Name: "nats", Run: publisher.Ready})
 
 	eventWriter := events.NewWriter(outbox)
-	runtime := app.NewRuntime(instances, eventWriter, message.NewReceipts(messageRepo, eventWriter), log)
+	runtime := app.NewRuntime(
+		instances, eventWriter, message.NewReceipts(messageRepo, eventWriter),
+		mediaStorage, cfg.PublicURL, cfg.MaxMediaBytes, log,
+	)
 	sessions, err := whatsmeow.NewManager(ctx, cfg.DatabaseURL, instances, log, runtime)
 	if err != nil {
 		return fmt.Errorf("session manager: %w", err)

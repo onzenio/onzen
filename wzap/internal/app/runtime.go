@@ -32,12 +32,16 @@ var _ ReceiptApplier = (*message.Receipts)(nil)
 
 // Runtime is the session.EventSink of the service. Connection changes are
 // projected into the instances row and enqueued as events in the outbox;
-// receipts are projected into the message rows; messages arrive in later tasks.
+// receipts are projected into the message rows; inbound messages have their
+// media stored and are enqueued as events.
 type Runtime struct {
-	instances storage.InstanceRepository
-	events    events.Writer
-	receipts  ReceiptApplier
-	log       *slog.Logger
+	instances     storage.InstanceRepository
+	events        events.Writer
+	receipts      ReceiptApplier
+	media         MediaStore
+	publicURL     string
+	maxMediaBytes int64
+	log           *slog.Logger
 
 	// mu serializes connection updates: the repository update is a
 	// read-modify-write of the whole row, so concurrent session events could
@@ -48,18 +52,43 @@ type Runtime struct {
 var _ session.EventSink = (*Runtime)(nil)
 
 // NewRuntime builds the runtime over the instance repository, the outbox
-// writer and the receipt projector. A nil logger falls back to the default
-// one; a nil receipt projector makes OnReceipt a no-op.
-func NewRuntime(instances storage.InstanceRepository, writer events.Writer, receipts ReceiptApplier, log *slog.Logger) *Runtime {
+// writer, the receipt projector and the inbound media store. publicURL is the
+// base of the media download URLs and maxMediaBytes the largest inbound media
+// stored before it is omitted. A nil logger falls back to the default one; a
+// nil receipt projector makes OnReceipt a no-op and a nil media store marks
+// every inbound media as omitted.
+func NewRuntime(
+	instances storage.InstanceRepository,
+	writer events.Writer,
+	receipts ReceiptApplier,
+	mediaStore MediaStore,
+	publicURL string,
+	maxMediaBytes int64,
+	log *slog.Logger,
+) *Runtime {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Runtime{instances: instances, events: writer, receipts: receipts, log: log}
+	return &Runtime{
+		instances:     instances,
+		events:        writer,
+		receipts:      receipts,
+		media:         mediaStore,
+		publicURL:     publicURL,
+		maxMediaBytes: maxMediaBytes,
+		log:           log,
+	}
 }
 
-// OnMessage handles an inbound message. Media download and the message event
-// arrive in Task 17.
-func (r *Runtime) OnMessage(context.Context, session.InboundMessage) {}
+// OnMessage stores the media of an inbound message when it has one and
+// enqueues its event. Failures are logged: the sink must not bring the session
+// down and a message without its media is still delivered to the consumers.
+func (r *Runtime) OnMessage(ctx context.Context, msg session.InboundMessage) {
+	if err := r.handleInbound(ctx, msg); err != nil {
+		r.log.ErrorContext(ctx, "handle inbound message",
+			"instance_id", msg.InstanceID, "message_id", msg.MessageID, "error", err)
+	}
+}
 
 // OnReceipt applies a delivery/read receipt to the stored messages and
 // enqueues its event. A failure is logged: the receipt is an observation and

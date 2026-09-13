@@ -117,7 +117,7 @@ func TestRuntimeOnConnectionUpdatesInstanceAndEnqueuesEvent(t *testing.T) {
 		WhatsAppJID: "5511@wa", LastError: "old failure",
 	})
 	writer := &fakeWriter{}
-	runtime := NewRuntime(repo, writer, nil, nil)
+	runtime := NewRuntime(repo, writer, nil, nil, "", 0, nil)
 
 	runtime.OnConnection(context.Background(), id, session.StatusConnected, "5511999999999@s.whatsapp.net", "")
 
@@ -168,7 +168,7 @@ func TestRuntimeOnConnectionFailureRecordsReason(t *testing.T) {
 		WhatsAppJID: "5511@wa", LastConnectedAt: &connectedAt,
 	})
 	writer := &fakeWriter{}
-	runtime := NewRuntime(repo, writer, nil, nil)
+	runtime := NewRuntime(repo, writer, nil, nil, "", 0, nil)
 
 	runtime.OnConnection(context.Background(), id, session.StatusError, "", "temporary ban")
 
@@ -194,7 +194,7 @@ func TestRuntimeOnConnectionFailureRecordsReason(t *testing.T) {
 
 func TestRuntimeOnConnectionUnknownInstanceSkipsEvent(t *testing.T) {
 	writer := &fakeWriter{}
-	runtime := NewRuntime(newRuntimeRepo(), writer, nil, nil)
+	runtime := NewRuntime(newRuntimeRepo(), writer, nil, nil, "", 0, nil)
 
 	runtime.OnConnection(context.Background(), uuid.New(), session.StatusConnected, "5511@wa", "")
 
@@ -208,7 +208,7 @@ func TestRuntimeOnConnectionUpdateFailureSkipsEvent(t *testing.T) {
 	repo := newRuntimeRepo(model.Instance{ID: id, Status: string(session.StatusDisconnected)})
 	repo.updateErr = errors.New("database down")
 	writer := &fakeWriter{}
-	runtime := NewRuntime(repo, writer, nil, nil)
+	runtime := NewRuntime(repo, writer, nil, nil, "", 0, nil)
 
 	runtime.OnConnection(context.Background(), id, session.StatusConnected, "5511@wa", "")
 
@@ -234,7 +234,7 @@ func (f *fakeReceiptApplier) Apply(_ context.Context, receipt session.Receipt) e
 func TestRuntimeOnReceiptAppliesReceipt(t *testing.T) {
 	id := uuid.New()
 	applier := &fakeReceiptApplier{}
-	runtime := NewRuntime(newRuntimeRepo(), &fakeWriter{}, applier, nil)
+	runtime := NewRuntime(newRuntimeRepo(), &fakeWriter{}, applier, nil, "", 0, nil)
 	receipt := session.Receipt{
 		InstanceID: id,
 		MessageIDs: []string{"wamid.1"},
@@ -254,7 +254,7 @@ func TestRuntimeOnReceiptAppliesReceipt(t *testing.T) {
 func TestRuntimeOnReceiptFailureIsLogged(t *testing.T) {
 	var logs bytes.Buffer
 	applier := &fakeReceiptApplier{err: errors.New("database down")}
-	runtime := NewRuntime(newRuntimeRepo(), &fakeWriter{}, applier, slog.New(slog.NewTextHandler(&logs, nil)))
+	runtime := NewRuntime(newRuntimeRepo(), &fakeWriter{}, applier, nil, "", 0, slog.New(slog.NewTextHandler(&logs, nil)))
 
 	runtime.OnReceipt(context.Background(), session.Receipt{InstanceID: uuid.New(), MessageIDs: []string{"wamid.1"}})
 
@@ -264,7 +264,7 @@ func TestRuntimeOnReceiptFailureIsLogged(t *testing.T) {
 }
 
 func TestRuntimeOnReceiptWithoutApplierIsNoOp(t *testing.T) {
-	runtime := NewRuntime(newRuntimeRepo(), &fakeWriter{}, nil, nil)
+	runtime := NewRuntime(newRuntimeRepo(), &fakeWriter{}, nil, nil, "", 0, nil)
 
 	runtime.OnReceipt(context.Background(), session.Receipt{InstanceID: uuid.New(), MessageIDs: []string{"wamid.1"}})
 }
