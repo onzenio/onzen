@@ -214,6 +214,8 @@ func writeInstanceError(w http.ResponseWriter, r *http.Request, err error) {
 		Error(w, r, http.StatusNotFound, "not_found", "instance not found")
 	case errors.Is(err, instance.ErrExternalRefTaken):
 		Error(w, r, http.StatusConflict, "conflict", "external ref already taken")
+	case errors.Is(err, instance.ErrInvalidCursor):
+		Error(w, r, http.StatusBadRequest, "invalid_request", "invalid cursor")
 	default:
 		Error(w, r, http.StatusInternalServerError, "internal_error", "internal server error")
 	}

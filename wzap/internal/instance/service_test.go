@@ -29,6 +29,7 @@ type fakeRepo struct {
 	createErr error
 	updateErr error
 	deleteErr error
+	listErr   error
 
 	listResult []model.Instance
 	nextCursor string
@@ -83,10 +84,14 @@ func (r *fakeRepo) GetByExternalRef(_ context.Context, externalRef string) (*mod
 	return nil, fmt.Errorf("get instance by external ref: %w", storage.ErrNotFound)
 }
 
-// List returns the configured page and records the pagination arguments.
+// List returns the configured page and records the pagination arguments, or the
+// forced error when set.
 func (r *fakeRepo) List(_ context.Context, limit int, cursor string) ([]model.Instance, string, error) {
 	r.listLimit = limit
 	r.listCursor = cursor
+	if r.listErr != nil {
+		return nil, "", r.listErr
+	}
 	return r.listResult, r.nextCursor, nil
 }
 
@@ -231,6 +236,17 @@ func TestServiceList(t *testing.T) {
 	}
 	if repo.listLimit != 25 || repo.listCursor != "cursor-0" {
 		t.Errorf("repo List(%d, %q), want (25, cursor-0)", repo.listLimit, repo.listCursor)
+	}
+}
+
+func TestServiceListInvalidCursor(t *testing.T) {
+	repo := newFakeRepo()
+	repo.listErr = fmt.Errorf("list instances: %w", storage.ErrInvalidCursor)
+	svc := NewService(repo, sessiontest.New(nil), &fakeMedia{})
+
+	_, _, err := svc.List(context.Background(), 10, "not-a-uuid")
+	if !errors.Is(err, ErrInvalidCursor) {
+		t.Fatalf("List error = %v, want ErrInvalidCursor", err)
 	}
 }
 

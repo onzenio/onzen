@@ -22,6 +22,8 @@ var (
 	ErrNotFound = errors.New("instance not found")
 	// ErrExternalRefTaken reports that an instance external_ref is already in use.
 	ErrExternalRefTaken = errors.New("external ref already taken")
+	// ErrInvalidCursor reports that a list cursor is not a valid identifier.
+	ErrInvalidCursor = errors.New("invalid cursor")
 )
 
 // MediaRemover deletes the media files and rows of an instance. It is declared
@@ -145,6 +147,8 @@ func mapError(op string, err error) error {
 		return fmt.Errorf("%s: %w", op, ErrNotFound)
 	case errors.Is(err, storage.ErrExternalRefTaken):
 		return fmt.Errorf("%s: %w", op, ErrExternalRefTaken)
+	case errors.Is(err, storage.ErrInvalidCursor):
+		return fmt.Errorf("%s: %w", op, ErrInvalidCursor)
 	default:
 		return fmt.Errorf("%s: %w", op, err)
 	}

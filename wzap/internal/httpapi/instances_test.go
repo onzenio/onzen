@@ -264,6 +264,21 @@ func TestInstancesListLimit(t *testing.T) {
 	}
 }
 
+func TestInstancesListRejectsInvalidCursor(t *testing.T) {
+	svc := &fakeInstanceService{listFn: func(context.Context, int, string) ([]model.Instance, string, error) {
+		return nil, "", instance.ErrInvalidCursor
+	}}
+
+	rec := serveJSON(t, instancesServer(t, svc), http.MethodGet, "/api/v1/instances?cursor=not-a-uuid", "")
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	if code := errorCode(t, rec.Body.Bytes()); code != "invalid_request" {
+		t.Errorf("error code = %q, want %q", code, "invalid_request")
+	}
+}
+
 func TestInstancesGet(t *testing.T) {
 	want := &model.Instance{ID: uuid.New(), Name: "loja", ExternalRef: "crm-1", Status: "connected"}
 	svc := &fakeInstanceService{getFn: func(_ context.Context, id uuid.UUID) (*model.Instance, error) {
