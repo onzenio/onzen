@@ -418,7 +418,7 @@ CREATE INDEX event_outbox_pending_idx ON event_outbox (created_at) WHERE publish
 
 - [ ] **Step 1: Build da imagem** — `docker build -t wzap:dev wzap` e `docker run --rm wzap:dev healthcheck` falha controladamente sem config? (esperado: erro de config; valida o binário).
 - [ ] **Step 2: Subir o serviço no compose** — `docker compose up -d wzap` e verificar `/readyz` em `127.0.0.1:8081`.
-- [ ] **Step 3: Banco no volume atual** — executar `docker compose exec postgres createdb -U onefisc onefisc_wzap` uma vez (registrar no README) e confirmar migrações aplicadas.
+- [ ] **Step 3: Banco no volume atual** — verificar com `docker compose exec postgres psql -U onefisc -tAc "SELECT datname FROM pg_database WHERE datname='onefisc_wzap'"`; se ausente, criar com `createdb` uma vez (registrar no README) e confirmar migrações aplicadas.
 - [ ] **Step 4: Workflow de CI** válido (`actionlint` ou revisão) e verde em execução local equivalente (`go test`, `golangci-lint`).
 - [ ] **Step 5: Commit** — `git commit -am "chore(wzap): add docker image, compose service and ci"`.
 
