@@ -48,6 +48,7 @@ class AccountApiTest extends TestCase
         Mail::assertSent(InvitationMail::class, fn (InvitationMail $mail) => $mail->hasTo('admin-novo@example.com'));
 
         $this->assertArrayNotHasKey('token_hash', $response->json('invitation'));
+        $this->assertArrayNotHasKey('token', $response->json('invitation'));
     }
 
     public function test_non_super_admin_cannot_list_or_create_accounts(): void

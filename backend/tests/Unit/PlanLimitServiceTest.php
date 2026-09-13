@@ -107,4 +107,15 @@ class PlanLimitServiceTest extends TestCase
         $this->assertNull($service->canAccessModule($account, 'clients'));
         $this->assertNotNull($service->canAccessModule($account, 'fiscal'));
     }
+
+    public function test_monthly_query_volume_is_deferred_not_enforced(): void
+    {
+        $service = new PlanLimitService;
+        $account = Account::factory()->create([
+            'plan_id' => Plan::factory()->create(['monthly_query_volume' => 0])->id,
+        ]);
+
+        $this->assertNull($service->canConsumeQuery($account));
+        $this->assertNull($service->canConsumeQuery($account, 1000));
+    }
 }

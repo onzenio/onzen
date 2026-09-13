@@ -43,7 +43,7 @@ class AccountController extends Controller
 
         return response()->json([
             'account' => $account->load('plan'),
-            'invitation' => $invitation,
+            'invitation' => $invitation->makeHidden('token'),
         ], 201);
     }
 }

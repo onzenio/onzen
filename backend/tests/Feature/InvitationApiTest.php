@@ -41,6 +41,7 @@ class InvitationApiTest extends TestCase
 
         $response->assertCreated()->assertJsonPath('email', 'novo@example.com');
         $this->assertArrayNotHasKey('token_hash', $response->json());
+        $this->assertArrayNotHasKey('token', $response->json());
         $this->assertDatabaseHas('invitations', ['email' => 'novo@example.com', 'account_id' => $account->id]);
         Mail::assertSent(InvitationMail::class, fn (InvitationMail $mail) => $mail->hasTo('novo@example.com'));
     }

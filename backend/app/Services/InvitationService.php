@@ -64,7 +64,11 @@ class InvitationService
 
         $invitation->setAttribute('token', $rawToken);
 
-        Mail::to($invitation->email)->send(new InvitationMail($invitation, $rawToken));
+        // Pós-commit: quando invite() roda dentro da transação do
+        // AccountProvisioningService, o envio imediato geraria e-mail órfão
+        // se o commit externo falhasse. afterCommit executa de imediato sem
+        // transação ativa e adia para o commit quando aninhado.
+        DB::afterCommit(fn () => Mail::to($invitation->email)->send(new InvitationMail($invitation, $rawToken)));
 
         return $invitation;
     }

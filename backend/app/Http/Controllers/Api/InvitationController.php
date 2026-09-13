@@ -38,7 +38,7 @@ class InvitationController extends Controller
 
         $invitation = $invitations->invite($account, $user, $data);
 
-        return response()->json($invitation, 201);
+        return response()->json($invitation->makeHidden('token'), 201);
     }
 
     public function accept(Request $request, string $token, InvitationService $invitations): JsonResponse

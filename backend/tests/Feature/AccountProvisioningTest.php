@@ -7,8 +7,10 @@ use App\Enums\UserRole;
 use App\Models\Account;
 use App\Models\Plan;
 use App\Services\AccountProvisioningService;
+use App\Services\InvitationService;
 use Database\Seeders\PlanSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
@@ -54,5 +56,37 @@ class AccountProvisioningTest extends TestCase
         $this->assertSame(2, Account::query()->count());
         $this->assertDatabaseMissing('accounts', ['name' => 'Escritório C']);
         $this->assertDatabaseMissing('invitations', ['email' => 'taken@example.com', 'accepted_at' => null]);
+    }
+
+    public function test_failed_transaction_after_invite_sends_no_mail_and_leaves_no_orphan_account(): void
+    {
+        Mail::fake();
+        $this->seed(PlanSeeder::class);
+        $provisioner = $this->createUser(attributes: ['role' => UserRole::SuperAdmin]);
+
+        try {
+            DB::transaction(function () use ($provisioner) {
+                $account = Account::query()->create([
+                    'name' => 'Escritório Órfão',
+                    'profile' => AccountProfile::B,
+                    'plan_id' => Plan::default()?->id,
+                ]);
+
+                app(InvitationService::class)->invite($account, $provisioner, [
+                    'name' => 'Órfã',
+                    'email' => 'orfa@example.com',
+                    'role' => 'admin',
+                ]);
+
+                throw new \RuntimeException('forced post-create failure');
+            });
+            $this->fail('Falha forçada pós-create deveria reverter a transação.');
+        } catch (\RuntimeException $e) {
+            $this->assertSame('forced post-create failure', $e->getMessage());
+        }
+
+        Mail::assertNothingSent();
+        $this->assertDatabaseMissing('accounts', ['name' => 'Escritório Órfão']);
+        $this->assertDatabaseMissing('invitations', ['email' => 'orfa@example.com']);
     }
 }

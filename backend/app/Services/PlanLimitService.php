@@ -58,6 +58,17 @@ class PlanLimitService
             : 'Módulo não liberado no plano vigente. Faça upgrade do plano.';
     }
 
+    /**
+     * Deferred (Fase D): monthly_query_volume existe no plano mas não há
+     * rastreamento de consumo nesta fase — nenhuma rota consome queries
+     * ainda. Método explícito retornando null (permitido) para documentar
+     * o deferral; enforcement fica para a fase de uso de módulos.
+     */
+    public function canConsumeQuery(Account $account, int $quantity = 1): ?string
+    {
+        return null;
+    }
+
     protected function usersOk(Account $account, int $extra): bool
     {
         if ($account->plan === null) {
