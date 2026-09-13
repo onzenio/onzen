@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\MonitoringHealthController;
 use App\Http\Controllers\Api\MonitoringPowerOfAttorneyController;
 use App\Http\Controllers\Api\MonitoringRunController;
 use App\Http\Controllers\Api\MonitoringSnapshotController;
+use App\Http\Controllers\Api\ParcelmentController;
 use App\Http\Controllers\Api\SerproAdminController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -77,6 +78,21 @@ Route::middleware('auth:sanctum')->group(function (): void {
 
     Route::get('/monitoring/clients/{client}/cnd', ClientCndController::class)
         ->name('monitoring.clients.cnd');
+
+    Route::get('/monitoring/parcelamentos', [ParcelmentController::class, 'index'])
+        ->name('monitoring.parcelments.index');
+
+    Route::get('/monitoring/parcelamentos/{parcelment}', [ParcelmentController::class, 'show'])
+        ->name('monitoring.parcelments.show');
+
+    Route::get('/monitoring/parcelamentos/{parcelment}/parcelas', [ParcelmentController::class, 'installments'])
+        ->name('monitoring.parcelments.installments');
+
+    Route::get('/monitoring/parcelas/{installment}/pagamentos', [ParcelmentController::class, 'payments'])
+        ->name('monitoring.parcelments.payments');
+
+    Route::get('/monitoring/parcelas/{installment}/guia/download', [ParcelmentController::class, 'downloadGuide'])
+        ->name('monitoring.parcelments.guide');
 
     Route::get('/monitoring/clients/{client}/powers-of-attorney', [MonitoringPowerOfAttorneyController::class, 'index'])
         ->name('monitoring.powers.index');

@@ -6,17 +6,23 @@ use App\Models\MonitoringAlert;
 use App\Models\MonitoringChange;
 use App\Models\MonitoringRun;
 use App\Models\MonitoringSnapshot;
+use App\Models\ParcelmentInstallment;
+use App\Models\ParcelmentOrder;
+use App\Models\ParcelmentPayment;
 
 /**
  * Payloads das leituras de monitoramento (Task 25).
  *
- * Uma única política de exposição para snapshots, mudanças, execuções e
- * alertas: metadados factuais, datas em ISO-8601 e nenhum payload bruto,
- * referência interna de armazenamento ou material sensível. O `data` de um
- * snapshot/mudança só aparece quando o resultado foi normalizado; chaves
- * internas (`*_storage_ref`, credenciais e conteúdo binário pdf/xml/base64)
- * são removidas recursivamente mesmo de resultados normalizados. O filtro é
- * somente-leitura: nunca altera o que está persistido.
+ * Uma única política de exposição para snapshots, mudanças, execuções,
+ * alertas e parcelamentos (Task 26): metadados factuais, datas em ISO-8601 e
+ * nenhum payload bruto, referência interna de armazenamento ou material
+ * sensível. O `data` de um snapshot/mudança só aparece quando o resultado foi
+ * normalizado; chaves internas (`*_storage_ref`, credenciais e conteúdo
+ * binário pdf/xml/base64) são removidas recursivamente mesmo de resultados
+ * normalizados. Nos parcelamentos o `metadata` cru nunca é exposto e as
+ * referências de guia/comprovante aparecem apenas como fatos
+ * (`guide_available`/`receipt_available`). O filtro é somente-leitura: nunca
+ * altera o que está persistido.
  */
 final class MonitoringReadPayload
 {
@@ -122,6 +128,143 @@ final class MonitoringReadPayload
             'acknowledged_by_user_id' => $alert->acknowledged_by_user_id,
             'acknowledged_at' => $alert->acknowledged_at?->toIso8601String(),
             'created_at' => $alert->created_at?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * Resumo normalizado de um pedido de parcelamento para listagem: os
+     * agregados factuais derivam das parcelas quando carregadas; o
+     * `metadata` bruto do provedor nunca aparece.
+     *
+     * @return array<string, mixed>
+     */
+    public static function parcelmentOrder(ParcelmentOrder $order): array
+    {
+        $installments = $order->relationLoaded('installments') ? $order->installments : null;
+
+        $paidInstallments = $installments === null
+            ? null
+            : $installments->whereNotNull('paid_at')->count();
+
+        $nextDue = $installments === null
+            ? null
+            : $installments->whereNull('paid_at')->sortBy('due_date')->first()?->due_date;
+
+        return [
+            'id' => $order->id,
+            'client_id' => $order->client_id,
+            'client' => self::clientSummary($order),
+            'modality' => $order->modality,
+            'external_id' => $order->external_id,
+            'status' => $order->status,
+            'installments_count' => $order->installments_count ?? $installments?->count(),
+            'paid_installments' => $paidInstallments,
+            'next_due_date' => $nextDue?->toDateString(),
+            'total_amount' => $order->total_amount,
+            'competence' => $order->competence?->toDateString(),
+            'provenance' => $order->provenance,
+            'operation_code' => $order->operation_code,
+            'created_at' => $order->created_at?->toIso8601String(),
+            'updated_at' => $order->updated_at?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * Detalhe normalizado do pedido com parcelas e pagamentos; as parcelas
+     * precisam vir carregadas com `payments` pelo controller.
+     *
+     * @return array<string, mixed>
+     */
+    public static function parcelmentOrderDetail(ParcelmentOrder $order): array
+    {
+        $payload = self::parcelmentOrder($order);
+
+        $payload['installments'] = $order->relationLoaded('installments')
+            ? $order->installments
+                ->map(fn (ParcelmentInstallment $installment): array => self::parcelmentInstallment($installment, true))
+                ->values()
+                ->all()
+            : [];
+
+        return $payload;
+    }
+
+    /**
+     * Parcela normalizada; `guide_available` é o único sinal da guia — a
+     * referência opaca do artefato fica interna.
+     *
+     * @return array<string, mixed>
+     */
+    public static function parcelmentInstallment(ParcelmentInstallment $installment, bool $withPayments = false): array
+    {
+        $payload = [
+            'id' => $installment->id,
+            'order_id' => $installment->order_id,
+            'client_id' => $installment->client_id,
+            'external_id' => $installment->external_id,
+            'number' => $installment->number,
+            'status' => $installment->status,
+            'amount' => $installment->amount,
+            'due_date' => $installment->due_date?->toDateString(),
+            'paid_at' => $installment->paid_at?->toDateString(),
+            'guide_available' => trim((string) $installment->guide_ref) !== '',
+            'provenance' => $installment->provenance,
+            'created_at' => $installment->created_at?->toIso8601String(),
+            'updated_at' => $installment->updated_at?->toIso8601String(),
+        ];
+
+        if ($withPayments) {
+            $payload['payments'] = $installment->relationLoaded('payments')
+                ? $installment->payments
+                    ->map(fn (ParcelmentPayment $payment): array => self::parcelmentPayment($payment))
+                    ->values()
+                    ->all()
+                : [];
+        }
+
+        return $payload;
+    }
+
+    /**
+     * Pagamento normalizado; `receipt_available` é o único sinal do
+     * comprovante — a referência fica interna.
+     *
+     * @return array<string, mixed>
+     */
+    public static function parcelmentPayment(ParcelmentPayment $payment): array
+    {
+        return [
+            'id' => $payment->id,
+            'installment_id' => $payment->installment_id,
+            'client_id' => $payment->client_id,
+            'external_id' => $payment->external_id,
+            'status' => $payment->status,
+            'amount' => $payment->amount,
+            'paid_at' => $payment->paid_at?->toDateString(),
+            'receipt_available' => trim((string) $payment->receipt_ref) !== '',
+            'provenance' => $payment->provenance,
+            'created_at' => $payment->created_at?->toIso8601String(),
+            'updated_at' => $payment->updated_at?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * Resumo factual do Client vinculado (ou null quando não carregado).
+     *
+     * @return array{id: int, razao_social: string, cnpj: string}|null
+     */
+    private static function clientSummary(ParcelmentOrder $order): ?array
+    {
+        $client = $order->relationLoaded('client') ? $order->client : null;
+
+        if ($client === null) {
+            return null;
+        }
+
+        return [
+            'id' => $client->id,
+            'razao_social' => $client->razao_social,
+            'cnpj' => $client->cnpj,
         ];
     }
 

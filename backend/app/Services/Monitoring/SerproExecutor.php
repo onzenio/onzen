@@ -72,6 +72,12 @@ use Throwable;
  * are enforced by this executor when each child executes, and a chain failure
  * rolls the completion back so novelty is never committed without children.
  *
+ * Task 26 adds the parcelment projection: a completed parcelment consult run
+ * hands off to {@see ParcelmentConsultProjector} in the same completion
+ * transaction, right after the `ResultProjector`, so orders/installments/
+ * payments are never committed separately from the snapshot. Retryable
+ * outcomes (429/5xx/timeout) never reach it.
+ *
  * Fail-closed: a call is only attempted when the effective gate is open, and
  * missing credentials, an inactive enrollment or a missing fixture end the
  * run with a factual code. Nothing sensitive is logged or persisted.
@@ -99,6 +105,7 @@ final class SerproExecutor
         private readonly SerproEvents $events,
         private readonly ProcurationGate $procuration,
         private readonly PgdasdConsultChain $chain,
+        private readonly ParcelmentConsultProjector $parcelments,
     ) {}
 
     /**
@@ -529,6 +536,19 @@ final class SerproExecutor
                     }
 
                     $this->projector->project($run, [
+                        'source' => $result['source'],
+                        'operation_code' => $result['operation_code'],
+                        'http_status' => $result['http_status'],
+                        'protocol' => $protocol,
+                        'eta' => $result['eta'],
+                        'body' => $result['body'],
+                    ]);
+
+                    // Task 26: parcelment consults also project normalized
+                    // orders/installments/payments in the same completion
+                    // transaction; any failure rolls the whole completion
+                    // back (never a snapshot without its parcelment state).
+                    $this->parcelments->project($run, [
                         'source' => $result['source'],
                         'operation_code' => $result['operation_code'],
                         'http_status' => $result['http_status'],
