@@ -63,7 +63,7 @@ final class MonthlyCycleCommandTest extends TestCase
         // The preview only considers the automatic portfolio; the manual
         // definition is out of scope even before eligibility.
         $this->artisan('monitoring:run-monthly-cycle')
-            ->expectsOutputToContain('{"dry_run":true,"queued":1,"blocked":0,"skipped":0}')
+            ->expectsOutputToContain('{"dry_run":true,"queued":1,"blocked":0,"skipped":0,"exhausted_accounts":[],"truncated":false}')
             ->assertSuccessful();
 
         $this->assertDatabaseCount('monitoring_runs', 0);
@@ -79,7 +79,7 @@ final class MonthlyCycleCommandTest extends TestCase
         $manual = $this->enrollment($account, $this->manualDefinition());
 
         $this->artisan('monitoring:run-monthly-cycle --confirm')
-            ->expectsOutputToContain('{"dry_run":false,"queued":1,"blocked":0,"skipped":0}')
+            ->expectsOutputToContain('{"dry_run":false,"queued":1,"blocked":0,"skipped":0,"exhausted_accounts":[],"truncated":false}')
             ->assertSuccessful();
 
         $this->assertDatabaseCount('monitoring_runs', 1);
@@ -126,9 +126,9 @@ final class MonthlyCycleCommandTest extends TestCase
         ]);
 
         // The paused association is out of the active portfolio entirely;
-        // the monitoring-off one is considered and skipped factually.
+        // the monitoring-off one is filtered in SQL and never considered.
         $this->artisan('monitoring:run-monthly-cycle --confirm')
-            ->expectsOutputToContain('{"dry_run":false,"queued":0,"blocked":0,"skipped":1}')
+            ->expectsOutputToContain('{"dry_run":false,"queued":0,"blocked":0,"skipped":0,"exhausted_accounts":[],"truncated":false}')
             ->assertSuccessful();
 
         $this->assertDatabaseMissing('monitoring_runs', ['enrollment_id' => $paused->id]);
@@ -137,22 +137,79 @@ final class MonthlyCycleCommandTest extends TestCase
         Queue::assertNothingPushed();
     }
 
-    public function test_confirm_stops_on_quota_exhaustion_without_failing(): void
+    public function test_quota_exhaustion_in_one_account_does_not_stop_the_cycle(): void
     {
         Queue::fake();
-        $account = $this->accountWithVolume(1);
+        $empty = $this->accountWithVolume(0);
+        $funded = $this->accountWithVolume(5);
         $definition = $this->automaticDefinition();
-        $this->enrollment($account, $definition);
-        $this->enrollment($account, $definition);
-        $this->enrollment($account, $definition);
+
+        $blocked = $this->enrollment($empty, $definition);
+        $queued = $this->enrollment($funded, $definition);
+        $alsoBlocked = $this->enrollment($empty, $definition);
+
+        $expected = (string) json_encode([
+            'dry_run' => false,
+            'queued' => 1,
+            'blocked' => 2,
+            'skipped' => 0,
+            'exhausted_accounts' => [$empty->id],
+            'truncated' => false,
+        ], JSON_THROW_ON_ERROR);
 
         $this->artisan('monitoring:run-monthly-cycle --confirm')
-            ->expectsOutputToContain('{"dry_run":false,"queued":1,"blocked":1,"skipped":1}')
+            ->expectsOutputToContain($expected)
             ->assertSuccessful();
+
+        // The exhausted Account is blocked and its remaining rows are not
+        // attempted; the funded Account keeps being processed normally.
+        $this->assertDatabaseHas('monitoring_runs', [
+            'enrollment_id' => $blocked->id,
+            'status' => MonitoringRunStatus::Blocked->value,
+            'error_code' => 'quota_exceeded',
+        ]);
+        $this->assertDatabaseHas('monitoring_runs', [
+            'enrollment_id' => $queued->id,
+            'status' => MonitoringRunStatus::Pending->value,
+        ]);
+        $this->assertDatabaseMissing('monitoring_runs', ['enrollment_id' => $alsoBlocked->id]);
 
         $this->assertDatabaseCount('monitoring_runs', 2);
         $this->assertDatabaseCount('query_quota_consumptions', 1);
         Queue::assertPushed(ExecuteSerproJob::class, 1);
+    }
+
+    public function test_limit_counts_only_eligible_rows_and_signals_truncation(): void
+    {
+        Queue::fake();
+        $account = $this->accountWithVolume(10);
+        $definition = $this->automaticDefinition();
+
+        $ineligible = $this->enrollment($account, $definition, ['client_monitoring_enabled' => false]);
+        $first = $this->enrollment($account, $definition);
+        $second = $this->enrollment($account, $definition);
+        $third = $this->enrollment($account, $definition);
+
+        // The Monitoring-Status-off row is filtered in SQL and must not
+        // consume the cap; three eligible rows with limit 2 truncate.
+        $this->artisan('monitoring:run-monthly-cycle --confirm --limit=2')
+            ->expectsOutputToContain('{"dry_run":false,"queued":2,"blocked":0,"skipped":0,"exhausted_accounts":[],"truncated":true}')
+            ->assertSuccessful();
+
+        $this->assertDatabaseHas('monitoring_runs', ['enrollment_id' => $first->id]);
+        $this->assertDatabaseHas('monitoring_runs', ['enrollment_id' => $second->id]);
+        $this->assertDatabaseMissing('monitoring_runs', ['enrollment_id' => $third->id]);
+        $this->assertDatabaseMissing('monitoring_runs', ['enrollment_id' => $ineligible->id]);
+        $this->assertDatabaseCount('monitoring_runs', 2);
+
+        $this->travel(61)->seconds();
+
+        // With room for every eligible row the run reports no truncation.
+        $this->artisan('monitoring:run-monthly-cycle --confirm --limit=5')
+            ->expectsOutputToContain('{"dry_run":false,"queued":3,"blocked":0,"skipped":0,"exhausted_accounts":[],"truncated":false}')
+            ->assertSuccessful();
+
+        $this->assertDatabaseCount('monitoring_runs', 5);
     }
 
     public function test_seeded_metadata_marks_the_three_legacy_definitions_as_automatic(): void

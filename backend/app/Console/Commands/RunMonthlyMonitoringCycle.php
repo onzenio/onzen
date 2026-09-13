@@ -8,6 +8,7 @@ use App\Models\MonitoringEnrollment;
 use App\Models\MonitoringRun;
 use App\Services\Monitoring\MonitoringScheduler;
 use Illuminate\Console\Command;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -18,14 +19,16 @@ use Illuminate\Validation\ValidationException;
  * dispara somente operações de consulta com origem `automatic`, reservando
  * quota por execução. Preview por padrão (`--confirm` para agendar de fato).
  *
- * Uma quota esgotada interrompe o lote de forma limpa: a associação da vez
- * entra como `blocked`, as restantes como `skipped`, e o comando termina com
- * sucesso — nunca 500.
+ * O comando é global: a quota é por Account, então uma Account esgotada
+ * entra como `blocked`, suas demais associações são puladas e a execução
+ * segue nas outras Accounts (ids esgotados saem em `exhausted_accounts`).
+ * O `--limit` corta apenas linhas já elegíveis e a saída sinaliza
+ * `truncated: true` quando o teto foi atingido com linhas restantes.
  */
 class RunMonthlyMonitoringCycle extends Command
 {
     protected $signature = 'monitoring:run-monthly-cycle
-        {--limit=500 : Número máximo de associações consideradas}
+        {--limit=500 : Número máximo de associações elegíveis consideradas}
         {--confirm : Agenda de fato; sem a flag apenas simula}';
 
     protected $description = 'Agenda o ciclo automático mensal (somente definições automáticas de consulta).';
@@ -43,25 +46,32 @@ class RunMonthlyMonitoringCycle extends Command
             ->all();
 
         $counts = ['queued' => 0, 'blocked' => 0, 'skipped' => 0];
-        $stop = false;
+        /** @var array<int, true> $exhaustedAccounts */
+        $exhaustedAccounts = [];
         $considered = 0;
+        $truncated = false;
 
+        // Eligibility that can live in SQL is pushed down so the cap counts
+        // only rows the cycle can actually consider: an active association of
+        // an active Client under an automatic production definition.
         $query = MonitoringEnrollment::query()
             ->with(['client', 'definition'])
             ->where('status', MonitoringEnrollment::STATUS_ACTIVE)
-            ->whereIn('definition_id', $definitionIds);
+            ->whereIn('definition_id', $definitionIds)
+            ->whereHas('client', function (Builder $client): void {
+                $client->where('monitoring_enabled', true);
+            });
+
+        $matched = (int) $query->count();
 
         foreach ($query->lazyById(100) as $enrollment) {
             if ($considered >= $limit) {
+                $truncated = $matched > $considered;
                 break;
             }
             $considered++;
 
-            if ($stop) {
-                $counts['skipped']++;
-
-                continue;
-            }
+            $accountId = (int) $enrollment->account_id;
 
             if (! $confirm) {
                 $scheduler->ineligibility($enrollment, MonitoringRun::TRIGGER_AUTOMATIC) === null
@@ -71,12 +81,20 @@ class RunMonthlyMonitoringCycle extends Command
                 continue;
             }
 
+            // Quota is per Account: an exhausted Account cannot reserve for
+            // its remaining enrollments, but every other Account still can.
+            if (isset($exhaustedAccounts[$accountId])) {
+                $counts['blocked']++;
+
+                continue;
+            }
+
             try {
                 $run = $scheduler->schedule($enrollment, MonitoringRun::TRIGGER_AUTOMATIC);
                 $run->wasRecentlyCreated ? $counts['queued']++ : $counts['skipped']++;
             } catch (ValidationException) {
                 $counts['blocked']++;
-                $stop = true;
+                $exhaustedAccounts[$accountId] = true;
             } catch (SerproBlockedException) {
                 $counts['skipped']++;
             }
@@ -87,6 +105,8 @@ class RunMonthlyMonitoringCycle extends Command
             'queued' => $counts['queued'],
             'blocked' => $counts['blocked'],
             'skipped' => $counts['skipped'],
+            'exhausted_accounts' => array_keys($exhaustedAccounts),
+            'truncated' => $truncated,
         ], JSON_THROW_ON_ERROR));
 
         return self::SUCCESS;
