@@ -130,6 +130,10 @@ services:
     frontend:
         <<: *frontend
         command: ["pnpm", "dev", "--host", "0.0.0.0", "--port", "3000"]
+        environment:
+            NUXT_TELEMETRY_DISABLED: "1"
+            BACKEND_URL: http://backend:8000
+            SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET is required but not set}
         ports:
             - "127.0.0.1:3000:3000"
         healthcheck:

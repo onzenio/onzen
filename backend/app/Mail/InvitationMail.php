@@ -28,11 +28,13 @@ class InvitationMail extends Mailable
     public function content(): Content
     {
         $acceptPath = "/api/invitations/{$this->rawToken}/accept";
+        $inviteeName = e($this->invitation->name);
+        $accountName = e($this->invitation->account->name);
 
         return new Content(
             htmlString: <<<HTML
-                <p>Olá {$this->invitation->name},</p>
-                <p>Você foi convidado a participar da conta {$this->invitation->account->name} no OneFisc.</p>
+                <p>Olá {$inviteeName},</p>
+                <p>Você foi convidado a participar da conta {$accountName} no OneFisc.</p>
                 <p>Use o token abaixo para aceitar o convite (válido por 7 dias):</p>
                 <p><code>{$this->rawToken}</code></p>
                 <p>Envie uma requisição POST para {$acceptPath} informando sua senha.</p>
