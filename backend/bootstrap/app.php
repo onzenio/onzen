@@ -14,7 +14,9 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        $middleware->api(append: [
+        // Before SubstituteBindings so route model binding honours the
+        // effective Account scope (cross-account bindings must 404).
+        $middleware->api(prepend: [
             ResolveAccount::class,
         ]);
     })

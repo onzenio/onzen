@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\MeController;
 use App\Http\Controllers\Api\MonitoringArtifactDownloadController;
+use App\Http\Controllers\Api\MonitoringEnrollmentController;
 use App\Http\Controllers\Api\MonitoringHealthController;
 use App\Http\Controllers\Api\SerproAdminController;
 use Illuminate\Http\Request;
@@ -18,6 +19,21 @@ Route::middleware('auth:sanctum')
     ->name('monitoring.health');
 
 Route::middleware('auth:sanctum')->group(function (): void {
+    Route::get('/monitoring/enrollments', [MonitoringEnrollmentController::class, 'index'])
+        ->name('monitoring.enrollments.index');
+
+    Route::post('/monitoring/enrollments', [MonitoringEnrollmentController::class, 'store'])
+        ->name('monitoring.enrollments.store');
+
+    Route::get('/monitoring/enrollments/{enrollment}', [MonitoringEnrollmentController::class, 'show'])
+        ->name('monitoring.enrollments.show');
+
+    Route::patch('/monitoring/enrollments/{enrollment}', [MonitoringEnrollmentController::class, 'update'])
+        ->name('monitoring.enrollments.update');
+
+    Route::delete('/monitoring/enrollments/{enrollment}', [MonitoringEnrollmentController::class, 'destroy'])
+        ->name('monitoring.enrollments.destroy');
+
     Route::get('/admin/serpro', [SerproAdminController::class, 'show'])
         ->name('admin.serpro.show');
 
