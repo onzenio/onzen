@@ -156,6 +156,7 @@ async function onSubmit(event: FormSubmitEvent<Schema>) {
           v-model:page="page"
           :items-per-page="data?.per_page ?? 15"
           :total="total"
+          @update:page="() => refresh()"
         />
       </div>
     </template>

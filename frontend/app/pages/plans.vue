@@ -238,6 +238,7 @@ async function onSwitchPlan() {
           v-model:page="page"
           :items-per-page="data?.meta.per_page ?? 15"
           :total="total"
+          @update:page="() => refresh()"
         />
       </div>
 
