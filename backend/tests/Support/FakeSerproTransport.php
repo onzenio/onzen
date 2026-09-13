@@ -24,6 +24,14 @@ final class FakeSerproTransport implements SerproTransport
     public array $callResponses;
 
     /**
+     * Optional hook invoked instead of shifting `$callResponses`, so tests can
+     * mutate state in the middle of the wire call (e.g. fencing races).
+     *
+     * @var (callable(string, array<string, mixed>, string, array<string, mixed>): array{status: int, body: array<string, mixed>, headers?: array<string, mixed>})|null
+     */
+    public $onCall = null;
+
+    /**
      * @param  list<array<string, mixed>>  $tokenResponses
      * @param  list<array{status: int, body: array<string, mixed>, headers?: array<string, mixed>}>  $callResponses
      */
@@ -49,6 +57,10 @@ final class FakeSerproTransport implements SerproTransport
             'access_token' => $accessToken,
             'options' => $options,
         ];
+
+        if ($this->onCall !== null) {
+            return ($this->onCall)($path, $envelope, $accessToken, $options);
+        }
 
         return array_shift($this->callResponses) ?? ['status' => 200, 'body' => []];
     }
