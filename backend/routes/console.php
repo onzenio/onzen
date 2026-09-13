@@ -14,3 +14,10 @@ Schedule::command('monitoring:run-monthly-cycle --confirm')
     ->monthlyOn(1, '06:00')
     ->timezone('America/Sao_Paulo')
     ->withoutOverlapping();
+
+// Rotina diária de renovação: 05:00 America/Sao_Paulo, renova termos e
+// reverifica procurações antes da janela comercial (Task 21).
+Schedule::command('monitoring:warm-procuracoes --confirm')
+    ->dailyAt('05:00')
+    ->timezone('America/Sao_Paulo')
+    ->withoutOverlapping();
