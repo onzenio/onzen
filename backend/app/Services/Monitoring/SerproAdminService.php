@@ -120,8 +120,13 @@ class SerproAdminService
 
     public function switchEnvironment(User $actor, string $environment, ?string $evidence = null): SerproSettings
     {
-        $settings = SerproSettings::current();
+        // O ambiente efetivo é lido ANTES de qualquer criação de linha: sem
+        // painel, `SerproSettings::current()` nasceria com o default
+        // `homologacao` e mascararia um `.env` em produção (um switch real
+        // producao → homologacao viraria no-op sem audit).
         $previous = $this->gate->environment();
+
+        $settings = $this->panelSettings($previous);
 
         if ($previous === $environment) {
             return $settings;
@@ -141,7 +146,12 @@ class SerproAdminService
 
     public function setTransport(User $actor, bool $enabled, ?string $evidence = null): SerproSettings
     {
-        $settings = SerproSettings::current();
+        // Mesma regra: o ambiente efetivo é capturado antes da primeira
+        // escrita e a linha nasce preservando-o, senão o POST de transporte
+        // trocaria o ambiente autoritativo silenciosamente.
+        $environment = $this->gate->environment();
+
+        $settings = $this->panelSettings($environment);
         $before = $settings->transportApproved();
 
         $settings->update([
@@ -153,7 +163,7 @@ class SerproAdminService
         $this->audit->record($actor, 'platform.serpro_transport_toggled', [
             'before' => $before,
             'after' => $enabled,
-            'environment' => $this->gate->environment(),
+            'environment' => $environment,
             'evidence' => $enabled ? $evidence : null,
         ], $this->platformAccount());
 
@@ -236,6 +246,19 @@ class SerproAdminService
     private function newRef(string $environment): string
     {
         return 'secret:serpro-contratante-'.$environment.'-'.strtolower((string) Str::ulid());
+    }
+
+    /**
+     * Painel singleton: quando a primeira decisão é gravada, a linha nasce
+     * com o ambiente efetivo do gate (painel ainda inexistente), nunca com um
+     * default que sobrescreva o `.env` vigente.
+     */
+    private function panelSettings(string $effectiveEnvironment): SerproSettings
+    {
+        return SerproSettings::query()->firstOrCreate([], [
+            'environment' => $effectiveEnvironment,
+            'transport_approved' => false,
+        ]);
     }
 
     private function platformAccount(): ?Account

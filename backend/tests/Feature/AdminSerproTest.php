@@ -354,6 +354,60 @@ final class AdminSerproTest extends TestCase
         $this->assertSame('CHG-1234: homologação validada', $audit->metadata['evidence']);
     }
 
+    public function test_environment_switch_from_env_production_seeds_panel_and_audits_real_switch(): void
+    {
+        config()->set('monitoring.environment', 'producao');
+        $this->assertSame(0, SerproSettings::query()->count());
+
+        $this->actingAs($this->superAdminA())
+            ->postJson('/api/admin/serpro/environment', ['environment' => 'homologacao'])
+            ->assertOk()
+            ->assertJsonPath('data.environment', 'homologacao');
+
+        $settings = SerproSettings::query()->firstOrFail();
+        $this->assertSame('homologacao', $settings->environment());
+
+        $audit = AuditLog::query()->where('action', 'platform.serpro_environment_switched')->firstOrFail();
+        $this->assertSame('producao', $audit->metadata['before']);
+        $this->assertSame('homologacao', $audit->metadata['after']);
+    }
+
+    public function test_transport_enable_from_env_production_seeds_panel_with_effective_environment(): void
+    {
+        config()->set('monitoring.environment', 'producao');
+        $admin = $this->superAdminA();
+        $this->assertSame(0, SerproSettings::query()->count());
+
+        $this->actingAs($admin)
+            ->postJson('/api/admin/serpro/transport', ['enabled' => true])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['confirm_transport', 'confirm_impact', 'evidence']);
+
+        $this->assertSame(0, SerproSettings::query()->count());
+
+        $refusal = AuditLog::query()->where('action', 'platform.serpro_transport_refused')->firstOrFail();
+        $this->assertSame('producao', $refusal->metadata['environment']);
+
+        $this->actingAs($admin)
+            ->postJson('/api/admin/serpro/transport', [
+                'enabled' => true,
+                'confirm_transport' => true,
+                'confirm_impact' => true,
+                'evidence' => 'CHG-77: homologação validada',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.environment', 'producao')
+            ->assertJsonPath('data.transport.open', true);
+
+        $settings = SerproSettings::query()->firstOrFail();
+        $this->assertSame('producao', $settings->environment());
+        $this->assertTrue($settings->transportApproved());
+
+        $audit = AuditLog::query()->where('action', 'platform.serpro_transport_toggled')->firstOrFail();
+        $this->assertSame('producao', $audit->metadata['environment']);
+        $this->assertTrue($audit->metadata['after']);
+    }
+
     public function test_environment_switch_back_to_homologacao_needs_no_ceremony(): void
     {
         $admin = $this->superAdminA();
