@@ -46,4 +46,17 @@ class AccountController extends Controller
             'invitation' => $invitation->makeHidden('token'),
         ], 201);
     }
+
+    public function updatePlan(Request $request, Account $account): JsonResponse
+    {
+        $this->authorize('update', Account::class);
+
+        $data = $request->validate([
+            'plan_id' => ['required', 'integer', 'exists:plans,id'],
+        ]);
+
+        $account->update(['plan_id' => $data['plan_id']]);
+
+        return response()->json($account->refresh()->load('plan'));
+    }
 }

@@ -1,9 +1,11 @@
 <?php
 
 use App\Http\Controllers\Api\AccountController;
+use App\Http\Controllers\Api\ClientController;
 use App\Http\Controllers\Api\InvitationController;
 use App\Http\Controllers\Api\MeController;
 use App\Http\Controllers\Api\OnboardingController;
+use App\Http\Controllers\Api\PlanController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -17,6 +19,20 @@ Route::get('/onboarding/status', [OnboardingController::class, 'status']);
 Route::post('/onboarding', [OnboardingController::class, 'store']);
 
 Route::middleware('auth:sanctum')->apiResource('accounts', AccountController::class)->only(['index', 'store']);
+
+Route::middleware('auth:sanctum')->group(function (): void {
+    Route::get('/plans', [PlanController::class, 'index']);
+    Route::post('/plans', [PlanController::class, 'store']);
+    Route::patch('/plans/{plan}', [PlanController::class, 'update']);
+    Route::patch('/accounts/{account}/plan', [AccountController::class, 'updatePlan']);
+
+    Route::get('/clients', [ClientController::class, 'index']);
+    Route::post('/clients', [ClientController::class, 'store']);
+    Route::get('/clients/{id}', [ClientController::class, 'show']);
+    Route::patch('/clients/{id}', [ClientController::class, 'update']);
+    Route::delete('/clients/{id}', [ClientController::class, 'destroy']);
+    Route::patch('/clients/{id}/monitoring', [ClientController::class, 'updateMonitoring']);
+});
 
 Route::middleware('auth:sanctum')->group(function (): void {
     Route::get('/invitations', [InvitationController::class, 'index']);

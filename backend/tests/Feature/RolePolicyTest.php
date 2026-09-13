@@ -107,13 +107,14 @@ class RolePolicyTest extends TestCase
 
     public function test_later_phase_routes_do_not_exist_yet(): void
     {
-        // Fase D implementada: /api/accounts, /api/onboarding e
-        // /api/invitations existem (guest recebe 401 nas protegidas).
-        // Fases E–G ainda não: sem plans/switch/clients/audit.
+        // Fases D–E implementadas: /api/accounts, /api/onboarding,
+        // /api/invitations, /api/plans e /api/clients existem (guest recebe
+        // 401 nas protegidas). Fases F–G ainda não: sem switch/audit.
         // Ausência = 404, não 403.
         $this->postJson('/api/accounts', [])->assertUnauthorized();
         $this->getJson('/api/invitations')->assertUnauthorized();
-        $this->getJson('/api/plans')->assertNotFound();
+        $this->getJson('/api/plans')->assertUnauthorized();
+        $this->getJson('/api/clients')->assertUnauthorized();
         $this->postJson('/api/switch', [])->assertNotFound();
     }
 }
