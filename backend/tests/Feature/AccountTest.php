@@ -3,7 +3,6 @@
 namespace Tests\Feature;
 
 use App\Enums\AccountProfile;
-use App\Models\Account;
 use App\Models\Plan;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Schema;
