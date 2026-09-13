@@ -17,10 +17,12 @@ import (
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waAdv"
 	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
 
+	"onefisc/wzap/internal/model"
 	"onefisc/wzap/internal/session"
 )
 
@@ -389,6 +391,118 @@ func TestNewSessionRejectsNilDevice(t *testing.T) {
 }
 
 func TestDeviceStoreIntegration(t *testing.T) {
+	manager := newTestManager(t)
+	container := manager.devices
+
+	devices, err := container.GetAllDevices(context.Background())
+	if err != nil {
+		t.Fatalf("GetAllDevices: %v", err)
+	}
+	if len(devices) != 0 {
+		t.Fatalf("fresh schema has %d devices, want 0", len(devices))
+	}
+
+	jid := saveTestDevice(t, container, "5511999999999")
+	stored, err := container.GetDevice(context.Background(), jid)
+	if err != nil {
+		t.Fatalf("GetDevice: %v", err)
+	}
+	if stored == nil || stored.PushName != "wzap-test" || stored.ID == nil || stored.ID.String() != jid.String() {
+		t.Fatalf("stored device = %+v", stored)
+	}
+}
+
+func TestRegisterRestoredIsAtomic(t *testing.T) {
+	manager := &Manager{sessions: make(map[uuid.UUID]*instanceSession), log: slog.Default()}
+	id := uuid.New()
+	first := &instanceSession{instanceID: id}
+	second := &instanceSession{instanceID: id}
+
+	if !manager.registerRestored(id, first) {
+		t.Fatal("first registerRestored returned false, want true")
+	}
+	if manager.registerRestored(id, second) {
+		t.Fatal("second registerRestored returned true, want false")
+	}
+	got, ok := manager.Get(id)
+	if !ok || got != first {
+		t.Fatalf("Get = (%v, %v), want the first session", got, ok)
+	}
+}
+
+func TestAttachAndConnectRegistersOnce(t *testing.T) {
+	manager := newTestManager(t)
+	var connects int
+	manager.restoreConnect = func(context.Context, *instanceSession) error {
+		connects++
+		return nil
+	}
+
+	id := uuid.New()
+	device := manager.devices.NewDevice()
+	ctx := context.Background()
+	if err := manager.attachAndConnect(ctx, id, device); err != nil {
+		t.Fatalf("first attachAndConnect: %v", err)
+	}
+	if err := manager.attachAndConnect(ctx, id, device); err != nil {
+		t.Fatalf("second attachAndConnect: %v", err)
+	}
+	if connects != 1 {
+		t.Fatalf("connect calls = %d, want 1", connects)
+	}
+	if _, ok := manager.Get(id); !ok {
+		t.Fatal("registered session not found after attachAndConnect")
+	}
+}
+
+func TestRemoveDeletesCredentials(t *testing.T) {
+	manager := newTestManager(t)
+	id := uuid.New()
+	jid := saveTestDevice(t, manager.devices, "5511999999999")
+	if _, err := manager.Create(&model.Instance{ID: id, WhatsAppJID: jid.String()}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if err := manager.Remove(context.Background(), id); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	if _, ok := manager.Get(id); ok {
+		t.Fatal("session still registered after Remove")
+	}
+	stored, err := manager.devices.GetDevice(context.Background(), jid)
+	if err != nil {
+		t.Fatalf("GetDevice: %v", err)
+	}
+	if stored != nil {
+		t.Fatal("device credentials still stored after Remove")
+	}
+}
+
+func TestRemoveKeepsSessionWhenDeleteFails(t *testing.T) {
+	manager := newTestManager(t)
+	id := uuid.New()
+	jid := saveTestDevice(t, manager.devices, "5511888888888")
+	if _, err := manager.Create(&model.Instance{ID: id, WhatsAppJID: jid.String()}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if err := manager.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if err := manager.Remove(context.Background(), id); err == nil {
+		t.Fatal("Remove with a closed device store returned nil error")
+	}
+	if _, ok := manager.Get(id); !ok {
+		t.Fatal("session was dropped even though the credentials were not deleted")
+	}
+}
+
+// newTestManager returns a Manager backed by a fresh, uniquely named schema of
+// the WZAP_TEST_DATABASE_URL database, so integration tests never touch the
+// shared public schema. The test is skipped when the variable is unset.
+func newTestManager(t *testing.T) *Manager {
+	t.Helper()
+
 	dsn := os.Getenv("WZAP_TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("set WZAP_TEST_DATABASE_URL to run Postgres integration tests")
@@ -405,34 +519,33 @@ func TestDeviceStoreIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open admin connection: %v", err)
 	}
-	defer func() { _ = admin.Close() }()
+	t.Cleanup(func() { _ = admin.Close() })
 
 	ctx := context.Background()
 	schema := fmt.Sprintf("wzap_session_test_%d", time.Now().UnixNano())
 	if _, err := admin.ExecContext(ctx, "CREATE SCHEMA "+schema); err != nil {
 		t.Fatalf("create schema: %v", err)
 	}
-	defer func() {
-		if _, err := admin.ExecContext(ctx, "DROP SCHEMA "+schema+" CASCADE"); err != nil {
+	t.Cleanup(func() {
+		if _, err := admin.ExecContext(context.Background(), "DROP SCHEMA "+schema+" CASCADE"); err != nil {
 			t.Errorf("drop schema: %v", err)
 		}
-	}()
+	})
 
-	container, err := openDeviceStore(ctx, dsnWithSearchPath(t, dsn, schema), slog.Default())
+	manager, err := NewManager(ctx, dsnWithSearchPath(t, dsn, schema), nil, slog.Default(), nil)
 	if err != nil {
-		t.Fatalf("openDeviceStore: %v", err)
+		t.Fatalf("NewManager: %v", err)
 	}
-	defer func() { _ = container.Close() }()
+	t.Cleanup(func() { _ = manager.Close() })
+	return manager
+}
 
-	devices, err := container.GetAllDevices(ctx)
-	if err != nil {
-		t.Fatalf("GetAllDevices: %v", err)
-	}
-	if len(devices) != 0 {
-		t.Fatalf("fresh schema has %d devices, want 0", len(devices))
-	}
+// saveTestDevice stores a minimally initialized paired device and returns its
+// JID.
+func saveTestDevice(t *testing.T, container *sqlstore.Container, number string) types.JID {
+	t.Helper()
 
-	jid := types.NewJID("5511999999999", types.DefaultUserServer)
+	jid := types.NewJID(number, types.DefaultUserServer)
 	device := container.NewDevice()
 	device.ID = &jid
 	device.PushName = "wzap-test"
@@ -442,17 +555,10 @@ func TestDeviceStoreIntegration(t *testing.T) {
 		AccountSignatureKey: make([]byte, 32),
 		DeviceSignature:     make([]byte, 64),
 	}
-	if err := device.Save(ctx); err != nil {
-		t.Fatalf("save device: %v", err)
+	if err := device.Save(context.Background()); err != nil {
+		t.Fatalf("save test device: %v", err)
 	}
-
-	stored, err := container.GetDevice(ctx, jid)
-	if err != nil {
-		t.Fatalf("GetDevice: %v", err)
-	}
-	if stored == nil || stored.PushName != "wzap-test" || stored.ID == nil || stored.ID.String() != jid.String() {
-		t.Fatalf("stored device = %+v", stored)
-	}
+	return jid
 }
 
 // dsnWithSearchPath points the sqlstore connections at the isolated test

@@ -44,6 +44,10 @@ type Manager struct {
 	log       *slog.Logger
 	sink      session.EventSink
 
+	// restoreConnect brings a restored session online; tests replace it to
+	// avoid the network handshake.
+	restoreConnect func(ctx context.Context, sess *instanceSession) error
+
 	mu       sync.RWMutex
 	sessions map[uuid.UUID]*instanceSession
 }
@@ -61,13 +65,17 @@ func NewManager(ctx context.Context, databaseURL string, instances storage.Insta
 	if err != nil {
 		return nil, err
 	}
-	return &Manager{
+	manager := &Manager{
 		devices:   devices,
 		instances: instances,
 		log:       log,
 		sink:      sink,
 		sessions:  make(map[uuid.UUID]*instanceSession),
-	}, nil
+	}
+	manager.restoreConnect = func(ctx context.Context, sess *instanceSession) error {
+		return sess.connectExisting(ctx)
+	}
+	return manager, nil
 }
 
 // Close releases the whatsmeow database connections.
@@ -116,7 +124,9 @@ func (m *Manager) Create(instance *model.Instance) (session.Session, error) {
 	return sess, nil
 }
 
-// Remove disconnects the session and deletes its stored credentials.
+// Remove disconnects the session and deletes its stored credentials. When the
+// deletion fails the session stays registered, so a retry can finish removing
+// the credentials instead of silently reporting success.
 func (m *Manager) Remove(ctx context.Context, instanceID uuid.UUID) error {
 	m.mu.Lock()
 	sess, ok := m.sessions[instanceID]
@@ -127,7 +137,16 @@ func (m *Manager) Remove(ctx context.Context, instanceID uuid.UUID) error {
 	if !ok {
 		return nil
 	}
-	return sess.remove(ctx)
+
+	if err := sess.remove(ctx); err != nil {
+		m.mu.Lock()
+		if _, exists := m.sessions[instanceID]; !exists {
+			m.sessions[instanceID] = sess
+		}
+		m.mu.Unlock()
+		return err
+	}
+	return nil
 }
 
 // RestoreAll reconnects every persisted session, at most restoreConcurrency at
@@ -187,18 +206,40 @@ func (m *Manager) restore(ctx context.Context, instance model.Instance) error {
 	if device == nil {
 		return fmt.Errorf("device %s not found", jid)
 	}
+	return m.attachAndConnect(ctx, instance.ID, device)
+}
 
-	sess, err := newSession(instance.ID, device, m.log, m.sink)
+// attachAndConnect registers a session built from device and brings it online.
+// A concurrent Create or RestoreAll that wins the registration turns this into
+// a no-op, so a client that is not in the manager is never connected: two live
+// clients on the same device would fight over the session.
+func (m *Manager) attachAndConnect(ctx context.Context, instanceID uuid.UUID, device *store.Device) error {
+	sess, err := newSession(instanceID, device, m.log, m.sink)
 	if err != nil {
 		return err
 	}
-	m.mu.Lock()
-	if _, ok := m.sessions[instance.ID]; !ok {
-		m.sessions[instance.ID] = sess
+	if !m.registerRestored(instanceID, sess) {
+		return nil
 	}
-	m.mu.Unlock()
+	connect := m.restoreConnect
+	if connect == nil {
+		connect = func(ctx context.Context, sess *instanceSession) error {
+			return sess.connectExisting(ctx)
+		}
+	}
+	return connect(ctx, sess)
+}
 
-	return sess.connectExisting(ctx)
+// registerRestored stores sess for instanceID unless another goroutine already
+// registered a session, reporting whether this call performed the insert.
+func (m *Manager) registerRestored(instanceID uuid.UUID, sess *instanceSession) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sessions[instanceID]; ok {
+		return false
+	}
+	m.sessions[instanceID] = sess
+	return true
 }
 
 // listInstances walks the instances table page by page.
