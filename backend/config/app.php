@@ -56,6 +56,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Frontend URL
+    |--------------------------------------------------------------------------
+    |
+    | Base URL of the headless frontend (BFF Nuxt). Used to build links
+    | sent by email, e.g. the password reset link consumed by the
+    | /reset-password page. Overridable via FRONTEND_URL.
+    |
+    */
+
+    'frontend_url' => env('FRONTEND_URL', 'http://localhost:3000'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Application Timezone
     |--------------------------------------------------------------------------
     |

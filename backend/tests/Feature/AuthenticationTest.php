@@ -4,6 +4,8 @@ namespace Tests\Feature;
 
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Mail\Mailer;
+use Illuminate\Mail\Transport\ArrayTransport;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Notification;
@@ -103,6 +105,32 @@ class AuthenticationTest extends TestCase
         ])->assertOk();
 
         Notification::assertSentTo($user, ResetPassword::class);
+    }
+
+    public function test_password_reset_email_uses_frontend_url_with_real_notification(): void
+    {
+        $this->createUser(attributes: ['email' => 'auth-reset-real@example.com']);
+
+        $this->postJson('/forgot-password', [
+            'email' => 'auth-reset-real@example.com',
+        ])->assertOk();
+
+        $transport = app(Mailer::class)->getSymfonyTransport();
+
+        $this->assertInstanceOf(ArrayTransport::class, $transport);
+
+        $messages = $transport->messages();
+
+        $this->assertCount(1, $messages);
+
+        $original = $messages->first()->getOriginalMessage();
+        $body = html_entity_decode((string) $original->getHtmlBody().' '.(string) $original->getTextBody());
+
+        $frontend = rtrim((string) config('app.frontend_url', 'http://localhost:3000'), '/');
+
+        $this->assertStringContainsString($frontend.'/reset-password?', $body);
+        $this->assertMatchesRegularExpression('/reset-password\?token=[^&\s"\']+&email=/', $body);
+        $this->assertStringContainsString(urlencode('auth-reset-real@example.com'), $body);
     }
 
     public function test_password_can_be_reset_with_valid_token_and_sessions_are_invalidated(): void
