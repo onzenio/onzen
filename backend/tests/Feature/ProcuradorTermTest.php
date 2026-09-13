@@ -284,6 +284,73 @@ final class ProcuradorTermTest extends TestCase
         $service->submitTerm($author, $this->signedTerm($service, $author));
     }
 
+    public function test_submit_refuses_an_unsigned_or_tampered_term_without_any_traffic(): void
+    {
+        $this->openTransport();
+        [$author] = $this->submittedAuthor();
+
+        $transport = $this->fakeTransport();
+        $this->app->instance(SerproTransport::class, $transport);
+        $service = app(ProcuradorTermService::class);
+
+        $unsigned = $service->buildTermXml(self::AUTHOR_DOCUMENT, 'PJ', self::CONTRATANTE_DOCUMENT, '20260906', '20260907');
+        $tampered = str_replace('20260907', '20260908', $this->signedTerm($service, $author));
+
+        foreach (['unsigned' => $unsigned, 'tampered' => $tampered] as $case => $invalid) {
+            try {
+                $service->submitTerm($author, $invalid);
+                $this->fail("Expected the {$case} term to be refused.");
+            } catch (SerproBlockedException $exception) {
+                $this->assertSame('procurador_term_unsigned', $exception->getMessage());
+            }
+        }
+
+        $this->assertSame([], $transport->tokenCalls);
+        $this->assertSame([], $transport->callCalls);
+    }
+
+    public function test_submit_refuses_an_author_with_an_expired_certificate_without_any_traffic(): void
+    {
+        $this->openTransport();
+        [$author] = $this->submittedAuthor();
+        $author->forceFill(['certificate_expires_at' => now()->subDay()])->save();
+
+        $transport = $this->fakeTransport();
+        $this->app->instance(SerproTransport::class, $transport);
+        $service = app(ProcuradorTermService::class);
+
+        try {
+            $service->submitTerm($author, $this->signedTerm($service, $author));
+            $this->fail('Expected an ineligible author to be refused.');
+        } catch (SerproBlockedException $exception) {
+            $this->assertSame('author_ineligible', $exception->getMessage());
+        }
+
+        $this->assertSame([], $transport->tokenCalls);
+        $this->assertSame([], $transport->callCalls);
+    }
+
+    public function test_submit_refuses_an_author_without_a_certificate_without_any_traffic(): void
+    {
+        $this->openTransport();
+        [$author] = $this->submittedAuthor();
+        $author->forceFill(['certificate_expires_at' => null])->save();
+
+        $transport = $this->fakeTransport();
+        $this->app->instance(SerproTransport::class, $transport);
+        $service = app(ProcuradorTermService::class);
+
+        try {
+            $service->submitTerm($author, $this->signedTerm($service, $author));
+            $this->fail('Expected an ineligible author to be refused.');
+        } catch (SerproBlockedException $exception) {
+            $this->assertSame('author_ineligible', $exception->getMessage());
+        }
+
+        $this->assertSame([], $transport->tokenCalls);
+        $this->assertSame([], $transport->callCalls);
+    }
+
     public function test_renew_term_builds_signs_and_submits_the_author_term(): void
     {
         $this->openTransport();

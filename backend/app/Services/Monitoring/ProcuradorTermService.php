@@ -247,6 +247,18 @@ final class ProcuradorTermService
             throw new SerproBlockedException('serpro_gated');
         }
 
+        // `submitTerm` is the transport boundary: as the last line of defense
+        // it never trusts the caller's XML or the author's status. The
+        // signature must verify and the author must be eligible before any
+        // credential resolution, envelope build or external traffic.
+        if (! $this->verifySignature($signedXml)) {
+            throw new SerproBlockedException('procurador_term_unsigned');
+        }
+
+        if (! $author->isEligible()) {
+            throw new SerproBlockedException('author_ineligible');
+        }
+
         $environment = $this->gate->environment();
         $contract = SerproContract::query()->where('environment', $environment)->first();
         $credentials = $this->credentialResolver->resolve($contract);
