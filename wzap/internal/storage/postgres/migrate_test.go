@@ -17,9 +17,9 @@ func TestMigrate(t *testing.T) {
 
 	for _, table := range []string{
 		"instances",
-		"outbound_messages",
+		"message_queue",
 		"idempotency_keys",
-		"jid_cache",
+		"contacts",
 		"media",
 		"event_outbox",
 	} {

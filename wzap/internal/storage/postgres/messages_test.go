@@ -36,7 +36,7 @@ func createTestMessage(t *testing.T, repo storage.MessageRepository, instanceID 
 func setNextAttemptAt(t *testing.T, pool *pgxpool.Pool, id uuid.UUID, at time.Time) {
 	t.Helper()
 
-	if _, err := pool.Exec(context.Background(), `UPDATE outbound_messages SET next_attempt_at = $2 WHERE id = $1`, id, at); err != nil {
+	if _, err := pool.Exec(context.Background(), `UPDATE message_queue SET next_attempt_at = $2 WHERE id = $1`, id, at); err != nil {
 		t.Fatalf("set next_attempt_at: %v", err)
 	}
 }
@@ -44,7 +44,7 @@ func setNextAttemptAt(t *testing.T, pool *pgxpool.Pool, id uuid.UUID, at time.Ti
 func backdateUpdatedAt(t *testing.T, pool *pgxpool.Pool, id uuid.UUID, at time.Time) {
 	t.Helper()
 
-	if _, err := pool.Exec(context.Background(), `UPDATE outbound_messages SET updated_at = $2 WHERE id = $1`, id, at); err != nil {
+	if _, err := pool.Exec(context.Background(), `UPDATE message_queue SET updated_at = $2 WHERE id = $1`, id, at); err != nil {
 		t.Fatalf("backdate updated_at: %v", err)
 	}
 }
@@ -115,11 +115,11 @@ func TestMessageRepositoryCreate(t *testing.T) {
 	requireTimeBetween(t, "Create: UpdatedAt", message.UpdatedAt, start.Add(-time.Second), time.Now().Add(time.Second))
 
 	var count int
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM outbound_messages WHERE id = $1`, message.ID).Scan(&count); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM message_queue WHERE id = $1`, message.ID).Scan(&count); err != nil {
 		t.Fatalf("count message: %v", err)
 	}
 	if count != 1 {
-		t.Errorf("outbound_messages with created id = %d, want 1", count)
+		t.Errorf("message_queue with created id = %d, want 1", count)
 	}
 }
 
@@ -408,7 +408,7 @@ func TestMessageRepositoryClaimQueuedSkipsLockedRows(t *testing.T) {
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	if _, err := tx.Exec(ctx, `SELECT id FROM outbound_messages WHERE id = $1 FOR UPDATE`, locked.ID); err != nil {
+	if _, err := tx.Exec(ctx, `SELECT id FROM message_queue WHERE id = $1 FOR UPDATE`, locked.ID); err != nil {
 		t.Fatalf("lock row: %v", err)
 	}
 

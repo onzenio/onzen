@@ -15,22 +15,22 @@ import (
 	"onefisc/wzap/internal/storage"
 )
 
-const messageColumns = `id, instance_id, type, recipient_jid, payload, media_id, status, ` +
-	`COALESCE(whatsapp_message_id, '') AS whatsapp_message_id, COALESCE(last_error, '') AS last_error, ` +
-	`attempts, delivered_at, read_at, created_at, updated_at`
+const messageColumns = `id, instance_id, type, recipient, payload, media_id, status, ` +
+	`COALESCE(whatsapp_id, '') AS whatsapp_id, COALESCE(last_error, '') AS last_error, ` +
+	`retries, delivered_at, read_at, created_at, updated_at`
 
-const listMessagesQuery = `SELECT ` + messageColumns + ` FROM outbound_messages ` +
+const listMessagesQuery = `SELECT ` + messageColumns + ` FROM message_queue ` +
 	`WHERE instance_id = $1 ORDER BY created_at DESC, id DESC LIMIT $2`
 
-const listMessagesAfterQuery = `SELECT ` + messageColumns + ` FROM outbound_messages ` +
-	`WHERE instance_id = $1 AND (created_at, id) < (SELECT created_at, id FROM outbound_messages WHERE id = $2) ` +
+const listMessagesAfterQuery = `SELECT ` + messageColumns + ` FROM message_queue ` +
+	`WHERE instance_id = $1 AND (created_at, id) < (SELECT created_at, id FROM message_queue WHERE id = $2) ` +
 	`ORDER BY created_at DESC, id DESC LIMIT $3`
 
-const claimQueuedSelectQuery = `SELECT ` + messageColumns + ` FROM outbound_messages ` +
+const claimQueuedSelectQuery = `SELECT ` + messageColumns + ` FROM message_queue ` +
 	`WHERE status = 'queued' AND (next_attempt_at IS NULL OR next_attempt_at <= now()) ` +
 	`ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT $1`
 
-const claimQueuedUpdateQuery = `UPDATE outbound_messages SET status = 'sending', updated_at = now() ` +
+const claimQueuedUpdateQuery = `UPDATE message_queue SET status = 'sending', updated_at = now() ` +
 	`WHERE id = ANY($1) RETURNING ` + messageColumns
 
 // MessageRepository is the pgx-backed storage.MessageRepository.
@@ -49,7 +49,7 @@ func NewMessageRepository(pool *pgxpool.Pool) *MessageRepository {
 // timestamps.
 func (r *MessageRepository) Create(ctx context.Context, message model.OutboundMessage) (*model.OutboundMessage, error) {
 	row := r.pool.QueryRow(ctx, `
-		INSERT INTO outbound_messages (id, instance_id, type, recipient_jid, payload, media_id, status, whatsapp_message_id)
+		INSERT INTO message_queue (id, instance_id, type, recipient, payload, media_id, status, whatsapp_id)
 		VALUES ($1, $2, $3, $4, $5, $6, COALESCE(NULLIF($7, ''), 'queued'), NULLIF($8, ''))
 		RETURNING `+messageColumns,
 		message.ID, message.InstanceID, message.Type, message.RecipientJID,
@@ -66,7 +66,7 @@ func (r *MessageRepository) Create(ctx context.Context, message model.OutboundMe
 // Get returns the message with the given id or storage.ErrNotFound.
 func (r *MessageRepository) Get(ctx context.Context, id uuid.UUID) (*model.OutboundMessage, error) {
 	message, err := scanMessage(r.pool.QueryRow(ctx,
-		`SELECT `+messageColumns+` FROM outbound_messages WHERE id = $1`, id))
+		`SELECT `+messageColumns+` FROM message_queue WHERE id = $1`, id))
 	if err != nil {
 		return nil, mapMessageError("get message", err)
 	}
@@ -195,8 +195,8 @@ func (r *MessageRepository) ClaimQueued(ctx context.Context, limit int) ([]model
 // MarkSent marks the message as sent with its WhatsApp identifier.
 func (r *MessageRepository) MarkSent(ctx context.Context, id uuid.UUID, whatsAppMessageID string) error {
 	tag, err := r.pool.Exec(ctx, `
-		UPDATE outbound_messages
-		SET status = 'sent', whatsapp_message_id = NULLIF($2, ''), last_error = NULL, updated_at = now()
+		UPDATE message_queue
+		SET status = 'sent', whatsapp_id = NULLIF($2, ''), last_error = NULL, updated_at = now()
 		WHERE id = $1`, id, whatsAppMessageID)
 	if err != nil {
 		return fmt.Errorf("mark message sent: %w", err)
@@ -210,7 +210,7 @@ func (r *MessageRepository) MarkSent(ctx context.Context, id uuid.UUID, whatsApp
 // MarkFailed marks the message as failed with the definitive reason.
 func (r *MessageRepository) MarkFailed(ctx context.Context, id uuid.UUID, errMsg string) error {
 	tag, err := r.pool.Exec(ctx, `
-		UPDATE outbound_messages
+		UPDATE message_queue
 		SET status = 'failed', last_error = NULLIF($2, ''), updated_at = now()
 		WHERE id = $1`, id, errMsg)
 	if err != nil {
@@ -225,8 +225,8 @@ func (r *MessageRepository) MarkFailed(ctx context.Context, id uuid.UUID, errMsg
 // MarkRetrying moves the message back to queued for a later attempt.
 func (r *MessageRepository) MarkRetrying(ctx context.Context, id uuid.UUID, errMsg string, nextAttemptAt time.Time) error {
 	tag, err := r.pool.Exec(ctx, `
-		UPDATE outbound_messages
-		SET status = 'queued', attempts = attempts + 1, last_error = NULLIF($2, ''),
+		UPDATE message_queue
+		SET status = 'queued', retries = retries + 1, last_error = NULLIF($2, ''),
 		    next_attempt_at = $3, updated_at = now()
 		WHERE id = $1`, id, errMsg, nextAttemptAt)
 	if err != nil {
@@ -243,11 +243,11 @@ func (r *MessageRepository) UpdateReceipt(
 	ctx context.Context, whatsAppMessageID, status string, at time.Time,
 ) (bool, error) {
 	tag, err := r.pool.Exec(ctx, `
-		UPDATE outbound_messages
+		UPDATE message_queue
 		SET delivered_at = COALESCE(delivered_at, $3),
 		    read_at = CASE WHEN $2 IN ('read', 'played') THEN COALESCE(read_at, $3) ELSE read_at END,
 		    updated_at = now()
-		WHERE whatsapp_message_id = $1 AND $2 IN ('delivered', 'read', 'played')`,
+		WHERE whatsapp_id = $1 AND $2 IN ('delivered', 'read', 'played')`,
 		whatsAppMessageID, status, at)
 	if err != nil {
 		return false, fmt.Errorf("update message receipt: %w", err)
@@ -259,7 +259,7 @@ func (r *MessageRepository) UpdateReceipt(
 // queued and returns how many were recovered.
 func (r *MessageRepository) RequeueStuck(ctx context.Context, olderThan time.Time) (int64, error) {
 	tag, err := r.pool.Exec(ctx, `
-		UPDATE outbound_messages
+		UPDATE message_queue
 		SET status = 'queued', updated_at = now()
 		WHERE status = 'sending' AND updated_at < $1`, olderThan)
 	if err != nil {
