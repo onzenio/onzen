@@ -22,6 +22,7 @@ class MonitoringConfigTest extends TestCase
         'MONITORING_SERPRO_QUEUE_CONNECTION',
         'MONITORING_SERPRO_FIXTURES_PATH',
         'MONITORING_SERPRO_MAX_ATTEMPTS',
+        'MONITORING_SERPRO_CREDENTIAL_VERSION',
     ];
 
     protected function tearDown(): void
@@ -46,6 +47,7 @@ class MonitoringConfigTest extends TestCase
         $this->assertSame('serpro', config('monitoring.queue'));
         $this->assertSame('serpro', config('monitoring.queue_connection'));
         $this->assertSame(8, config('monitoring.limits.max_attempts'));
+        $this->assertSame(1, config('monitoring.credential_version'));
     }
 
     public function test_fixtures_path_defaults_to_backend_consult_fixtures_directory(): void
@@ -78,6 +80,7 @@ class MonitoringConfigTest extends TestCase
             'MONITORING_SERPRO_QUEUE_CONNECTION' => 'redis',
             'MONITORING_SERPRO_FIXTURES_PATH' => 'resources/fixtures/serpro/consultar/custom',
             'MONITORING_SERPRO_MAX_ATTEMPTS' => '3',
+            'MONITORING_SERPRO_CREDENTIAL_VERSION' => '7',
         ]);
 
         $this->assertSame('https://sandbox.example.test/v2', config('monitoring.base_url'));
@@ -92,6 +95,7 @@ class MonitoringConfigTest extends TestCase
         $this->assertSame('redis', config('monitoring.queue_connection'));
         $this->assertSame('resources/fixtures/serpro/consultar/custom', config('monitoring.fixtures_path'));
         $this->assertSame(3, config('monitoring.limits.max_attempts'));
+        $this->assertSame(7, config('monitoring.credential_version'));
     }
 
     /**

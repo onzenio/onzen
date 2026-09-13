@@ -14,7 +14,9 @@ use App\Policies\ClientPolicy;
 use App\Policies\InvitationPolicy;
 use App\Policies\MonitoringArtifactPolicy;
 use App\Policies\PlanPolicy;
+use App\Policies\SerproAdminPolicy;
 use Illuminate\Foundation\Support\Providers\AuthServiceProvider as ServiceProvider;
+use Illuminate\Support\Facades\Gate;
 
 class AuthServiceProvider extends ServiceProvider
 {
@@ -34,5 +36,6 @@ class AuthServiceProvider extends ServiceProvider
     {
         // Sem Gate::before global de propósito: super_admin NÃO bypassa o
         // escopo de dados; só acessa rotas de plataforma via policies explícitas.
+        Gate::define('manage-serpro', [SerproAdminPolicy::class, 'manage']);
     }
 }

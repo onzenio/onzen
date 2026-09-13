@@ -65,6 +65,20 @@ final class SerproCredentialResolver
         $explicitDoc = (string) ($data['contratante_doc'] ?? $data['contratante'] ?? '');
         $contratanteDoc = preg_replace('/\D/', '', $explicitDoc) !== '' ? $explicitDoc : $eCnpj;
 
-        return new SerproCredentials($eCnpj, $secret, $contratanteDoc);
+        // Material de mTLS opcional: ou vem completo (PFX + senha) ou não vem,
+        // senão o transporte falharia no meio do caminho — falha-se aqui.
+        $certificate = (string) ($data['certificate'] ?? '');
+        $certificatePassword = (string) ($data['certificate_password'] ?? '');
+        if (($certificate === '') !== ($certificatePassword === '')) {
+            throw new SerproBlockedException('serpro_credential_invalid');
+        }
+
+        return new SerproCredentials(
+            $eCnpj,
+            $secret,
+            $contratanteDoc,
+            $certificate !== '' ? $certificate : null,
+            $certificatePassword !== '' ? $certificatePassword : null,
+        );
     }
 }

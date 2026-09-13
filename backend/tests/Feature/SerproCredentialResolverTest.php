@@ -67,6 +67,52 @@ final class SerproCredentialResolverTest extends TestCase
         $this->assertSame('98765432000199', $credentials->contratanteDoc);
     }
 
+    public function test_resolves_optional_certificate_material(): void
+    {
+        $contract = $this->contractWithCredential((string) json_encode([
+            'client_id' => '179024',
+            'consumer_secret' => 'consumer-secret',
+            'certificate' => base64_encode('pfx-raw-bytes'),
+            'certificate_password' => 'pfx-password',
+        ]));
+
+        $credentials = (new SerproCredentialResolver($this->vault))->resolve($contract);
+
+        $this->assertSame(base64_encode('pfx-raw-bytes'), $credentials->certificate);
+        $this->assertSame('pfx-password', $credentials->certificatePassword);
+        $this->assertSame(
+            [
+                'e_cnpj' => '179024',
+                'consumer_secret' => 'consumer-secret',
+                'certificate' => base64_encode('pfx-raw-bytes'),
+                'certificate_password' => 'pfx-password',
+            ],
+            $credentials->toTransportCredentials(),
+        );
+    }
+
+    public function test_fails_closed_on_incomplete_certificate_material(): void
+    {
+        $resolver = new SerproCredentialResolver($this->vault);
+
+        $payloads = [
+            ['client_id' => '179024', 'consumer_secret' => 'consumer-secret', 'certificate' => base64_encode('pfx-raw-bytes')],
+            ['client_id' => '179024', 'consumer_secret' => 'consumer-secret', 'certificate_password' => 'pfx-password'],
+        ];
+
+        foreach ($payloads as $index => $payload) {
+            $ref = "secret:incomplete-certificate-{$index}";
+            $this->vault->put($ref, (string) json_encode($payload));
+
+            try {
+                $resolver->resolveRef($ref);
+                $this->fail('Expected incomplete certificate material to be rejected.');
+            } catch (SerproBlockedException $exception) {
+                $this->assertSame('serpro_credential_invalid', $exception->getMessage());
+            }
+        }
+    }
+
     public function test_rejects_credential_ref_that_is_not_an_opaque_secret_ref(): void
     {
         $resolver = new SerproCredentialResolver($this->vault);
