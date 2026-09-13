@@ -17,6 +17,7 @@ use App\Integrations\Serpro\ResponseClassifier;
 use App\Integrations\Serpro\SerproClassification;
 use App\Integrations\Serpro\SerproCredentialResolver;
 use App\Integrations\Serpro\SerproEnvelope;
+use App\Models\Account;
 use App\Models\Client;
 use App\Models\MonitoringAttempt;
 use App\Models\MonitoringEnrollment;
@@ -26,6 +27,7 @@ use App\Models\SerproRequestAuthor;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 use Throwable;
 
@@ -42,6 +44,11 @@ use Throwable;
  * protocol is polled by {@see ProtocolPoller} without repeating the original
  * request. A run in a retryable state refuses to send traffic before its
  * persisted `eta`/`retry_after`.
+ *
+ * Task 17 adds the Plan quota gate: {@see QueryQuotaService} reserves one
+ * unit after the fencing check and before any transport work (dry-run
+ * included). An exhausted Account ends the run factually as `blocked` with
+ * `quota_exceeded` instead of throwing from the queue.
  *
  * Fail-closed: a call is only attempted when the effective gate is open, and
  * missing credentials, an inactive enrollment or a missing fixture end the
@@ -64,6 +71,7 @@ final class SerproExecutor
         private readonly ResponseClassifier $responseClassifier,
         private readonly ConsultMessageClassifier $messages,
         private readonly ProtocolPoller $poller,
+        private readonly QueryQuotaService $quota,
     ) {}
 
     /**
@@ -177,6 +185,26 @@ final class SerproExecutor
 
         if (! $this->fences($run, $this->enrollmentFor($run))) {
             return $this->discard($run);
+        }
+
+        // Quota (Task 17): the Plan unit is reserved after the enrollment
+        // fencing (a superseded run never spends volume) and before any
+        // credential/token/fixture/transport work. Dry-runs reserve too, so
+        // an exhausted Account is blocked even with the transport off. The
+        // service is idempotent by run id, so retries and protocol polls
+        // replay the reservation instead of charging again.
+        $account = Account::query()->whereKey($run->account_id)->first();
+
+        if ($account === null) {
+            return $this->finish($run, MonitoringRunStatus::Blocked, 'account_missing');
+        }
+
+        try {
+            $this->quota->reserve($account, $run);
+        } catch (ValidationException) {
+            return $this->finish($run, MonitoringRunStatus::Blocked, QueryQuotaService::ERROR_EXCEEDED);
+        } catch (SerproBlockedException $exception) {
+            return $this->finish($run, MonitoringRunStatus::Blocked, $exception->getMessage());
         }
 
         $dryRun = $this->gate->isGated();

@@ -3,6 +3,7 @@
 namespace Tests;
 
 use App\Models\Account;
+use App\Models\Plan;
 use App\Models\User;
 use App\Support\CurrentAccount;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
@@ -19,10 +20,17 @@ abstract class TestCase extends BaseTestCase
     /**
      * Create an Account for tests. Kept stable for reuse by later blocks.
      *
+     * Every Account gets a Plan unless one is given (or explicitly nulled),
+     * mirroring onboarding, which assigns the default Plan on creation.
+     *
      * @param  array<string, mixed>  $attributes
      */
     protected function createAccount(array $attributes = []): Account
     {
+        if (! array_key_exists('plan_id', $attributes)) {
+            $attributes['plan_id'] = Plan::factory()->create()->id;
+        }
+
         return Account::factory()->create($attributes);
     }
 
