@@ -2,29 +2,14 @@ package postgres
 
 import (
 	"context"
-	"os"
 	"testing"
+
+	"onefisc/wzap/internal/storage/postgres/postgrestest"
 )
 
 func TestMigrate(t *testing.T) {
-	databaseURL := os.Getenv("WZAP_TEST_DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("set WZAP_TEST_DATABASE_URL to run the Postgres integration test")
-	}
-
+	pool := postgrestest.NewPool(t)
 	ctx := context.Background()
-	pool, err := Connect(ctx, databaseURL)
-	if err != nil {
-		t.Fatalf("Connect: %v", err)
-	}
-	t.Cleanup(pool.Close)
-
-	if _, err := pool.Exec(ctx, `DROP SCHEMA IF EXISTS public CASCADE`); err != nil {
-		t.Fatalf("drop public schema: %v", err)
-	}
-	if _, err := pool.Exec(ctx, `CREATE SCHEMA public`); err != nil {
-		t.Fatalf("create public schema: %v", err)
-	}
 
 	if err := Migrate(ctx, pool); err != nil {
 		t.Fatalf("first Migrate: %v", err)
@@ -42,7 +27,7 @@ func TestMigrate(t *testing.T) {
 		err := pool.QueryRow(ctx, `
 			SELECT EXISTS (
 				SELECT 1 FROM information_schema.tables
-				WHERE table_schema = 'public' AND table_name = $1
+				WHERE table_schema = current_schema() AND table_name = $1
 			)`, table).Scan(&exists)
 		if err != nil {
 			t.Fatalf("check table %s: %v", table, err)
