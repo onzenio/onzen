@@ -22,6 +22,7 @@
 - Account Switcher: só super_admin; estado em `switch_account_id` na sessão; banner persistente + saída explícita; vínculo do User inalterado.
 - Sem auto-cadastro público: `Features::registration()` desligado; sem rota `/register`.
 - TDD em todo backend: teste falhando primeiro, depois implementação. Commits convencionais com escopo. Nunca commitar `.env`.
+- Frontend: NADA inventado — usar exclusivamente os componentes/padrões já disponíveis no template (Nuxt UI, `UDashboardSidebar`, `UForm`/padrão de `pages/settings`, `UNavigationMenu` do layout). Novas páginas = composição dos existentes; nenhum componente visual custom novo.
 - Verificações: backend `composer test` (gate); higiene manual `./vendor/bin/pint --test` (sem gate); frontend `pnpm run lint` + `pnpm run typecheck` (CI gate, sem runner de testes).
 - Comandos sempre do app dir (`backend/` ou `frontend/`).
 
@@ -334,6 +335,8 @@ Pré-requisito: `.env.example` do frontend ganha `BACKEND_URL=http://localhost:8
 - [ ] **Step 4: Verificação** `pnpm run lint` + `pnpm run typecheck` verdes + smoke manual login/logout (registrar no relatório). Commit `feat(multi-account): BFF de sessao e middleware Nuxt`.
 
 ### Fase H — Shell e páginas (tasks 9.1–9.6)
+
+Restrição de design (usuário): não inventar nada — só componentes/padrões do template. `AccountSwitcher` = `UDropdownMenu`/`UModal` + `UBadge` do template; banner = `UBanner` (ou o padrão de aviso já usado no template); páginas = layout `default` + `UCard`/`UTable`/`UForm` como em `pages/customers` e `pages/settings`.
 
 Padrão de página: `<script setup lang="ts">` + `useMe()` + `$fetch('/api/...')` + componentes Nuxt UI; formulários com `zod` (`z.object`, `useForm`? template usa `@nuxt/ui` Form — seguir o padrão de `pages/settings` existente).
 
