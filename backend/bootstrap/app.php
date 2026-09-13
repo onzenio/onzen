@@ -14,6 +14,10 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
+    // Audit de auth tem registro EXPLÍCITO em AppServiceProvider::boot; a
+    // descoberta automática varreria app/Listeners e registraria
+    // AuditAuthListener@handle uma segunda vez (2 linhas por login/logout).
+    ->withEvents(discover: false)
     ->withMiddleware(function (Middleware $middleware): void {
         // Sessão stateful ANTES do ResolveAccount (que lê switch_account_id
         // da sessão). O Ensure só abre sessão/CSRF para origens stateful,
