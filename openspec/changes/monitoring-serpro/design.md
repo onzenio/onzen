@@ -98,7 +98,7 @@ Alternativa descartada: desenhar componentes novos (decisão explícita do usuá
 
 ### 13. Health pelo gate efetivo
 
-O health de monitoramento deriva o estado do gate efetivo (painel + ambiente) e do cofre, e não apenas das variáveis de ambiente — corrige a inconsistência conhecida do `_legacy`, onde o painel ligado ainda aparecia `gated`.
+O health de monitoramento deriva o estado do gate efetivo (painel + ambiente) e do cofre, e não apenas das variáveis de ambiente — corrige a inconsistência conhecida do `_legacy`, onde o painel ligado ainda aparecia `gated`. Regra dos estados: `gated` = transporte fechado; `unavailable` = aberto sem credencial resolvível; `degraded` = aberto apenas pelo fallback de `.env` (sem decisão vigente no painel) com credencial resolvida; `configured` = aberto com decisão no painel e credencial resolvida.
 
 ### 14. Configuração e defaults
 
