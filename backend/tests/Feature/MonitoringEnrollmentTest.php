@@ -9,6 +9,7 @@ use App\Models\MonitoringArtifact;
 use App\Models\MonitoringDefinition;
 use App\Models\MonitoringEnrollment;
 use App\Models\User;
+use App\Services\Monitoring\MonitoringEnrollmentService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
@@ -542,6 +543,28 @@ final class MonitoringEnrollmentTest extends TestCase
             ->assertJsonPath('data.configuration.periodo', '202602');
     }
 
+    public function test_patch_on_an_ended_association_is_refused(): void
+    {
+        $account = $this->createAccount();
+        $actor = $this->actor($account);
+        $enrollment = $this->enrollment($account, $this->entitledClient($account), $this->eligibleDefinition(), [
+            'status' => MonitoringEnrollment::STATUS_ENDED,
+            'version' => 2,
+        ]);
+
+        $this->actingAs($actor)
+            ->patchJson("/api/monitoring/enrollments/{$enrollment->id}", [
+                'configuration' => ['periodo' => '202601'],
+            ])
+            ->assertUnprocessable();
+
+        $this->assertDatabaseHas('monitoring_enrollments', [
+            'id' => $enrollment->id,
+            'status' => MonitoringEnrollment::STATUS_ENDED,
+            'version' => 2,
+        ]);
+    }
+
     public function test_delete_ends_the_association_and_preserves_history(): void
     {
         $account = $this->createAccount();
@@ -578,7 +601,7 @@ final class MonitoringEnrollmentTest extends TestCase
             null,
         );
 
-        $enrollment->pause('outorga pendente');
+        $this->assertTrue($enrollment->pause('outorga pendente'));
         $enrollment->refresh();
 
         $this->assertSame(MonitoringEnrollment::STATUS_PAUSED, $enrollment->status);
@@ -586,23 +609,85 @@ final class MonitoringEnrollmentTest extends TestCase
         $this->assertSame(2, $enrollment->version);
         $this->assertNotNull($enrollment->last_change_at);
 
-        $enrollment->pause('outorga pendente');
+        $this->assertFalse($enrollment->pause('outorga pendente'));
         $enrollment->refresh();
         $this->assertSame(2, $enrollment->version, 'Repeating the same pause must not fence again.');
 
-        $enrollment->resume();
+        $this->assertTrue($enrollment->resume());
         $enrollment->refresh();
 
         $this->assertSame(MonitoringEnrollment::STATUS_ACTIVE, $enrollment->status);
         $this->assertNull($enrollment->pause_reason);
         $this->assertSame(3, $enrollment->version);
 
-        $enrollment->end();
+        $this->assertTrue($enrollment->end());
         $enrollment->refresh();
 
         $this->assertSame(MonitoringEnrollment::STATUS_ENDED, $enrollment->status);
         $this->assertNull($enrollment->pause_reason);
         $this->assertSame(4, $enrollment->version);
+    }
+
+    public function test_pause_and_resume_are_refused_on_an_ended_association(): void
+    {
+        $enrollment = $this->enrollment(
+            $this->createAccount(),
+            null,
+            null,
+        );
+
+        $this->assertTrue($enrollment->end());
+        $this->assertSame(2, $enrollment->version);
+
+        $this->assertFalse($enrollment->pause('outorga pendente'));
+        $this->assertFalse($enrollment->resume());
+        $this->assertFalse($enrollment->end());
+
+        $enrollment->refresh();
+
+        $this->assertSame(MonitoringEnrollment::STATUS_ENDED, $enrollment->status);
+        $this->assertNull($enrollment->pause_reason);
+        $this->assertSame(2, $enrollment->version, 'An ended association must never be revived or fenced again.');
+    }
+
+    public function test_model_transitions_from_stale_instances_are_monotonic(): void
+    {
+        $enrollment = $this->enrollment(
+            $this->createAccount(),
+            null,
+            null,
+        );
+        $stale = MonitoringEnrollment::query()->whereKey($enrollment->id)->firstOrFail();
+        $this->assertSame(1, $stale->version);
+
+        $this->assertTrue($enrollment->pause('outorga pendente'));
+        $this->assertSame(2, $enrollment->version);
+        $this->assertSame(1, $stale->version);
+
+        // A read-then-write would mint version 2 again from the stale
+        // instance; the locked fresh read must mint 3.
+        $this->assertTrue($stale->pause('outorga vencida'));
+        $this->assertSame(3, $stale->version);
+        $this->assertSame('outorga vencida', $stale->pause_reason);
+        $this->assertSame(3, $enrollment->refresh()->version);
+    }
+
+    public function test_service_configuration_updates_from_stale_instances_are_monotonic(): void
+    {
+        $enrollment = $this->enrollment(
+            $this->createAccount(),
+            null,
+            null,
+        );
+        $stale = MonitoringEnrollment::query()->whereKey($enrollment->id)->firstOrFail();
+        $service = app(MonitoringEnrollmentService::class);
+
+        $first = $service->updateConfiguration($enrollment, ['periodo' => '202601']);
+        $this->assertSame(2, $first->version);
+
+        $second = $service->updateConfiguration($stale, ['periodo' => '202602']);
+        $this->assertSame(3, $second->version);
+        $this->assertSame(3, $enrollment->refresh()->version);
     }
 
     private function actor(Account $account, UserRole $role = UserRole::Admin): User

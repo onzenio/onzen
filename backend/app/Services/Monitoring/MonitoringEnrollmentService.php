@@ -139,11 +139,13 @@ final class MonitoringEnrollmentService
      */
     public function updateConfiguration(MonitoringEnrollment $enrollment, ?array $configuration): MonitoringEnrollment
     {
-        $enrollment->forceFill([
-            'configuration' => $configuration,
-            'version' => $enrollment->version + 1,
-            'last_change_at' => now(),
-        ])->save();
+        // The model applies the change inside a locked transaction; a false
+        // result means the association was ended (concurrently or before).
+        if (! $enrollment->configure($configuration)) {
+            throw ValidationException::withMessages([
+                'configuration' => ['Associação encerrada não aceita alteração de configuração.'],
+            ]);
+        }
 
         return $enrollment->refresh()->load(['client', 'definition']);
     }
