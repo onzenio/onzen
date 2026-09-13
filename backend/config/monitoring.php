@@ -20,5 +20,9 @@ return [
     'fixtures_path' => env('MONITORING_SERPRO_FIXTURES_PATH', 'resources/fixtures/serpro/consultar'),
     'limits' => [
         'max_attempts' => (int) env('MONITORING_SERPRO_MAX_ATTEMPTS', 8),
+        // Backoff (segundos) por tentativa da execução quando a SERPRO não
+        // informa Retry-After; a última posição é o teto. O job usa a mesma
+        // tabela como fallback de release.
+        'retry_backoff' => [15, 60, 300, 900],
     ],
 ];

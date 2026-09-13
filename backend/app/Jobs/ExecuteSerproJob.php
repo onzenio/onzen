@@ -39,11 +39,15 @@ final class ExecuteSerproJob implements ShouldQueue
     }
 
     /**
+     * The fallback schedule for worker-managed retries and for runs without a
+     * persisted readiness. Shared with the executor via `monitoring.limits`
+     * so both release and duplicate-dispatch guards pace the same way.
+     *
      * @return list<int>
      */
     public function backoff(): array
     {
-        return [15, 60, 300, 900];
+        return array_values((array) config('monitoring.limits.retry_backoff', [15, 60, 300, 900]));
     }
 
     public function handle(SerproExecutor $executor): void

@@ -165,10 +165,13 @@ final class SerproExecutor
             return $run;
         }
 
-        $polling = $run->status === MonitoringRunStatus::AwaitingProtocol;
-        $protocol = $polling ? trim((string) $run->protocol) : '';
+        // A persisted protocol means the original request was already
+        // accepted: every retry from now on is a poll, never the original
+        // consult again — even after a retryable poll body.
+        $protocol = trim((string) $run->protocol);
+        $polling = $protocol !== '';
 
-        if ($polling && $protocol === '') {
+        if ($run->status === MonitoringRunStatus::AwaitingProtocol && ! $polling) {
             return $this->finish($run, MonitoringRunStatus::Blocked, 'protocol_missing');
         }
 
@@ -424,9 +427,14 @@ final class SerproExecutor
         $status = $this->statusFor($classification);
         $responseCode = (int) $result['http_status'];
 
+        // The protocol already persisted on the run survives every
+        // settlement: a retryable poll body (429/5xx) or a completion body
+        // without `protocol`/`protocolo` must not orphan the polling flow.
+        $protocol = $this->protocolFor($run, $result);
+
         if ($status === MonitoringRunStatus::Completed) {
             try {
-                DB::transaction(function () use ($run, $result, $classification, $responseCode): void {
+                DB::transaction(function () use ($run, $result, $classification, $responseCode, $protocol): void {
                     // The fencing token is compared on the locked enrollment
                     // INSIDE the completion transaction, before the projector
                     // and again after it. The row lock makes a concurrent
@@ -441,7 +449,7 @@ final class SerproExecutor
                         'source' => $result['source'],
                         'operation_code' => $result['operation_code'],
                         'http_status' => $result['http_status'],
-                        'protocol' => $result['protocol'],
+                        'protocol' => $protocol,
                         'eta' => $result['eta'],
                         'body' => $result['body'],
                     ]);
@@ -451,7 +459,7 @@ final class SerproExecutor
                     }
 
                     $run->transitionTo(MonitoringRunStatus::Completed, [
-                        'protocol' => $result['protocol'],
+                        'protocol' => $protocol,
                         'external_code' => $result['operation_code'],
                         'error_code' => null,
                     ]);
@@ -474,7 +482,7 @@ final class SerproExecutor
         }
 
         $run = $run->transitionTo($status, [
-            'protocol' => $result['protocol'],
+            'protocol' => $protocol,
             'eta' => $status === MonitoringRunStatus::AwaitingProtocol ? $result['eta'] : null,
             'external_code' => $result['operation_code'],
             'error_code' => $classification->code,
@@ -483,6 +491,19 @@ final class SerproExecutor
         $this->recordAttempt($run, $status, $responseCode, $classification->code, $classification->retryAfter);
 
         return $run;
+    }
+
+    /**
+     * Keep the run protocol when the current result does not provide a valid
+     * new one. Never turns a known protocol into null.
+     *
+     * @param  array<string, mixed>  $result
+     */
+    private function protocolFor(MonitoringRun $run, array $result): ?string
+    {
+        $incoming = is_scalar($result['protocol'] ?? null) ? trim((string) $result['protocol']) : '';
+
+        return $incoming !== '' ? $incoming : $run->protocol;
     }
 
     /**
@@ -557,8 +578,33 @@ final class SerproExecutor
             'status' => $status,
             'response_code' => $responseCode,
             'classification' => $classification,
-            'retry_after' => $retryAfter,
+            // A retryable outcome always persists a readiness: the server
+            // Retry-After when present, otherwise the backoff schedule for
+            // this attempt. Without it a duplicate dispatch would bypass
+            // backoff (notYetDue has nothing to compare against).
+            'retry_after' => $retryAfter ?? $this->defaultRetryAfter($status, $attempt),
         ]);
+    }
+
+    /**
+     * Backoff schedule for a `limited`/`transient` attempt without a server
+     * `Retry-After`, indexed by the run attempt number (last value clamps).
+     * The queue job reads the persisted value for its release.
+     */
+    private function defaultRetryAfter(MonitoringRunStatus $status, int $attempt): ?int
+    {
+        if (! in_array($status, [MonitoringRunStatus::Limited, MonitoringRunStatus::Transient], true)) {
+            return null;
+        }
+
+        /** @var list<int|numeric-string> $backoff */
+        $backoff = array_values((array) config('monitoring.limits.retry_backoff', [15, 60, 300, 900]));
+
+        if ($backoff === []) {
+            return 60;
+        }
+
+        return max(1, (int) $backoff[min(max($attempt, 1) - 1, count($backoff) - 1)]);
     }
 
     /**

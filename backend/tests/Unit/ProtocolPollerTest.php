@@ -49,6 +49,25 @@ final class ProtocolPollerTest extends TestCase
         $this->assertTrue($second['body']['obtained']);
     }
 
+    public function test_a_pending_200_body_is_not_cached(): void
+    {
+        $transport = new FakeSerproTransport(callResponses: [
+            ['status' => 200, 'body' => [
+                'protocol' => ['protocol_id' => 'PROTO-1', 'obtained' => false],
+                'dados' => ['situacao' => 'processando'],
+            ]],
+            ['status' => 200, 'body' => ['obtained' => true, 'dados' => []]],
+        ]);
+        $poller = new ProtocolPoller($transport);
+
+        $first = $poller->poll($this->awaitingRun(), 'PROTO-1', [], 'access-token');
+        $second = $poller->poll($this->awaitingRun(), 'PROTO-1', [], 'access-token');
+
+        $this->assertFalse((bool) data_get($first, 'body.protocol.obtained'));
+        $this->assertCount(2, $transport->callCalls, 'A pending 200 body must not be cached.');
+        $this->assertTrue((bool) $second['body']['obtained']);
+    }
+
     public function test_a_successful_one_shot_body_is_cached_even_without_obtained(): void
     {
         $transport = new FakeSerproTransport(callResponses: [[

@@ -13,10 +13,11 @@ use InvalidArgumentException;
  *
  * A consulta repete o caminho da operação com `{protocol, poll: true}` como
  * `pedidoDados.dados` — nunca a solicitação original. O resultado final
- * (`obtained`, ou 200 com `result`/`data`/`dados`) é cacheado por
- * Account/ambiente/protocolo, para que uma redelivery da fila não invoque a
- * SERPRO de novo; respostas ainda pendentes não são cacheadas. Operações do
- * catálogo proibidas no polling são recusadas antes de qualquer tráfego.
+ * (`obtained`, ou 200 com `result`/`data`/`dados` sem protocolo pendente) é
+ * cacheado por Account/ambiente/protocolo, para que uma redelivery da fila
+ * não invoque a SERPRO de novo; respostas ainda pendentes — mesmo em HTTP 200
+ * — não são cacheadas. Operações do catálogo proibidas no polling são
+ * recusadas antes de qualquer tráfego.
  */
 final class ProtocolPoller
 {
@@ -76,6 +77,13 @@ final class ProtocolPoller
         $status = (int) ($response['status'] ?? 0);
         $body = is_array($response['body'] ?? null) ? $response['body'] : [];
         $obtained = (bool) ($body['obtained'] ?? data_get($body, 'protocol.obtained', false));
+        $hasProtocol = isset($body['protocol']) || isset($body['protocolo']);
+
+        // A pending protocol is never final, even on HTTP 200 with data:
+        // caching it would redeliver a still-pending body forever.
+        if (! $obtained && ($status === 202 || $hasProtocol)) {
+            return false;
+        }
 
         if ($obtained) {
             return true;

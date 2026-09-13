@@ -142,18 +142,16 @@ final class ExecuteSerproJobTest extends TestCase
 
     public function test_release_backoff_grows_with_the_queue_attempt_number(): void
     {
-        $this->writeFixture('CONSDECLARACAO13', [
-            'operation' => 'CONSDECLARACAO13',
-            'dry_run' => true,
-            'http_status' => 503,
-            'body' => [],
-        ]);
-        $run = $this->claim($this->createAccount(), 'CONSDECLARACAO13', 'transient-attempt-key');
+        // Transient outcomes now persist a readiness (15s on the first
+        // attempt), so the fallback schedule is exercised through an awaiting
+        // poll without eta/retry_after.
+        $run = $this->claim($this->createAccount(), 'SOLICITARPROTOCOLO91', 'awaiting-attempt-key');
 
         $job = (new ExecuteSerproJob($run->id))->withFakeQueueInteractions();
         $job->job->attempts = 2;
         $job->handle(app(SerproExecutor::class));
 
+        $this->assertSame(MonitoringRunStatus::AwaitingProtocol, $run->refresh()->status);
         $job->assertReleased(60);
     }
 

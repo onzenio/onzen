@@ -355,6 +355,7 @@ final class SerproExecutionTest extends TestCase
             'status' => 'transient',
             'response_code' => 503,
             'classification' => 'transient_error',
+            'retry_after' => 15,
         ]);
     }
 
@@ -725,7 +726,106 @@ final class SerproExecutionTest extends TestCase
             'run_id' => $run->id,
             'status' => 'transient',
             'classification' => 'timeout',
+            'retry_after' => 15,
         ]);
+    }
+
+    public function test_a_failed_poll_keeps_polling_and_never_resends_the_original_request(): void
+    {
+        $this->freezeTime();
+
+        try {
+            $account = $this->createAccount();
+            $transport = $this->openTransport($account);
+            $transport->callResponses = [
+                ['status' => 202, 'body' => ['protocol' => ['protocol_id' => 'PROTO-17', 'obtained' => false]]],
+                ['status' => 429, 'headers' => ['Retry-After' => ['30']], 'body' => []],
+                ['status' => 200, 'body' => ['obtained' => true, 'dados' => ['situacao' => 'regular']]],
+            ];
+            $enrollment = $this->enrollment($account, 'SOLICITARPROTOCOLO91', [
+                'configuration' => ['anoCalendario' => '2024'],
+            ]);
+            $executor = $this->executor();
+
+            $run = $executor->execute($executor->claim($enrollment, 'poll-retry-key'));
+
+            $this->assertSame(MonitoringRunStatus::AwaitingProtocol, $run->status);
+            $this->assertSame('PROTO-17', $run->protocol);
+
+            $limited = $executor->execute($run);
+
+            $this->assertSame(MonitoringRunStatus::Limited, $limited->status);
+            $this->assertSame('PROTO-17', $limited->protocol, 'A retryable poll must keep the protocol.');
+            $this->assertCount(2, $transport->callCalls);
+
+            $executor->execute($limited);
+
+            $this->assertCount(2, $transport->callCalls, 'A duplicate dispatch before retry_after must send no traffic.');
+
+            $this->travel(31)->seconds();
+
+            $completed = $executor->execute($limited);
+
+            $this->assertSame(MonitoringRunStatus::Completed, $completed->status);
+            $this->assertSame('PROTO-17', $completed->protocol, 'The protocol must survive completion.');
+            $this->assertCount(3, $transport->callCalls);
+
+            $retried = json_decode($transport->callCalls[2]['envelope']['pedidoDados']['dados'], true);
+
+            $this->assertSame(
+                ['protocol' => 'PROTO-17', 'poll' => true],
+                $retried,
+                'A retry of a polled run must poll, never repeat the original consult.',
+            );
+            $this->assertArrayNotHasKey('anoCalendario', $retried);
+        } finally {
+            $this->travelBack();
+        }
+    }
+
+    public function test_a_thrown_timeout_blocks_a_duplicate_dispatch_until_the_default_backoff(): void
+    {
+        $this->freezeTime();
+
+        try {
+            $account = $this->createAccount();
+            $transport = $this->openTransport($account);
+            $transport->onCall = fn (): never => throw new ConnectionException('connection timed out');
+            $enrollment = $this->enrollment($account, 'CONSDECLARACAO13');
+            $executor = $this->executor();
+
+            $run = $executor->execute($executor->claim($enrollment, 'timeout-duplicate-key'));
+
+            $this->assertSame(MonitoringRunStatus::Transient, $run->status);
+            $this->assertCount(1, $transport->callCalls);
+            $this->assertDatabaseHas('monitoring_attempts', [
+                'run_id' => $run->id,
+                'attempt' => 1,
+                'status' => 'transient',
+                'classification' => 'timeout',
+                'retry_after' => 15,
+            ]);
+
+            $duplicate = $executor->execute($run);
+
+            $this->assertSame(MonitoringRunStatus::Transient, $duplicate->status);
+            $this->assertCount(1, $transport->callCalls, 'A duplicate dispatch before the default backoff must send no traffic.');
+
+            $this->travel(16)->seconds();
+
+            $executor->execute($duplicate);
+
+            $this->assertCount(2, $transport->callCalls);
+            $this->assertDatabaseHas('monitoring_attempts', [
+                'run_id' => $run->id,
+                'attempt' => 2,
+                'status' => 'transient',
+                'classification' => 'timeout',
+                'retry_after' => 60,
+            ]);
+        } finally {
+            $this->travelBack();
+        }
     }
 
     private function executor(): SerproExecutor
