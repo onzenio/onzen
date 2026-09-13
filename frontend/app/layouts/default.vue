@@ -1,81 +1,110 @@
 <script setup lang="ts">
-import type { NavigationMenuItem } from '@nuxt/ui'
+import type { CommandPaletteItem, NavigationMenuItem } from '@nuxt/ui'
 
 const route = useRoute()
 const toast = useToast()
 
 const open = ref(false)
 
-const links = [[{
-  label: 'Home',
-  icon: 'i-lucide-house',
-  to: '/',
-  onSelect: () => {
-    open.value = false
-  }
-}, {
-  label: 'Inbox',
-  icon: 'i-lucide-inbox',
-  to: '/inbox',
-  badge: '4',
-  onSelect: () => {
-    open.value = false
-  }
-}, {
-  label: 'Customers',
-  icon: 'i-lucide-users',
-  to: '/customers',
-  onSelect: () => {
-    open.value = false
-  }
-}, {
-  label: 'Settings',
-  to: '/settings',
-  icon: 'i-lucide-settings',
-  defaultOpen: true,
-  type: 'trigger',
-  children: [{
-    label: 'General',
-    to: '/settings',
-    exact: true,
-    onSelect: () => {
-      open.value = false
-    }
-  }, {
-    label: 'Members',
-    to: '/settings/members',
-    onSelect: () => {
-      open.value = false
-    }
-  }, {
-    label: 'Notifications',
-    to: '/settings/notifications',
-    onSelect: () => {
-      open.value = false
-    }
-  }, {
-    label: 'Security',
-    to: '/settings/security',
-    onSelect: () => {
-      open.value = false
-    }
+const { me, actingAs, refresh } = useMe()
+const { can, isSuperAdmin } = usePermissions()
+
+function closeSidebar() {
+  open.value = false
+}
+
+const links = computed<NavigationMenuItem[][]>(() => {
+  const main: NavigationMenuItem[] = [{
+    label: 'Home',
+    icon: 'i-lucide-house',
+    to: '/',
+    onSelect: closeSidebar
   }]
-}], [{
-  label: 'Feedback',
-  icon: 'i-lucide-message-circle',
-  to: 'https://github.com/nuxt-ui-templates/dashboard',
-  target: '_blank'
-}, {
-  label: 'Help & Support',
-  icon: 'i-lucide-info',
-  to: 'https://github.com/nuxt-ui-templates/dashboard',
-  target: '_blank'
-}]] satisfies NavigationMenuItem[][]
+  if (can('clients.view')) {
+    main.push({
+      label: 'Clients',
+      icon: 'i-lucide-briefcase',
+      to: '/clients',
+      onSelect: closeSidebar
+    })
+  }
+  if (can('accounts.view')) {
+    main.push({
+      label: 'Accounts',
+      icon: 'i-lucide-building-2',
+      to: '/accounts',
+      onSelect: closeSidebar
+    })
+  }
+  if (can('plans.view')) {
+    main.push({
+      label: 'Plans',
+      icon: 'i-lucide-layers',
+      to: '/plans',
+      onSelect: closeSidebar
+    })
+  }
+  if (can('audit.view')) {
+    main.push({
+      label: 'Audit',
+      icon: 'i-lucide-scroll-text',
+      to: '/audit',
+      onSelect: closeSidebar
+    })
+  }
+  main.push({
+    label: 'Inbox',
+    icon: 'i-lucide-inbox',
+    to: '/inbox',
+    badge: '4',
+    onSelect: closeSidebar
+  }, {
+    label: 'Customers',
+    icon: 'i-lucide-users',
+    to: '/customers',
+    onSelect: closeSidebar
+  }, {
+    label: 'Settings',
+    to: '/settings',
+    icon: 'i-lucide-settings',
+    defaultOpen: true,
+    type: 'trigger',
+    children: [{
+      label: 'General',
+      to: '/settings',
+      exact: true,
+      onSelect: closeSidebar
+    }, {
+      label: 'Members',
+      to: '/settings/members',
+      onSelect: closeSidebar
+    }, {
+      label: 'Notifications',
+      to: '/settings/notifications',
+      onSelect: closeSidebar
+    }, {
+      label: 'Security',
+      to: '/settings/security',
+      onSelect: closeSidebar
+    }]
+  })
+  return [main, [{
+    label: 'Feedback',
+    icon: 'i-lucide-message-circle',
+    to: 'https://github.com/nuxt-ui-templates/dashboard',
+    target: '_blank'
+  }, {
+    label: 'Help & Support',
+    icon: 'i-lucide-info',
+    to: 'https://github.com/nuxt-ui-templates/dashboard',
+    target: '_blank'
+  }]]
+})
 
 const groups = computed(() => [{
   id: 'links',
   label: 'Go to',
-  items: links.flat()
+  items: links.value.flat() as unknown as CommandPaletteItem[]
 }, {
   id: 'code',
   label: 'Code',
@@ -87,6 +116,17 @@ const groups = computed(() => [{
     target: '_blank'
   }]
 }])
+
+async function exitSwitch() {
+  try {
+    await $fetch('/api/switch', { method: 'DELETE' })
+    await refresh()
+    toast.add({ title: 'De volta à sua conta', color: 'success' })
+    await navigateTo('/')
+  } catch (error) {
+    toast.add({ title: 'Não foi possível sair da conta', description: backendMessage(error), color: 'error' })
+  }
+}
 
 onMounted(async () => {
   const cookie = useCookie('cookie-consent')
@@ -115,6 +155,23 @@ onMounted(async () => {
 </script>
 
 <template>
+  <UBanner
+    v-if="actingAs"
+    icon="i-lucide-eye"
+    :title="`Atuando como ${me?.account.name ?? ''}`"
+    color="warning"
+  >
+    <template #actions>
+      <UButton
+        label="Sair"
+        color="neutral"
+        variant="outline"
+        size="xs"
+        @click="exitSwitch"
+      />
+    </template>
+  </UBanner>
+
   <UDashboardGroup unit="rem">
     <UDashboardSidebar
       id="default"
@@ -125,7 +182,8 @@ onMounted(async () => {
       :ui="{ footer: 'lg:border-t lg:border-default' }"
     >
       <template #header="{ collapsed }">
-        <TeamsMenu :collapsed="collapsed" />
+        <AccountSwitcher v-if="isSuperAdmin" :collapsed="collapsed" />
+        <TeamsMenu v-else :collapsed="collapsed" />
       </template>
 
       <template #default="{ collapsed }">

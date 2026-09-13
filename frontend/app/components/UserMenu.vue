@@ -8,16 +8,28 @@ defineProps<{
 const colorMode = useColorMode()
 const appConfig = useAppConfig()
 
+const { me, refresh } = useMe()
+
+async function logout() {
+  try {
+    await $fetch('/api/auth/logout', { method: 'POST' })
+  } catch {
+    // Sessão local é descartada de qualquer forma.
+  }
+  await refresh()
+  await navigateTo('/login')
+}
+
 const colors = ['red', 'orange', 'amber', 'yellow', 'lime', 'green', 'emerald', 'teal', 'cyan', 'sky', 'blue', 'indigo', 'violet', 'purple', 'fuchsia', 'pink', 'rose']
 const neutrals = ['slate', 'gray', 'zinc', 'neutral', 'stone', 'taupe', 'mauve', 'mist', 'olive']
 
-const user = ref({
-  name: 'Benjamin Canac',
+const user = computed(() => ({
+  name: me.value?.user.name ?? 'Minha conta',
   avatar: {
-    src: 'https://github.com/benjamincanac.png',
-    alt: 'Benjamin Canac'
+    src: undefined,
+    alt: me.value?.user.name ?? 'Minha conta'
   }
-})
+}))
 
 const items = computed<DropdownMenuItem[][]>(() => ([[{
   type: 'label',
@@ -158,7 +170,10 @@ const items = computed<DropdownMenuItem[][]>(() => ([[{
   target: '_blank'
 }], [{
   label: 'Log out',
-  icon: 'i-lucide-log-out'
+  icon: 'i-lucide-log-out',
+  onSelect() {
+    void logout()
+  }
 }]]))
 </script>
 
