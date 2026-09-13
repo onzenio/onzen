@@ -15,7 +15,10 @@ class ResolveAccountTest extends TestCase
         $admin = $this->createUser(attributes: ['role' => UserRole::SuperAdmin]);
         $target = $this->createAccount();
 
+        // O grupo api abre sessão stateful via EnsureFrontendRequestsAreStateful:
+        // withSession semeia o store, Origin aciona o pipeline de sessão.
         $this->actingAs($admin)->withSession(['switch_account_id' => $target->id])
+            ->withHeaders(['Origin' => 'http://localhost:3000'])
             ->getJson('/api/me')->assertOk()->assertJsonPath('account.id', $target->id);
 
         $user = $this->createUser();

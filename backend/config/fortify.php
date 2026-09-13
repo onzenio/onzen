@@ -129,9 +129,11 @@ return [
     | you may not need them when building your own application. This may be
     | especially true if you're writing a custom single-page application.
     |
+    | Headless: o BFF Nuxt renderiza todas as telas; o Laravel expõe só JSON.
+    |
     */
 
-    'views' => true,
+    'views' => false,
 
     /*
     |--------------------------------------------------------------------------
@@ -162,19 +164,21 @@ return [
     */
 
     'features' => [
-        Features::registration(),
+        // Sem auto-cadastro público: contas nascem via onboarding (fase D).
+        // Features::registration(),
         Features::resetPasswords(),
         // Features::emailVerification(),
-        Features::updateProfileInformation(),
-        Features::updatePasswords(),
-        Features::twoFactorAuthentication([
-            'confirm' => true,
-            'confirmPassword' => true,
-            // 'window' => 0,
-        ]),
-        Features::passkeys([
-            'confirmPassword' => true,
-        ]),
+        // Fora de escopo desta fundação.
+        // Features::updateProfileInformation(),
+        // Features::updatePasswords(),
+        // Features::twoFactorAuthentication([
+        //     'confirm' => true,
+        //     'confirmPassword' => true,
+        //     // 'window' => 0,
+        // ]),
+        // Features::passkeys([
+        //     'confirmPassword' => true,
+        // ]),
     ],
 
 ];

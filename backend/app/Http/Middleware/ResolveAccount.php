@@ -17,11 +17,11 @@ class ResolveAccount
         $effective = $user?->account_id;
 
         if ($user?->isSuperAdmin() === true) {
-            // Lê da sessão da requisição quando houver (grupo web / api stateful);
-            // cai para o gerenciador de sessão para cobrir testes e api sem StartSession.
+            // O grupo api abre sessão stateful via EnsureFrontendRequestsAreStateful,
+            // então a sessão da requisição é a fonte única (sem fallback global).
             $targetId = $request->hasSession()
                 ? $request->session()->get('switch_account_id')
-                : session()->get('switch_account_id');
+                : null;
 
             if (is_numeric($targetId) && Account::query()->whereKey($targetId)->exists()) {
                 $effective = (int) $targetId;

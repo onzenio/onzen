@@ -56,6 +56,7 @@ class MeControllerTest extends TestCase
         $target = $this->createAccount();
 
         $this->actingAs($admin)->withSession(['switch_account_id' => $target->id])
+            ->withHeaders(['Origin' => 'http://localhost:3000'])
             ->getJson('/api/me')->assertOk()
             ->assertJsonPath('account.id', $target->id)
             ->assertJsonPath('acting_as.account_id', $target->id);
