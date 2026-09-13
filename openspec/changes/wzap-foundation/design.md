@@ -65,6 +65,11 @@ envelope versionado e publicação via tabela `event_outbox` + relay com retry.
 - **Alternativas**: publicação direta (perde eventos em indisponibilidade);
   webhooks HTTP (exigiria endpoint no Laravel, retry/DLQ próprios e não foi a
   escolha do stack).
+- **Sem `reply_to` na v1**: o recorte de inbound não carrega a fonte de
+  reply/citação; quoting fica para change futura (decisão de 2026-09-13).
+- **Cap de mídia**: `MediaLength` do proto é checado antes do download e o
+  stream é limitado a `MaxMediaBytes`, para o limite valer memória/banda e não
+  só armazenamento (decisão de 2026-09-13).
 
 ### D4. Envio assíncrono com outbox e recuperação de interrupção
 

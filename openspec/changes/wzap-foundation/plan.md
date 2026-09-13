@@ -383,7 +383,7 @@ CREATE INDEX event_outbox_pending_idx ON event_outbox (created_at) WHERE publish
 - Create: `wzap/internal/app/inbound.go`, `inbound_test.go`; Modify: `internal/app/runtime.go`
 
 **Interfaces:**
-- Produces: `Runtime.OnMessage(ctx, session.InboundMessage) error` — com mídia e dentro do limite, baixa e salva (`direction=inbound`); acima do limite marca `media_omitted`; grava evento `message` no outbox com payload da spec (`from_jid`, `chat_jid`, `is_group`, `message_id`, `timestamp`, `type`, `text`, `media{media_id,mimetype,filename,size,url}`, `reply_to`), URL `PublicURL + /api/v1/media/{id}`.
+- Produces: `Runtime.OnMessage(ctx, session.InboundMessage)` (void — a interface `session.EventSink` é a autoridade) — com mídia e dentro do limite, baixa e salva (`direction=inbound`); acima do limite (pré-check por `MediaLength` + cap no stream) marca `media_omitted`; grava evento `message` no outbox com payload da spec (`from_jid`, `chat_jid`, `is_group`, `message_id`, `timestamp`, `type`, `text`, `media{media_id,mimetype,filename,size,url}` — sem `reply_to`, descopado da v1), URL `PublicURL + /api/v1/media/{id}`.
 - `Runtime.OnConnection` (já existente) publica `connection`; `OnReceipt` publica `receipt`.
 
 - [ ] **Step 1: Testes** com sessão/storage fakes: texto gera payload com campos obrigatórios; mídia dentro do limite é salva e referenciada com URL e `expires_at`; mídia acima do limite gera `media_omitted`; falha de download não derruba o handler e registra `last_error` no evento? (não: gera `media_omitted` com motivo).
