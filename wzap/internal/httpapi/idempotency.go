@@ -321,7 +321,7 @@ func partsFingerprint(r *http.Request, parts []string) string {
 	sum := sha256.New()
 	writeRoute(sum, r)
 	for _, part := range parts {
-		fmt.Fprintf(sum, "%d:", len(part))
+		_, _ = fmt.Fprintf(sum, "%d:", len(part))
 		sum.Write([]byte(part))
 		sum.Write([]byte{'\n'})
 	}
@@ -336,7 +336,7 @@ func writeRoute(h io.Writer, r *http.Request) {
 	if route == "" {
 		route = r.URL.Path
 	}
-	fmt.Fprintf(h, "%s\n%s\n", r.Method, route)
+	_, _ = fmt.Fprintf(h, "%s\n%s\n", r.Method, route)
 }
 
 // readBodyPrefix reads at most fingerprintBodyLimit+1 bytes of the request body

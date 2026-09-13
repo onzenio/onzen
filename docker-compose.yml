@@ -59,6 +59,7 @@ services:
             POSTGRES_PASSWORD: ${DB_PASSWORD:-secret}
         volumes:
             - pgdata:/var/lib/postgresql
+            - ./wzap/docker/postgres-init.sql:/docker-entrypoint-initdb.d/10-onefisc-wzap.sql:ro
         networks:
             - app
         healthcheck:
@@ -139,12 +140,42 @@ services:
             retries: 12
             start_period: 120s
 
+    wzap:
+        image: onefisc-wzap:dev
+        build: ./wzap
+        restart: unless-stopped
+        environment:
+            WZAP_SERVICE_TOKEN: ${WZAP_SERVICE_TOKEN:-dev-wzap-token}
+            WZAP_DATABASE_URL: postgres://onefisc:secret@postgres:5432/onefisc_wzap?sslmode=disable
+            WZAP_NATS_URL: nats://nats:4222
+            WZAP_PUBLIC_URL: http://127.0.0.1:8081
+            WZAP_AUTO_MIGRATE: "true"
+            WZAP_DATA_DIR: /data
+        ports:
+            - "127.0.0.1:8081:8080"
+        volumes:
+            - wzap-media:/data
+        networks:
+            - app
+        depends_on:
+            postgres:
+                condition: service_healthy
+            nats:
+                condition: service_healthy
+        healthcheck:
+            test: ["CMD", "/wzap", "healthcheck"]
+            interval: 5s
+            timeout: 5s
+            retries: 12
+            start_period: 30s
+
 volumes:
     pgdata:
     redisdata:
     natsdata:
     backend-vendor:
     frontend-node-modules:
+    wzap-media:
 
 networks:
     app:

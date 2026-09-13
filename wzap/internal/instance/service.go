@@ -157,7 +157,7 @@ func (s *Service) Connect(ctx context.Context, id uuid.UUID) (ConnectResult, err
 		return result, nil
 	}
 
-	sess, qr, expiresAt, err := s.connectPairing(ctx, instance, sess)
+	_, qr, expiresAt, err := s.connectPairing(ctx, instance, sess)
 	if err != nil {
 		return ConnectResult{}, fmt.Errorf("connect instance: %w", err)
 	}
@@ -198,7 +198,7 @@ func (s *Service) QR(ctx context.Context, id uuid.UUID) (ConnectResult, error) {
 		return result, nil
 	}
 
-	sess, qr, expiresAt, err := s.connectPairing(ctx, instance, sess)
+	_, qr, expiresAt, err := s.connectPairing(ctx, instance, sess)
 	if err != nil {
 		return ConnectResult{}, fmt.Errorf("get qr: %w", err)
 	}
