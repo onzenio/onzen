@@ -4,6 +4,7 @@ namespace App\Integrations\Serpro\Transport;
 
 use App\Contracts\SerproTransport;
 use App\Exceptions\SerproBlockedException;
+use App\Integrations\Serpro\OAuthTokenCache;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 
@@ -15,8 +16,9 @@ use Illuminate\Support\Facades\Http;
  * copied to a 0600 temporary file for a single token exchange and removed in
  * `finally`, on success and on failure. Credentials, PFX bytes, passwords and
  * tokens are never logged; connection failures bubble up untouched so callers
- * can classify transient errors, while HTTP responses keep the contract's
- * `{status, body, headers}` shape for any status code.
+ * can classify transient errors. `token()` returns the decoded OAuth payload
+ * (contract shape), while `call()` returns `{status, body, headers}` for any
+ * status code.
  */
 final class HttpOAuthMtlsTransport implements SerproTransport
 {
@@ -50,7 +52,7 @@ final class HttpOAuthMtlsTransport implements SerproTransport
                     'client_secret' => $consumerSecret,
                 ]);
 
-            return $this->normalize($response);
+            return $this->tokenPayload($response);
         } finally {
             @unlink($certificatePath);
         }
@@ -93,6 +95,22 @@ final class HttpOAuthMtlsTransport implements SerproTransport
     private function url(string $path): string
     {
         return rtrim((string) config('monitoring.base_url'), '/').'/'.ltrim($path, '/');
+    }
+
+    /**
+     * Decoded OAuth payload in the contract's `token()` shape: top-level
+     * `access_token`, `expires_in` and optional `jwt_token`. Rejected
+     * exchanges keep their decoded error body and undecodable bodies collapse
+     * to `[]`, so {@see OAuthTokenCache} fails closed with
+     * `serpro_oauth_failed` instead of the transport inventing success.
+     *
+     * @return array<string, mixed>
+     */
+    private function tokenPayload(Response $response): array
+    {
+        $body = $response->json();
+
+        return is_array($body) ? $body : [];
     }
 
     /**

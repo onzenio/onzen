@@ -4,9 +4,12 @@ namespace Tests\Feature;
 
 use App\Contracts\SerproTransport;
 use App\Exceptions\SerproBlockedException;
+use App\Integrations\Serpro\OAuthTokenCache;
+use App\Integrations\Serpro\SerproCredentials;
 use App\Integrations\Serpro\Transport\HttpOAuthMtlsTransport;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -38,9 +41,9 @@ final class HttpOAuthMtlsTransportTest extends TestCase
 
         $payload = (new HttpOAuthMtlsTransport)->token($this->credentials(), 'homologacao');
 
-        $this->assertSame('opaque-access-token', $payload['body']['access_token']);
-        $this->assertSame(300, $payload['body']['expires_in']);
-        $this->assertSame('opaque-jwt', $payload['body']['jwt_token']);
+        $this->assertSame('opaque-access-token', $payload['access_token']);
+        $this->assertSame(300, $payload['expires_in']);
+        $this->assertSame('opaque-jwt', $payload['jwt_token']);
 
         $sent = $captured['request'];
         $this->assertSame('POST', $sent->method());
@@ -212,15 +215,55 @@ final class HttpOAuthMtlsTransportTest extends TestCase
         $this->assertFileDoesNotExist($certificatePath);
     }
 
-    public function test_token_returns_status_and_body_for_rejected_exchange(): void
+    public function test_token_returns_decoded_error_payload_for_rejected_exchange(): void
     {
         Http::fake(fn () => Http::response(['error' => 'invalid_client'], 401));
 
         $payload = (new HttpOAuthMtlsTransport)->token($this->credentials(), 'homologacao');
 
-        $this->assertSame(401, $payload['status']);
-        $this->assertSame(['error' => 'invalid_client'], $payload['body']);
-        $this->assertArrayHasKey('headers', $payload);
+        $this->assertSame(['error' => 'invalid_client'], $payload);
+        $this->assertArrayNotHasKey('status', $payload);
+        $this->assertArrayNotHasKey('body', $payload);
+    }
+
+    public function test_token_returns_empty_payload_for_undecodable_response(): void
+    {
+        Http::fake(fn () => Http::response('gateway unavailable', 502));
+
+        $payload = (new HttpOAuthMtlsTransport)->token($this->credentials(), 'homologacao');
+
+        $this->assertSame([], $payload);
+    }
+
+    public function test_oauth_token_cache_consumes_the_real_transport_payload(): void
+    {
+        Cache::flush();
+        Http::fake(fn () => Http::response([
+            'access_token' => 'opaque-access-token',
+            'expires_in' => 300,
+            'jwt_token' => 'opaque-jwt',
+        ], 200));
+
+        $cache = new OAuthTokenCache(new HttpOAuthMtlsTransport);
+
+        $tokens = $cache->get($this->credentialsObject(), 'homologacao', 'secret:contratante-e2e');
+
+        $this->assertSame('opaque-access-token', $tokens['access_token']);
+        $this->assertSame('opaque-jwt', $tokens['jwt_token']);
+        Http::assertSentCount(1);
+    }
+
+    public function test_oauth_token_cache_fails_closed_when_exchange_is_rejected(): void
+    {
+        Cache::flush();
+        Http::fake(fn () => Http::response(['error' => 'invalid_client'], 401));
+
+        $cache = new OAuthTokenCache(new HttpOAuthMtlsTransport);
+
+        $this->expectException(SerproBlockedException::class);
+        $this->expectExceptionMessage('serpro_oauth_failed');
+
+        $cache->get($this->credentialsObject(), 'homologacao', 'secret:contratante-e2e');
     }
 
     public function test_call_posts_envelope_with_bearer_token_and_idempotency_tag(): void
@@ -346,6 +389,17 @@ final class HttpOAuthMtlsTransportTest extends TestCase
             'certificate' => $certificate ?? base64_encode('pfx-bytes'),
             'certificate_password' => $password,
         ];
+    }
+
+    private function credentialsObject(): SerproCredentials
+    {
+        return new SerproCredentials(
+            eCnpj: '179024',
+            consumerSecret: 'consumer-secret',
+            contratanteDoc: '65396736000176',
+            certificate: base64_encode('pfx-bytes'),
+            certificatePassword: 'pfx-password',
+        );
     }
 
     /**
