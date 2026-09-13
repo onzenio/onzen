@@ -148,6 +148,57 @@ func TestLoadMissingDatabaseAndNATS(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsNonPositiveNumbers(t *testing.T) {
+	tests := []struct {
+		key   string
+		value string
+	}{
+		{"WZAP_EVENT_RETENTION_DAYS", "0"},
+		{"WZAP_MEDIA_TTL_SECONDS", "-1"},
+		{"WZAP_MAX_MEDIA_BYTES", "0"},
+		{"WZAP_OUTBOX_WORKERS", "-2"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.key+"/"+tt.value, func(t *testing.T) {
+			clearWZAPEnv(t)
+			setRequiredEnv(t)
+			t.Setenv(tt.key, tt.value)
+
+			_, err := Load()
+			if err == nil {
+				t.Fatalf("Load() error = nil, want error naming %s", tt.key)
+			}
+			if !strings.Contains(err.Error(), tt.key) {
+				t.Errorf("Load() error = %q, want it to mention %s", err, tt.key)
+			}
+			if !strings.Contains(err.Error(), "positive") {
+				t.Errorf("Load() error = %q, want it to say the value must be positive", err)
+			}
+		})
+	}
+}
+
+func TestLoadAggregatesProblems(t *testing.T) {
+	clearWZAPEnv(t)
+	t.Setenv("WZAP_EVENT_RETENTION_DAYS", "0")
+	t.Setenv("WZAP_MEDIA_TTL_SECONDS", "0")
+	t.Setenv("WZAP_MAX_MEDIA_BYTES", "0")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() error = nil, want the aggregated error")
+	}
+	for _, key := range []string{
+		"WZAP_SERVICE_TOKEN", "WZAP_DATABASE_URL", "WZAP_NATS_URL",
+		"WZAP_EVENT_RETENTION_DAYS", "WZAP_MEDIA_TTL_SECONDS", "WZAP_MAX_MEDIA_BYTES",
+	} {
+		if !strings.Contains(err.Error(), key) {
+			t.Errorf("Load() error = %q, want it to mention %s", err, key)
+		}
+	}
+}
+
 func TestLoadInvalidValues(t *testing.T) {
 	tests := []struct {
 		key   string

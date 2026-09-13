@@ -72,10 +72,10 @@ func Load() (Config, error) {
 		}
 	}
 
-	cfg.EventRetentionDays = intValue("WZAP_EVENT_RETENTION_DAYS", defaultEventRetentionDays, &problems)
-	cfg.MediaTTLSeconds = intValue("WZAP_MEDIA_TTL_SECONDS", defaultMediaTTLSeconds, &problems)
-	cfg.MaxMediaBytes = int64Value("WZAP_MAX_MEDIA_BYTES", defaultMaxMediaBytes, &problems)
-	cfg.OutboxWorkers = intValue("WZAP_OUTBOX_WORKERS", defaultOutboxWorkers, &problems)
+	cfg.EventRetentionDays = positiveIntValue("WZAP_EVENT_RETENTION_DAYS", defaultEventRetentionDays, &problems)
+	cfg.MediaTTLSeconds = positiveIntValue("WZAP_MEDIA_TTL_SECONDS", defaultMediaTTLSeconds, &problems)
+	cfg.MaxMediaBytes = positiveInt64Value("WZAP_MAX_MEDIA_BYTES", defaultMaxMediaBytes, &problems)
+	cfg.OutboxWorkers = positiveIntValue("WZAP_OUTBOX_WORKERS", defaultOutboxWorkers, &problems)
 	cfg.Humanize = boolValue("WZAP_HUMANIZE", false, &problems)
 	cfg.AutoMigrate = boolValue("WZAP_AUTO_MIGRATE", defaultAutoMigrate, &problems)
 
@@ -93,7 +93,9 @@ func envOrDefault(name, fallback string) string {
 	return fallback
 }
 
-func intValue(name string, fallback int, problems *[]string) int {
+// positiveIntValue reads a numeric variable that is only meaningful when it is
+// positive, reporting malformed and non-positive values.
+func positiveIntValue(name string, fallback int, problems *[]string) int {
 	raw := os.Getenv(name)
 	if raw == "" {
 		return fallback
@@ -103,10 +105,15 @@ func intValue(name string, fallback int, problems *[]string) int {
 		*problems = append(*problems, fmt.Sprintf("%s must be an integer, got %q", name, raw))
 		return fallback
 	}
+	if value <= 0 {
+		*problems = append(*problems, fmt.Sprintf("%s must be positive, got %q", name, raw))
+		return fallback
+	}
 	return value
 }
 
-func int64Value(name string, fallback int64, problems *[]string) int64 {
+// positiveInt64Value is positiveIntValue for 64-bit values such as byte sizes.
+func positiveInt64Value(name string, fallback int64, problems *[]string) int64 {
 	raw := os.Getenv(name)
 	if raw == "" {
 		return fallback
@@ -114,6 +121,10 @@ func int64Value(name string, fallback int64, problems *[]string) int64 {
 	value, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil {
 		*problems = append(*problems, fmt.Sprintf("%s must be an integer, got %q", name, raw))
+		return fallback
+	}
+	if value <= 0 {
+		*problems = append(*problems, fmt.Sprintf("%s must be positive, got %q", name, raw))
 		return fallback
 	}
 	return value
