@@ -1,10 +1,12 @@
 package message
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
@@ -561,21 +563,28 @@ func TestOutboxHumanizeDisabledSkipsPresence(t *testing.T) {
 	}
 }
 
-func TestOutboxHumanizePresenceFailureRetries(t *testing.T) {
+func TestOutboxHumanizePresenceFailureIsBestEffort(t *testing.T) {
 	fixture := newOutboxFixture(textMessage(uuid.Nil, 0))
 	fixture.outbox.humanizer = Humanizer{Enabled: true, Sleep: func(context.Context, time.Duration) error { return nil }}
-	fixture.session.SendPresenceErr = fmt.Errorf("%w: presence failed", session.ErrTransient)
+	fixture.session.SendPresenceErr = errors.New("websocket write failed")
+
+	var logs bytes.Buffer
+	fixture.outbox.log = slog.New(slog.NewTextHandler(&logs, nil))
 
 	runOutbox(t, fixture)
 
-	if len(fixture.repo.retryCalls()) != 1 {
-		t.Fatalf("MarkRetrying calls = %d, want the transient presence failure retried", len(fixture.repo.retryCalls()))
+	if len(fixture.session.SendCalls()) != 1 {
+		t.Fatalf("session sends = %d, want the message sent despite the presence failure", len(fixture.session.SendCalls()))
 	}
-	if len(fixture.session.SendCalls()) != 0 {
-		t.Error("the message was sent despite the presence failure")
+	if len(fixture.repo.sentIDs()) != 1 {
+		t.Errorf("sent = %d messages, want the message delivered", len(fixture.repo.sentIDs()))
 	}
-	if len(fixture.repo.failedMessages()) != 0 {
-		t.Error("the message was failed on a retryable presence error")
+	if len(fixture.repo.retryCalls()) != 0 || len(fixture.repo.failedMessages()) != 0 {
+		t.Errorf("retries = %d, failures = %d, want neither for a best-effort presence failure",
+			len(fixture.repo.retryCalls()), len(fixture.repo.failedMessages()))
+	}
+	if !strings.Contains(logs.String(), "presence") || !strings.Contains(logs.String(), "websocket write failed") {
+		t.Errorf("logs = %q, want the presence failure logged", logs.String())
 	}
 }
 

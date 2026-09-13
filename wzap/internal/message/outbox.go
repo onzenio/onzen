@@ -241,14 +241,25 @@ func (o *Outbox) process(ctx context.Context, msg model.OutboundMessage) {
 	o.complete(ctx, msg, whatsappID)
 }
 
-// simulatePresence types before the send when humanization is enabled. v1 keeps
-// no inbound history, so a send cannot be told apart from an open conversation;
-// the delay always uses the open-conversation profile, and first contact stays
-// available for when that signal exists. The media size arrives with the media
-// pipeline, so media messages currently use the base delay only.
+// simulatePresence types before the send when humanization is enabled. Presence
+// is best effort: a typing-indicator hiccup must not retry or fail a message
+// that was never sent, so it is logged and the send proceeds. A canceled
+// context still aborts, leaving the message in sending for the recovery. v1
+// keeps no inbound history, so a send cannot be told apart from an open
+// conversation; the delay always uses the open-conversation profile, and first
+// contact stays available for when that signal exists. The media size arrives
+// with the media pipeline, so media messages currently use the base delay only.
 func (o *Outbox) simulatePresence(ctx context.Context, sess session.Session, msg model.OutboundMessage) error {
 	delay := o.humanizer.PresenceFor(msg.Type, contentTextLen(msg.Type, msg.Payload), 0, false)
-	return o.humanizer.BeforeSend(ctx, sess, msg.RecipientJID, delay)
+	if err := o.humanizer.BeforeSend(ctx, sess, msg.RecipientJID, delay); err != nil {
+		if ctx.Err() != nil {
+			// Shutdown or timeout: leave the message in sending for the
+			// recovery instead of sending it on a dead context.
+			return err
+		}
+		o.log.WarnContext(ctx, "simulate send presence", "message_id", msg.ID, "error", err)
+	}
+	return nil
 }
 
 // contentTextLen returns the typing budget of a stored payload: the length of a
