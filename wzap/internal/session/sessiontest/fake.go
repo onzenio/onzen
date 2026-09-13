@@ -155,10 +155,11 @@ type FakeSession struct {
 	// are reported as not registered.
 	OnWhatsApp map[string]string
 
-	connectCalls    int
-	disconnectCalls int
-	sends           []session.OutboundMessage
-	presences       []PresenceCall
+	connectCalls      int
+	disconnectCalls   int
+	isOnWhatsAppCalls int
+	sends             []session.OutboundMessage
+	presences         []PresenceCall
 }
 
 // NewSession returns a standalone fake session for tests that do not go
@@ -218,6 +219,7 @@ func (s *FakeSession) Send(_ context.Context, msg session.OutboundMessage) (stri
 func (s *FakeSession) IsOnWhatsApp(_ context.Context, phone string) (string, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.isOnWhatsAppCalls++
 	if s.IsOnWhatsAppErr != nil {
 		return "", false, s.IsOnWhatsAppErr
 	}
@@ -287,6 +289,13 @@ func (s *FakeSession) DisconnectCalls() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.disconnectCalls
+}
+
+// IsOnWhatsAppCalls returns how many times IsOnWhatsApp was called.
+func (s *FakeSession) IsOnWhatsAppCalls() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.isOnWhatsAppCalls
 }
 
 // SendCalls returns the outbound messages passed to Send, in order.

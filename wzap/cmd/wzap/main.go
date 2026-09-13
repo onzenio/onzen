@@ -21,6 +21,7 @@ import (
 	"onefisc/wzap/internal/events"
 	"onefisc/wzap/internal/httpapi"
 	"onefisc/wzap/internal/instance"
+	"onefisc/wzap/internal/message"
 	"onefisc/wzap/internal/session/whatsmeow"
 	"onefisc/wzap/internal/storage/postgres"
 	"onefisc/wzap/internal/version"
@@ -129,6 +130,7 @@ func serve() error {
 	defer func() { _ = sessions.Close() }()
 
 	service := instance.NewService(instances, sessions, nil)
+	numbers := message.NewJIDResolver(sessions, postgres.NewJIDCacheRepository(pool), log)
 
 	// Restore the persisted sessions before serving. Per-instance failures are
 	// reflected in instances.status by the manager; only an aborted restore is
@@ -140,7 +142,7 @@ func serve() error {
 		log.Warn("restore sessions not completed", "error", restoreErr)
 	}
 
-	srv := httpapi.New(cfg, log, httpapi.Deps{ReadyChecker: checker, Instances: service})
+	srv := httpapi.New(cfg, log, httpapi.Deps{ReadyChecker: checker, Instances: service, Numbers: numbers})
 
 	relayCtx, stopRelay := context.WithCancel(ctx)
 	defer stopRelay()

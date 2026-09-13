@@ -22,6 +22,7 @@ type ReadyChecker interface {
 type Deps struct {
 	ReadyChecker ReadyChecker
 	Instances    InstanceService
+	Numbers      NumberResolver
 }
 
 // New builds the HTTP server with the middleware chain, the health endpoints
@@ -41,6 +42,7 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *http.Server {
 	api.HandleFunc("POST /api/v1/instances/{id}/disconnect", handleDisconnectInstance(deps.Instances))
 	api.HandleFunc("GET /api/v1/instances/{id}/qr", handleQRInstance(deps.Instances))
 	api.HandleFunc("GET /api/v1/instances/{id}/status", handleInstanceStatus(deps.Instances))
+	api.HandleFunc("POST /api/v1/instances/{id}/numbers/check", handleCheckNumber(deps.Instances, deps.Numbers))
 	mux.Handle("/api/v1/", Auth(cfg.ServiceToken)(api))
 
 	return &http.Server{
