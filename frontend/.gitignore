@@ -15,13 +15,29 @@ logs
 
 # Misc
 .DS_Store
+Thumbs.db
 .fleet
 .idea
+.vscode
+.history
 
 # Local env files
 .env
 .env.*
 !.env.example
 
-# VSC
-.history
+# Tooling / test artifacts
+.eslintcache
+*.tsbuildinfo
+coverage
+playwright-report
+test-results
+
+# Generated declarations
+/auto-imports.d.ts
+/components.d.ts
+
+# Package manager / deployment
+.pnpm-store
+.vercel
+.netlify

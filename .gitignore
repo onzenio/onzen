@@ -3,6 +3,19 @@
 /node_modules
 /vendor
 .env
+.env.*
+!.env.example
 .DS_Store
+Thumbs.db
+*.log
+npm-debug.log*
+yarn-error.log*
+
+# Editors / IDE
 /.idea
 /.vscode
+/.fleet
+/.history
+
+# Git worktrees
+/.worktrees/

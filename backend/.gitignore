@@ -1,8 +1,8 @@
 *.log
 .DS_Store
 .env
-.env.backup
-.env.production
+.env.*
+!.env.example
 .phpactor.json
 .phpunit.result.cache
 /.codex
@@ -22,6 +22,14 @@
 /storage/pail
 /vendor
 _ide_helper.php
+_ide_helper_models.php
+.phpstorm.meta.php
 Homestead.json
 Homestead.yaml
 Thumbs.db
+composer.phar
+
+# Tooling caches
+/.phpstan/
+/.php-cs-fixer.cache
+/storage/debugbar/
