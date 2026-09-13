@@ -4,10 +4,18 @@ namespace Tests;
 
 use App\Models\Account;
 use App\Models\User;
+use App\Support\CurrentAccount;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 
 abstract class TestCase extends BaseTestCase
 {
+    protected function tearDown(): void
+    {
+        CurrentAccount::clear();
+
+        parent::tearDown();
+    }
+
     /**
      * Create an Account for tests. Kept stable for reuse by later blocks.
      *

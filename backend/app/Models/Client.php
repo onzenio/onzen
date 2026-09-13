@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Concerns\BelongsToAccount;
 use Database\Factories\ClientFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -21,7 +22,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class Client extends Model
 {
     /** @use HasFactory<ClientFactory> */
-    use HasFactory;
+    use BelongsToAccount, HasFactory;
 
     /**
      * @return BelongsTo<Account, $this>

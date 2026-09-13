@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Concerns\BelongsToAccount;
 use App\Enums\UserRole;
 use Carbon\CarbonInterface;
 use Database\Factories\InvitationFactory;
@@ -25,7 +26,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class Invitation extends Model
 {
     /** @use HasFactory<InvitationFactory> */
-    use HasFactory;
+    use BelongsToAccount, HasFactory;
 
     /**
      * @return BelongsTo<Account, $this>
