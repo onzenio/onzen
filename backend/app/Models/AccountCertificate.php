@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Concerns\BelongsToAccount;
+use App\Contracts\VaultResolver;
 use App\Services\AuditService;
 use App\Support\VaultRef;
 use Carbon\CarbonInterface;
@@ -75,11 +76,16 @@ class AccountCertificate extends Model
     public function replace(array $attributes, ?User $actor = null): self
     {
         return DB::transaction(function () use ($attributes, $actor): self {
+            $previousVaultRef = $this->vault_ref;
             $previousThumbprint = $this->thumbprint;
             $previousExpiresAt = $this->expires_at;
 
             $this->fill($attributes);
             $this->save();
+
+            if ($previousVaultRef !== null && $previousVaultRef !== $this->vault_ref) {
+                app(VaultResolver::class)->forget($previousVaultRef);
+            }
 
             SerproRequestAuthor::query()
                 ->withoutGlobalScope('account')
