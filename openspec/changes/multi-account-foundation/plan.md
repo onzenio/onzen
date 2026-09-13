@@ -236,7 +236,7 @@ Sessões: `SESSION_DRIVER=database` exige tabela `sessions` — gerar (`php arti
 
 - [ ] **Step 3: RED→GREEN `tests/Feature/AuthenticationTest.php`**
 
-Login válido (`postJson('/login', [...])` → 200 + autenticado em `getJson('/api/me')`), login inválido (422 + mensagem genérica, sem revelar existência), logout (204 + `getJson('/api/me')` → 401), reset válido (notificação via `Notification::fake`, `postJson('/reset-password')` → 200 + sessões invalidadas), token expirado/inválido (422). Rate limiting: `assert` 429 após 5 tentativas? Cobrir com ` Ismail`? Manter simples: 1 teste de throttle no login (6 POSTs rápidos → 429) — se flaky, fixar com `RateLimiter::clear` no setUp.
+Login válido (`postJson('/login', [...])` → 200 + autenticado em `getJson('/api/me')`), login inválido (422 + mensagem genérica, sem revelar existência), logout (204 + `getJson('/api/me')` → 401), reset válido (notificação via `Notification::fake`, `postJson('/reset-password')` → 200 + sessões invalidadas), token expirado/inválido (422). Rate limiting: 1 teste de throttle no login (6 POSTs rápidos → 429) — se flaky, fixar com `RateLimiter::clear` no setUp.
 
 - [ ] **Step 4: Contrato de sessão (task 3.2)**
 
