@@ -112,6 +112,28 @@ class AuthenticationTest extends TestCase
         $user = $this->createUser(attributes: ['email' => 'auth-reset-valid@example.com']);
         $rememberBefore = $user->remember_token;
 
+        // Prova de invalidação de sessões: em produção SESSION_DRIVER=database,
+        // então as linhas em `sessions` SÃO as sessões vivas. Semeia uma sessão
+        // pré-reset do usuário + uma linha de controle de outro usuário
+        // (nos testes o driver é array, mas a tabela existe via RefreshDatabase).
+        $otherUser = $this->createUser(attributes: ['email' => 'auth-reset-other@example.com']);
+        DB::table('sessions')->insert([
+            'id' => 'pre-reset-session-id',
+            'user_id' => $user->getAuthIdentifier(),
+            'ip_address' => '127.0.0.1',
+            'user_agent' => 'phpunit',
+            'payload' => 'test',
+            'last_activity' => now()->getTimestamp(),
+        ]);
+        DB::table('sessions')->insert([
+            'id' => 'other-user-session-id',
+            'user_id' => $otherUser->getAuthIdentifier(),
+            'ip_address' => '127.0.0.1',
+            'user_agent' => 'phpunit',
+            'payload' => 'test',
+            'last_activity' => now()->getTimestamp(),
+        ]);
+
         $this->postJson('/forgot-password', [
             'email' => 'auth-reset-valid@example.com',
         ])->assertOk();
@@ -135,6 +157,10 @@ class AuthenticationTest extends TestCase
 
         $this->assertTrue(Hash::check('new-secure-password', $user->password));
         $this->assertNotSame($rememberBefore, $user->remember_token);
+
+        // Sessões pré-reset do usuário morrem; as de outros usuários sobrevivem.
+        $this->assertDatabaseMissing('sessions', ['id' => 'pre-reset-session-id']);
+        $this->assertDatabaseHas('sessions', ['id' => 'other-user-session-id']);
 
         $this->postJson('/login', [
             'email' => 'auth-reset-valid@example.com',

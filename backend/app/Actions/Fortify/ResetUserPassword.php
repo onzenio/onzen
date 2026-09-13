@@ -3,6 +3,7 @@
 namespace App\Actions\Fortify;
 
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
@@ -28,5 +29,10 @@ class ResetUserPassword implements ResetsUserPasswords
         $user->forceFill([
             'password' => Hash::make($input['password']),
         ])->save();
+
+        // Mata sessões anteriores: com SESSION_DRIVER=database (produção) as
+        // linhas em `sessions` são as sessões vivas; sem isto, cookies de
+        // sessão roubados/perdidos continuariam válidos após o reset.
+        DB::table('sessions')->where('user_id', $user->getAuthIdentifier())->delete();
     }
 }
