@@ -2,6 +2,7 @@
 
 namespace App\Services\Monitoring;
 
+use App\Concerns\EmitsSerproEvents;
 use App\Contracts\SerproEvents;
 use App\Events\Monitoring\SerproActionFinished;
 use App\Events\Monitoring\SerproRunFinished;
@@ -31,7 +32,7 @@ use Throwable;
  * Best-effort by design: a broken log channel or a throwing listener is
  * swallowed and recorded as a technical log only, so event emission can never
  * break a run. Callers that need defence against a broken emitter itself wrap
- * the call too (see {@see SerproExecutor::emit()}).
+ * the call too (see {@see EmitsSerproEvents}).
  */
 final class SerproEventEmitter implements SerproEvents
 {
@@ -57,7 +58,7 @@ final class SerproEventEmitter implements SerproEvents
                 ...$this->runContext($run),
                 'status' => $run->status->value,
                 'attempt' => $this->lastAttempt($run),
-                'error_code' => $run->error_code,
+                'error_code' => Redactor::text($run->error_code),
                 'reason' => Redactor::text($reason),
                 'retryable' => ! $run->status->isTerminal(),
                 'terminal' => $run->status->isTerminal(),
@@ -101,7 +102,7 @@ final class SerproEventEmitter implements SerproEvents
                 'client_id' => $clientId,
                 'operation_code' => $operationCode,
                 'status' => $status,
-                'error_code' => $errorCode,
+                'error_code' => Redactor::text($errorCode),
                 'reason' => Redactor::text($reason),
                 'retryable' => $retryable,
                 'terminal' => $terminal,

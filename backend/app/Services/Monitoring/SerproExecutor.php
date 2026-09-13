@@ -2,6 +2,7 @@
 
 namespace App\Services\Monitoring;
 
+use App\Concerns\EmitsSerproEvents;
 use App\Contracts\ResultProjector;
 use App\Contracts\SerproEvents;
 use App\Contracts\SerproTransport;
@@ -25,11 +26,9 @@ use App\Models\MonitoringEnrollment;
 use App\Models\MonitoringRun;
 use App\Models\SerproContract;
 use App\Models\SerproRequestAuthor;
-use App\Support\Redactor;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 use Throwable;
@@ -64,6 +63,8 @@ use Throwable;
  */
 final class SerproExecutor
 {
+    use EmitsSerproEvents;
+
     private const SOURCE_FIXTURE = 'fixture';
 
     private const SOURCE_SERPRO = 'serpro';
@@ -228,7 +229,7 @@ final class SerproExecutor
         // reaches the single finish/discard seam, which emits exactly one
         // `serpro_run_finished`. Emission is best-effort and never breaks the
         // run.
-        $this->emit('serpro_run_started', fn () => $this->events->runStarted($run));
+        $this->emitSerproEvent('serpro_run_started', fn () => $this->events->runStarted($run));
 
         try {
             if (trim((string) $run->operation_code) === '') {
@@ -631,29 +632,7 @@ final class SerproExecutor
      */
     private function emitFinished(MonitoringRun $run, ?string $reason = null): void
     {
-        $this->emit('serpro_run_finished', fn () => $this->events->runFinished($run, $reason));
-    }
-
-    /**
-     * Emission is best-effort: a throwing listener, log channel or emitter
-     * implementation is recorded as a technical log and never breaks the run.
-     *
-     * @param  callable(): void  $emission
-     */
-    private function emit(string $event, callable $emission): void
-    {
-        try {
-            $emission();
-        } catch (Throwable $exception) {
-            try {
-                Log::error('serpro_event_emission_failed', [
-                    'event' => $event,
-                    'error' => Redactor::text($exception->getMessage()),
-                ]);
-            } catch (Throwable) {
-                // A broken log channel must never break the execution either.
-            }
-        }
+        $this->emitSerproEvent('serpro_run_finished', fn () => $this->events->runFinished($run, $reason));
     }
 
     private function recordAttempt(

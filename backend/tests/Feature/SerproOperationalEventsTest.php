@@ -11,14 +11,18 @@ use App\Enums\MonitoringRunStatus;
 use App\Events\Monitoring\SerproActionFinished;
 use App\Events\Monitoring\SerproRunFinished;
 use App\Events\Monitoring\SerproRunStarted;
+use App\Jobs\ExecuteSerproJob;
 use App\Models\Account;
 use App\Models\Client;
 use App\Models\MonitoringDefinition;
 use App\Models\MonitoringEnrollment;
 use App\Models\MonitoringRun;
+use App\Models\Plan;
 use App\Models\SerproContract;
 use App\Models\SerproRequestAuthor;
 use App\Models\SerproSettings;
+use App\Services\Monitoring\MonitoringScheduler;
+use App\Services\Monitoring\QueryQuotaService;
 use App\Services\Monitoring\SerproEventEmitter;
 use App\Services\Monitoring\SerproExecutor;
 use DateTimeInterface;
@@ -26,6 +30,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\ValidationException;
 use Mockery;
 use RuntimeException;
 use Tests\Support\FakeResultProjector;
@@ -186,33 +191,7 @@ final class SerproOperationalEventsTest extends TestCase
     {
         Log::spy();
 
-        $this->app->instance(SerproEvents::class, new class implements SerproEvents
-        {
-            public function runStarted(MonitoringRun $run): void
-            {
-                throw new RuntimeException('event sink down');
-            }
-
-            public function runFinished(MonitoringRun $run, ?string $reason = null): void
-            {
-                throw new RuntimeException('event sink down');
-            }
-
-            public function actionFinished(
-                string $requestId,
-                string $accountId,
-                string $operationCode,
-                string $status,
-                ?string $clientId = null,
-                ?string $errorCode = null,
-                ?string $reason = null,
-                bool $retryable = false,
-                bool $terminal = true,
-                ?DateTimeInterface $finishedAt = null,
-            ): void {
-                throw new RuntimeException('event sink down');
-            }
-        });
+        $this->app->instance(SerproEvents::class, $this->throwingEvents());
 
         $account = $this->createAccount();
         $enrollment = $this->enrollment($account, 'CONSDECLARACAO13');
@@ -233,6 +212,166 @@ final class SerproOperationalEventsTest extends TestCase
         Log::shouldHaveReceived('error')
             ->with('serpro_event_emission_failed', Mockery::type('array'))
             ->atLeast()->once();
+    }
+
+    public function test_queue_exhaustion_emits_finished_with_the_exhausted_outcome(): void
+    {
+        Event::fake([SerproRunStarted::class, SerproRunFinished::class]);
+
+        $account = $this->createAccount();
+        $enrollment = $this->enrollment($account, 'CONSDECLARACAO13');
+        $run = $this->executor()->claim($enrollment, 'events-exhausted-key');
+
+        (new ExecuteSerproJob($run->id))->failed(new RuntimeException('queue exhausted'));
+
+        $run->refresh();
+
+        $this->assertSame(MonitoringRunStatus::Failed, $run->status);
+        $this->assertSame(ExecuteSerproJob::ERROR_EXHAUSTED, $run->error_code);
+
+        Event::assertNotDispatched(SerproRunStarted::class);
+        Event::assertDispatched(SerproRunFinished::class, function (SerproRunFinished $event) use ($run, $account, $enrollment): bool {
+            $context = $event->context;
+
+            $this->assertSame((string) $run->id, $context['run_id']);
+            $this->assertSame((string) $account->id, $context['account_id']);
+            $this->assertSame((string) $enrollment->client_id, $context['client_id']);
+            $this->assertSame('failed', $context['status']);
+            $this->assertSame(ExecuteSerproJob::ERROR_EXHAUSTED, $context['error_code']);
+            $this->assertTrue($context['terminal']);
+            $this->assertFalse($context['retryable']);
+
+            return true;
+        });
+    }
+
+    public function test_queue_exhaustion_event_failure_does_not_break_the_job(): void
+    {
+        Log::spy();
+
+        $this->app->instance(SerproEvents::class, $this->throwingEvents());
+
+        $account = $this->createAccount();
+        $enrollment = $this->enrollment($account, 'CONSDECLARACAO13');
+        $run = $this->executor()->claim($enrollment, 'events-exhausted-failure-key');
+
+        (new ExecuteSerproJob($run->id))->failed(new RuntimeException('queue exhausted'));
+
+        $this->assertSame(MonitoringRunStatus::Failed, $run->refresh()->status);
+        $this->assertSame(ExecuteSerproJob::ERROR_EXHAUSTED, $run->error_code);
+
+        Log::shouldHaveReceived('error')
+            ->with('serpro_event_emission_failed', Mockery::type('array'))
+            ->atLeast()->once();
+    }
+
+    public function test_scheduler_quota_block_emits_finished_with_the_blocked_outcome(): void
+    {
+        Event::fake([SerproRunStarted::class, SerproRunFinished::class]);
+
+        $account = $this->exhaustedAccount();
+        $enrollment = $this->enrollment($account, 'CONSDECLARACAO13');
+
+        try {
+            app(MonitoringScheduler::class)->schedule($enrollment);
+            $this->fail('The scheduler should have refused the exhausted quota.');
+        } catch (ValidationException) {
+            // Expected: quota refusal rethrows the 422 upgrade message.
+        }
+
+        $run = MonitoringRun::query()->where('account_id', $account->id)->firstOrFail();
+
+        $this->assertSame(MonitoringRunStatus::Blocked, $run->status);
+        $this->assertSame(QueryQuotaService::ERROR_EXCEEDED, $run->error_code);
+
+        Event::assertNotDispatched(SerproRunStarted::class);
+        Event::assertDispatched(SerproRunFinished::class, function (SerproRunFinished $event) use ($run, $account, $enrollment): bool {
+            $context = $event->context;
+
+            $this->assertSame((string) $run->id, $context['run_id']);
+            $this->assertSame((string) $account->id, $context['account_id']);
+            $this->assertSame((string) $enrollment->client_id, $context['client_id']);
+            $this->assertSame('blocked', $context['status']);
+            $this->assertSame(QueryQuotaService::ERROR_EXCEEDED, $context['error_code']);
+            $this->assertTrue($context['terminal']);
+            $this->assertFalse($context['retryable']);
+
+            return true;
+        });
+    }
+
+    public function test_scheduler_block_event_failure_does_not_break_the_scheduler(): void
+    {
+        Log::spy();
+
+        $this->app->instance(SerproEvents::class, $this->throwingEvents());
+
+        $account = $this->exhaustedAccount();
+        $enrollment = $this->enrollment($account, 'CONSDECLARACAO13');
+
+        try {
+            app(MonitoringScheduler::class)->schedule($enrollment);
+            $this->fail('The scheduler should have refused the exhausted quota.');
+        } catch (ValidationException) {
+            // Expected: the emitter failure never masks the quota refusal.
+        }
+
+        $run = MonitoringRun::query()->where('account_id', $account->id)->firstOrFail();
+
+        $this->assertSame(MonitoringRunStatus::Blocked, $run->status);
+        $this->assertDatabaseHas('monitoring_attempts', [
+            'run_id' => $run->id,
+            'attempt' => 1,
+            'status' => 'blocked',
+            'classification' => QueryQuotaService::ERROR_EXCEEDED,
+        ]);
+
+        Log::shouldHaveReceived('error')
+            ->with('serpro_event_emission_failed', Mockery::type('array'))
+            ->atLeast()->once();
+    }
+
+    public function test_error_code_is_redacted_in_the_finished_payload(): void
+    {
+        Event::fake([SerproRunFinished::class]);
+
+        $account = $this->createAccount();
+        $enrollment = $this->enrollment($account, 'CONSDECLARACAO13');
+        $run = $this->executor()->claim($enrollment, 'events-code-redaction-key');
+        $run->forceFill([
+            'status' => MonitoringRunStatus::Failed,
+            'error_code' => 'token=CANARY-ERROR-CODE',
+            'finished_at' => now(),
+        ])->save();
+
+        app(SerproEventEmitter::class)->runFinished($run);
+
+        Event::assertDispatched(SerproRunFinished::class, function (SerproRunFinished $event): bool {
+            $this->assertSame('token=[redacted]', $event->context['error_code']);
+            $this->assertStringNotContainsString('CANARY-ERROR-CODE', (string) json_encode($event->context));
+
+            return true;
+        });
+    }
+
+    public function test_action_error_code_is_redacted_too(): void
+    {
+        Event::fake([SerproActionFinished::class]);
+
+        app(SerproEventEmitter::class)->actionFinished(
+            requestId: '93',
+            accountId: '7',
+            operationCode: 'EMITIRDAS12',
+            status: 'failed',
+            errorCode: 'pfx=CANARY-ACTION-CODE',
+        );
+
+        Event::assertDispatched(SerproActionFinished::class, function (SerproActionFinished $event): bool {
+            $this->assertSame('pfx=[redacted]', $event->context['error_code']);
+            $this->assertStringNotContainsString('CANARY-ACTION-CODE', (string) json_encode($event->context));
+
+            return true;
+        });
     }
 
     public function test_action_finished_emitter_api_emits_a_redacted_structured_payload(): void
@@ -354,5 +493,43 @@ final class SerproOperationalEventsTest extends TestCase
         $this->app->instance(SerproTransport::class, $transport);
 
         return $transport;
+    }
+
+    private function exhaustedAccount(): Account
+    {
+        $plan = Plan::factory()->create(['monthly_query_volume' => 0]);
+
+        return $this->createAccount(['plan_id' => $plan->id]);
+    }
+
+    private function throwingEvents(): SerproEvents
+    {
+        return new class implements SerproEvents
+        {
+            public function runStarted(MonitoringRun $run): void
+            {
+                throw new RuntimeException('event sink down');
+            }
+
+            public function runFinished(MonitoringRun $run, ?string $reason = null): void
+            {
+                throw new RuntimeException('event sink down');
+            }
+
+            public function actionFinished(
+                string $requestId,
+                string $accountId,
+                string $operationCode,
+                string $status,
+                ?string $clientId = null,
+                ?string $errorCode = null,
+                ?string $reason = null,
+                bool $retryable = false,
+                bool $terminal = true,
+                ?DateTimeInterface $finishedAt = null,
+            ): void {
+                throw new RuntimeException('event sink down');
+            }
+        };
     }
 }

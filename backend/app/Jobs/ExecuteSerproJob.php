@@ -2,6 +2,8 @@
 
 namespace App\Jobs;
 
+use App\Concerns\EmitsSerproEvents;
+use App\Contracts\SerproEvents;
 use App\Enums\MonitoringRunStatus;
 use App\Exceptions\InvalidRunTransitionException;
 use App\Models\MonitoringRun;
@@ -25,7 +27,7 @@ use Throwable;
  */
 final class ExecuteSerproJob implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable;
+    use Dispatchable, EmitsSerproEvents, InteractsWithQueue, Queueable;
 
     public const ERROR_EXHAUSTED = 'queue_attempts_exhausted';
 
@@ -73,7 +75,9 @@ final class ExecuteSerproJob implements ShouldQueue
 
     /**
      * The queue exhausted its attempts: mark the run with the factual reason
-     * without throwing from the failure callback.
+     * without throwing from the failure callback, and emit the terminal
+     * `serpro_run_finished` (Task 19) so operators do not keep seeing the last
+     * retryable event. Emission is best-effort and never breaks the callback.
      */
     public function failed(?Throwable $exception): void
     {
@@ -85,23 +89,27 @@ final class ExecuteSerproJob implements ShouldQueue
 
         try {
             if ($run->status->canTransitionTo(MonitoringRunStatus::Failed)) {
-                $run->transitionTo(MonitoringRunStatus::Failed, [
+                $run = $run->transitionTo(MonitoringRunStatus::Failed, [
                     'error_code' => self::ERROR_EXHAUSTED,
                 ]);
-
-                return;
+            } else {
+                // `pending` has no edge to `failed`: the job threw before the
+                // run started, so record the factual outcome directly.
+                $run->forceFill([
+                    'status' => MonitoringRunStatus::Failed,
+                    'error_code' => self::ERROR_EXHAUSTED,
+                    'finished_at' => now(),
+                ])->save();
             }
-
-            // `pending` has no edge to `failed`: the job threw before the run
-            // started, so record the factual outcome directly.
-            $run->forceFill([
-                'status' => MonitoringRunStatus::Failed,
-                'error_code' => self::ERROR_EXHAUSTED,
-                'finished_at' => now(),
-            ])->save();
         } catch (InvalidRunTransitionException) {
             // Another worker settled the run first; nothing factual to mark.
+            return;
         }
+
+        $this->emitSerproEvent(
+            'serpro_run_finished',
+            fn () => app(SerproEvents::class)->runFinished($run),
+        );
     }
 
     private function run(): ?MonitoringRun

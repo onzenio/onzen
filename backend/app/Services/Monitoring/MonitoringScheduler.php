@@ -2,6 +2,8 @@
 
 namespace App\Services\Monitoring;
 
+use App\Concerns\EmitsSerproEvents;
+use App\Contracts\SerproEvents;
 use App\Enums\MonitoringRunStatus;
 use App\Exceptions\SerproBlockedException;
 use App\Jobs\ExecuteSerproJob;
@@ -36,11 +38,14 @@ use Illuminate\Validation\ValidationException;
  */
 final class MonitoringScheduler
 {
+    use EmitsSerproEvents;
+
     private const TIMEZONE = 'America/Sao_Paulo';
 
     public function __construct(
         private readonly SerproExecutor $executor,
         private readonly QueryQuotaService $quota,
+        private readonly SerproEvents $events,
     ) {}
 
     /**
@@ -230,7 +235,7 @@ final class MonitoringScheduler
             return;
         }
 
-        $run->transitionTo(MonitoringRunStatus::Blocked, ['error_code' => $reason]);
+        $run = $run->transitionTo(MonitoringRunStatus::Blocked, ['error_code' => $reason]);
 
         $run->attempts()->create([
             'attempt' => 1,
@@ -239,6 +244,14 @@ final class MonitoringScheduler
             'classification' => $reason,
             'retry_after' => null,
         ]);
+
+        // Task 19: a pre-dispatch block (quota/account refusal) is a terminal
+        // outcome and must be observable like any executor outcome. Emission
+        // is best-effort and never masks the original refusal.
+        $this->emitSerproEvent(
+            'serpro_run_finished',
+            fn () => $this->events->runFinished($run),
+        );
     }
 
     private function findRun(MonitoringEnrollment $enrollment, string $key): ?MonitoringRun
