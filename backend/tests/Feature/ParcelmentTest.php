@@ -185,6 +185,80 @@ final class ParcelmentTest extends TestCase
         $this->assertSame('2026-03-10', $neutralInstallment->due_date?->toDateString());
     }
 
+    public function test_installment_level_payment_facts_are_not_taken_from_the_order(): void
+    {
+        [, $client, $enrollment] = $this->context();
+
+        $this->project($enrollment, 'OBTERPARC194', 'installment-payment', [
+            'source' => 'fixture',
+            'operation_code' => 'OBTERPARC194',
+            'http_status' => 200,
+            'protocol' => null,
+            'eta' => null,
+            'body' => ['dados' => [
+                'numero' => 'PARC-ORDER-194',
+                'id' => 'PARC-ORDER-194',
+                'status' => 'ativo',
+                'valorTotal' => 200.00,
+                'parcelas' => [[
+                    'numeroParcela' => 2,
+                    'id' => 'PARC-ORDER-194-2',
+                    'status' => 'pago',
+                    'valor' => 100.04,
+                    'vencimento' => '2026-03-31',
+                    'numeroDas' => '85800000000000000999',
+                    'dataPagamento' => '2026-03-20',
+                ]],
+            ]],
+        ]);
+
+        // The payment signal lives in the installment row: its facts must
+        // come from the installment, never from the order-level fallback.
+        $payment = ParcelmentPayment::query()->sole();
+
+        $this->assertSame('PARC-ORDER-194-2', $payment->external_id);
+        $this->assertSame('pago', $payment->status);
+        $this->assertSame('100.04', $payment->amount);
+        $this->assertSame('2026-03-20', $payment->paid_at?->toDateString());
+        $this->assertSame($client->id, $payment->client_id);
+    }
+
+    public function test_order_level_payment_facts_still_normalize_from_the_order(): void
+    {
+        [, , $enrollment] = $this->context();
+
+        $this->project($enrollment, 'OBTERPARC204', 'order-payment', [
+            'source' => 'fixture',
+            'operation_code' => 'OBTERPARC204',
+            'http_status' => 200,
+            'protocol' => null,
+            'eta' => null,
+            'body' => ['dados' => [
+                'numero' => 'PARC-ORDER-204',
+                'id' => 'PARC-ORDER-204',
+                'status' => 'ativo',
+                'numeroDas' => '85800000000000000777',
+                'dataPagamento' => '2026-04-15',
+                'parcelas' => [[
+                    'numeroParcela' => 1,
+                    'id' => 'PARC-ORDER-204-1',
+                    'status' => 'available',
+                    'valor' => 50.00,
+                    'vencimento' => '2026-04-30',
+                ]],
+            ]],
+        ]);
+
+        // Legacy port kept: an order-level payment signal normalizes from the
+        // order payload, even when a payment-free installment row exists.
+        $payment = ParcelmentPayment::query()->sole();
+
+        $this->assertSame('PARC-ORDER-204', $payment->external_id);
+        $this->assertSame('ativo', $payment->status);
+        $this->assertSame('2026-04-15', $payment->paid_at?->toDateString());
+        $this->assertSame('PARC-ORDER-204-1', $payment->installment->external_id);
+    }
+
     public function test_projection_is_idempotent_per_run(): void
     {
         [$account, $client, $enrollment] = $this->context();

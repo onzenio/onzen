@@ -151,8 +151,10 @@ final class ParcelmentConsultProjector
                     $provenance,
                 );
 
-                if ($this->hasPayment($data) || $this->hasPayment($installmentData)) {
-                    $this->parcelments->normalizePayment($installment, $data, $provenance);
+                $paymentData = $this->paymentData($data, $installmentData);
+
+                if ($paymentData !== null) {
+                    $this->parcelments->normalizePayment($installment, $paymentData, $provenance);
                 }
             }
         }
@@ -205,5 +207,25 @@ final class ParcelmentConsultProjector
             || isset($data['dataPagamento'])
             || isset($data['data_pagamento'])
             || isset($data['dataArrecadacao']);
+    }
+
+    /**
+     * O payload que carrega os fatos do pagamento: quando o sinal está na
+     * própria parcela, a linha da parcela tem precedência sobre o `dados` do
+     * pedido (merge com a parcela por cima); quando só o pedido carrega o
+     * sinal, o comportamento legado é mantido (pagamento lido do pedido).
+     * `null` quando nenhum dos dois traz sinal — nenhum pagamento é inventado.
+     *
+     * @param  array<string, mixed>  $data
+     * @param  array<string, mixed>  $installmentData
+     * @return array<string, mixed>|null
+     */
+    private function paymentData(array $data, array $installmentData): ?array
+    {
+        if (! $this->hasPayment($installmentData)) {
+            return $this->hasPayment($data) ? $data : null;
+        }
+
+        return array_merge($data, $installmentData);
     }
 }
