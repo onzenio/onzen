@@ -3,6 +3,7 @@
 namespace App\Services\Monitoring;
 
 use App\Contracts\ResultProjector;
+use App\Contracts\SerproEvents;
 use App\Contracts\SerproTransport;
 use App\Enums\MonitoringRunStatus;
 use App\Exceptions\SerproBlockedException;
@@ -24,9 +25,11 @@ use App\Models\MonitoringEnrollment;
 use App\Models\MonitoringRun;
 use App\Models\SerproContract;
 use App\Models\SerproRequestAuthor;
+use App\Support\Redactor;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 use Throwable;
@@ -50,6 +53,11 @@ use Throwable;
  * included). An exhausted Account ends the run factually as `blocked` with
  * `quota_exceeded` instead of throwing from the queue.
  *
+ * Task 19 adds the operational events: `serpro_run_started` is emitted once
+ * the run actually begins execution (after fencing and quota) and
+ * `serpro_run_finished` exactly once per terminal/retryable outcome, with
+ * redacted reasons. Emission is best-effort and never breaks the run.
+ *
  * Fail-closed: a call is only attempted when the effective gate is open, and
  * missing credentials, an inactive enrollment or a missing fixture end the
  * run with a factual code. Nothing sensitive is logged or persisted.
@@ -72,6 +80,7 @@ final class SerproExecutor
         private readonly ConsultMessageClassifier $messages,
         private readonly ProtocolPoller $poller,
         private readonly QueryQuotaService $quota,
+        private readonly SerproEvents $events,
     ) {}
 
     /**
@@ -214,6 +223,13 @@ final class SerproExecutor
             'error_code' => null,
         ]);
 
+        // Task 19: `serpro_run_started` is emitted here — after fencing and
+        // quota, right before any fixture/transport work — and every outcome
+        // reaches the single finish/discard seam, which emits exactly one
+        // `serpro_run_finished`. Emission is best-effort and never breaks the
+        // run.
+        $this->emit('serpro_run_started', fn () => $this->events->runStarted($run));
+
         try {
             if (trim((string) $run->operation_code) === '') {
                 throw new SerproBlockedException('consult_operation_unresolved');
@@ -227,7 +243,13 @@ final class SerproExecutor
         } catch (Throwable $exception) {
             $classification = $this->responseClassifier->classifyException($exception);
 
-            return $this->finish($run, MonitoringRunStatus::Transient, $classification->code, retryAfter: $classification->retryAfter);
+            return $this->finish(
+                $run,
+                MonitoringRunStatus::Transient,
+                $classification->code,
+                retryAfter: $classification->retryAfter,
+                reason: $exception->getMessage(),
+            );
         }
 
         return $this->settle($run, $result);
@@ -502,7 +524,10 @@ final class SerproExecutor
                 return $this->finish($run, MonitoringRunStatus::Failed, 'projection_failed', $responseCode);
             }
 
-            return $run->refresh();
+            $run = $run->refresh();
+            $this->emitFinished($run);
+
+            return $run;
         }
 
         if (! $this->fences($run, $this->enrollmentFor($run))) {
@@ -517,6 +542,8 @@ final class SerproExecutor
         ]);
 
         $this->recordAttempt($run, $status, $responseCode, $classification->code, $classification->retryAfter);
+
+        $this->emitFinished($run);
 
         return $run;
     }
@@ -575,6 +602,8 @@ final class SerproExecutor
 
         $this->recordAttempt($run, MonitoringRunStatus::Discarded, null, MonitoringRun::DISCARDS_SUPERSEDED);
 
+        $this->emitFinished($run);
+
         return $run;
     }
 
@@ -584,12 +613,47 @@ final class SerproExecutor
         string $errorCode,
         ?int $responseCode = null,
         ?int $retryAfter = null,
+        ?string $reason = null,
     ): MonitoringRun {
         $run = $run->transitionTo($status, ['error_code' => $errorCode]);
 
         $this->recordAttempt($run, $status, $responseCode, $errorCode, $retryAfter);
 
+        $this->emitFinished($run, $reason);
+
         return $run;
+    }
+
+    /**
+     * Task 19: the single finish seam — every terminal/retryable outcome
+     * reaches it exactly once, with the factual `error_code` already persisted
+     * and an optional free-form reason that the emitter redacts.
+     */
+    private function emitFinished(MonitoringRun $run, ?string $reason = null): void
+    {
+        $this->emit('serpro_run_finished', fn () => $this->events->runFinished($run, $reason));
+    }
+
+    /**
+     * Emission is best-effort: a throwing listener, log channel or emitter
+     * implementation is recorded as a technical log and never breaks the run.
+     *
+     * @param  callable(): void  $emission
+     */
+    private function emit(string $event, callable $emission): void
+    {
+        try {
+            $emission();
+        } catch (Throwable $exception) {
+            try {
+                Log::error('serpro_event_emission_failed', [
+                    'event' => $event,
+                    'error' => Redactor::text($exception->getMessage()),
+                ]);
+            } catch (Throwable) {
+                // A broken log channel must never break the execution either.
+            }
+        }
     }
 
     private function recordAttempt(

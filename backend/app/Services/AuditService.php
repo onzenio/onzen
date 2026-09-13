@@ -7,6 +7,7 @@ use App\Models\Account;
 use App\Models\AuditLog;
 use App\Models\User;
 use App\Support\CurrentAccount;
+use App\Support\Redactor;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
@@ -21,12 +22,7 @@ use Throwable;
  */
 class AuditService
 {
-    public const REDACTED = '[redacted]';
-
-    /**
-     * @var list<string>
-     */
-    private const SENSITIVE_KEY_FRAGMENTS = ['password', 'secret', 'pfx', 'token'];
+    public const REDACTED = Redactor::REDACTED;
 
     /**
      * Record an audit entry. Canonical contract:
@@ -60,7 +56,7 @@ class AuditService
                     'origin_account_id' => $origin->id,
                     'target_account_id' => null,
                     'action' => $action,
-                    'metadata' => $this->redact($metadata),
+                    'metadata' => Redactor::array($metadata),
                 ]);
                 $log->created_at = now();
                 $log->save();
@@ -90,39 +86,5 @@ class AuditService
             ->where('profile', AccountProfile::A)
             ->orderBy('id')
             ->first();
-    }
-
-    /**
-     * @param  array<array-key, mixed>  $metadata
-     * @return array<array-key, mixed>
-     */
-    private function redact(array $metadata): array
-    {
-        $redacted = [];
-
-        foreach ($metadata as $key => $value) {
-            if (is_string($key) && $this->isSensitiveKey($key)) {
-                $redacted[$key] = self::REDACTED;
-            } elseif (is_array($value)) {
-                $redacted[$key] = $this->redact($value);
-            } else {
-                $redacted[$key] = $value;
-            }
-        }
-
-        return $redacted;
-    }
-
-    private function isSensitiveKey(string $key): bool
-    {
-        $normalized = strtolower($key);
-
-        foreach (self::SENSITIVE_KEY_FRAGMENTS as $fragment) {
-            if (str_contains($normalized, $fragment)) {
-                return true;
-            }
-        }
-
-        return false;
     }
 }
