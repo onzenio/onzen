@@ -18,6 +18,7 @@ use App\Models\SerproRequestAuthor;
 use App\Models\SerproSettings;
 use App\Services\Monitoring\SerproExecutor;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\File;
 use RuntimeException;
 use Tests\Support\FakeResultProjector;
@@ -496,6 +497,235 @@ final class SerproExecutionTest extends TestCase
         $this->assertTrue($run->dry_run);
         $this->assertSame(4, $run->fencing_token);
         $this->assertSame('manual', $run->trigger);
+    }
+
+    public function test_business_rejection_message_is_terminal_without_retry(): void
+    {
+        $projector = $this->projector;
+        $account = $this->createAccount();
+        $transport = $this->openTransport($account);
+        $transport->callResponses = [['status' => 200, 'body' => ['codigo' => 'MSG_ISN_027']]];
+        $enrollment = $this->enrollment($account, 'CONSDECLARACAO13');
+        $executor = $this->executor();
+
+        $run = $executor->execute($executor->claim($enrollment, 'message-rejected-key'));
+
+        $this->assertSame(MonitoringRunStatus::Rejected, $run->status);
+        $this->assertSame('MSG_ISN_027', $run->error_code);
+        $this->assertNotNull($run->finished_at);
+        $this->assertSame(0, $projector->calls());
+        $this->assertCount(1, $transport->callCalls);
+
+        $this->assertDatabaseHas('monitoring_attempts', [
+            'run_id' => $run->id,
+            'status' => 'rejected',
+            'response_code' => 200,
+            'classification' => 'MSG_ISN_027',
+        ]);
+
+        $again = $executor->execute($run);
+
+        $this->assertSame(MonitoringRunStatus::Rejected, $again->status);
+        $this->assertCount(1, $transport->callCalls, 'A rejected run must never retry.');
+        $this->assertDatabaseCount('monitoring_attempts', 1);
+    }
+
+    public function test_transient_message_code_records_backoff_without_projection(): void
+    {
+        $projector = $this->projector;
+        $account = $this->createAccount();
+        $transport = $this->openTransport($account);
+        $transport->callResponses = [['status' => 200, 'body' => ['codigo' => 'MSG_ISN_012']]];
+        $enrollment = $this->enrollment($account, 'CONSDECLARACAO13');
+
+        $run = $this->executor()->execute(
+            $this->executor()->claim($enrollment, 'message-transient-key'),
+        );
+
+        $this->assertSame(MonitoringRunStatus::Transient, $run->status);
+        $this->assertSame('MSG_ISN_012', $run->error_code);
+        $this->assertSame(0, $projector->calls());
+
+        $this->assertDatabaseHas('monitoring_attempts', [
+            'run_id' => $run->id,
+            'status' => 'transient',
+            'response_code' => 200,
+            'classification' => 'MSG_ISN_012',
+            'retry_after' => 60,
+        ]);
+    }
+
+    public function test_protocol_pending_is_polled_with_the_protocol_payload_and_never_repeats_the_original(): void
+    {
+        $projector = $this->projector;
+        $account = $this->createAccount();
+        $transport = $this->openTransport($account);
+        $transport->callResponses = [
+            ['status' => 202, 'body' => ['protocol' => ['protocol_id' => 'PROTO-16', 'obtained' => false]]],
+            ['status' => 200, 'body' => [
+                'obtained' => true,
+                'protocol' => ['protocol_id' => 'PROTO-16', 'obtained' => true],
+                'dados' => ['situacao' => 'regular'],
+            ]],
+        ];
+        $enrollment = $this->enrollment($account, 'SOLICITARPROTOCOLO91', [
+            'configuration' => ['anoCalendario' => '2024'],
+        ]);
+        $executor = $this->executor();
+
+        $run = $executor->execute($executor->claim($enrollment, 'poll-key'));
+
+        $this->assertSame(MonitoringRunStatus::AwaitingProtocol, $run->status);
+        $this->assertSame('PROTO-16', $run->protocol);
+        $this->assertCount(1, $transport->callCalls);
+
+        $polled = $executor->execute($run);
+
+        $this->assertSame(MonitoringRunStatus::Completed, $polled->status);
+        $this->assertSame('PROTO-16', $polled->protocol);
+        $this->assertSame(1, $projector->calls());
+        $this->assertCount(2, $transport->callCalls);
+
+        $original = $transport->callCalls[0];
+        $poll = $transport->callCalls[1];
+
+        $this->assertSame($original['path'], $poll['path'], 'Polling must use the same operation path.');
+        $this->assertSame($run->idempotency_key, $poll['options']['idempotency_key']);
+
+        $originalDados = json_decode($original['envelope']['pedidoDados']['dados'], true);
+        $pollDados = json_decode($poll['envelope']['pedidoDados']['dados'], true);
+
+        $this->assertSame(['anoCalendario' => '2024'], $originalDados);
+        $this->assertSame(['protocol' => 'PROTO-16', 'poll' => true], $pollDados);
+        $this->assertArrayNotHasKey('anoCalendario', $pollDados, 'The original request must never be repeated.');
+
+        $this->assertDatabaseHas('monitoring_attempts', [
+            'run_id' => $run->id,
+            'attempt' => 1,
+            'status' => 'awaiting_protocol',
+            'classification' => 'protocol_pending',
+        ]);
+        $this->assertDatabaseHas('monitoring_attempts', [
+            'run_id' => $run->id,
+            'attempt' => 2,
+            'status' => 'completed',
+            'classification' => 'ok',
+        ]);
+    }
+
+    public function test_dry_run_protocol_pending_completes_on_poll_without_repeating_the_request(): void
+    {
+        $projector = $this->projector;
+        $account = $this->createAccount();
+        $enrollment = $this->enrollment($account, 'SOLICITARPROTOCOLO91');
+        $executor = $this->executor();
+
+        $run = $executor->execute($executor->claim($enrollment, 'dry-run-poll-key'));
+
+        $this->assertSame(MonitoringRunStatus::AwaitingProtocol, $run->status);
+        $this->assertSame('SITFIS-PROTO-91', $run->protocol);
+
+        $polled = $executor->execute($run);
+
+        $this->assertSame(MonitoringRunStatus::Completed, $polled->status);
+        $this->assertSame(1, $projector->calls());
+        $this->assertDatabaseCount('monitoring_attempts', 2);
+    }
+
+    public function test_a_run_with_a_future_retry_after_sends_no_traffic_until_it_is_due(): void
+    {
+        $this->freezeTime();
+
+        try {
+            $account = $this->createAccount();
+            $transport = $this->openTransport($account);
+            $transport->callResponses = [
+                ['status' => 429, 'headers' => ['Retry-After' => ['30']], 'body' => []],
+                ['status' => 200, 'body' => ['dados' => ['situacao' => 'ativa']]],
+            ];
+            $enrollment = $this->enrollment($account, 'CONSDECLARACAO13');
+            $executor = $this->executor();
+
+            $run = $executor->execute($executor->claim($enrollment, 'duplicate-before-eta'));
+
+            $this->assertSame(MonitoringRunStatus::Limited, $run->status);
+
+            $duplicate = $executor->execute($run);
+
+            $this->assertSame(MonitoringRunStatus::Limited, $duplicate->status);
+            $this->assertCount(1, $transport->callCalls, 'A duplicate dispatch before retry_after must send no traffic.');
+            $this->assertDatabaseCount('monitoring_attempts', 1);
+
+            $this->travel(31)->seconds();
+
+            $completed = $executor->execute($duplicate);
+
+            $this->assertSame(MonitoringRunStatus::Completed, $completed->status);
+            $this->assertCount(2, $transport->callCalls);
+        } finally {
+            $this->travelBack();
+        }
+    }
+
+    public function test_an_awaiting_protocol_run_does_not_poll_before_its_eta(): void
+    {
+        $this->freezeTime();
+
+        try {
+            $account = $this->createAccount();
+            $transport = $this->openTransport($account);
+            $transport->callResponses = [
+                ['status' => 202, 'body' => [
+                    'protocol' => ['protocol_id' => 'PROTO-ETA', 'obtained' => false],
+                    'eta' => now()->addMinutes(15)->toIso8601String(),
+                ]],
+                ['status' => 200, 'body' => ['obtained' => true, 'dados' => []]],
+            ];
+            $enrollment = $this->enrollment($account, 'SOLICITARPROTOCOLO91');
+            $executor = $this->executor();
+
+            $run = $executor->execute($executor->claim($enrollment, 'eta-poll-key'));
+
+            $this->assertSame(MonitoringRunStatus::AwaitingProtocol, $run->status);
+
+            $early = $executor->execute($run);
+
+            $this->assertSame(MonitoringRunStatus::AwaitingProtocol, $early->status);
+            $this->assertCount(1, $transport->callCalls, 'Polling before the eta must send no traffic.');
+
+            $this->travel(16)->minutes();
+
+            $completed = $executor->execute($early);
+
+            $this->assertSame(MonitoringRunStatus::Completed, $completed->status);
+            $this->assertCount(2, $transport->callCalls);
+        } finally {
+            $this->travelBack();
+        }
+    }
+
+    public function test_a_thrown_transport_timeout_is_transient_and_retryable(): void
+    {
+        $projector = $this->projector;
+        $account = $this->createAccount();
+        $transport = $this->openTransport($account);
+        $transport->onCall = fn (): never => throw new ConnectionException('connection timed out');
+        $enrollment = $this->enrollment($account, 'CONSDECLARACAO13');
+
+        $run = $this->executor()->execute(
+            $this->executor()->claim($enrollment, 'transport-timeout-key'),
+        );
+
+        $this->assertSame(MonitoringRunStatus::Transient, $run->status);
+        $this->assertSame('timeout', $run->error_code);
+        $this->assertNull($run->finished_at);
+        $this->assertSame(0, $projector->calls());
+
+        $this->assertDatabaseHas('monitoring_attempts', [
+            'run_id' => $run->id,
+            'status' => 'transient',
+            'classification' => 'timeout',
+        ]);
     }
 
     private function executor(): SerproExecutor

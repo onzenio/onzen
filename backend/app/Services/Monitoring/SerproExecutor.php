@@ -8,9 +8,13 @@ use App\Enums\MonitoringRunStatus;
 use App\Exceptions\SerproBlockedException;
 use App\Exceptions\SupersededRunException;
 use App\Integrations\Serpro\ConsultFixtureProvider;
+use App\Integrations\Serpro\ConsultMessageClassifier;
 use App\Integrations\Serpro\ConsultOperationResolver;
 use App\Integrations\Serpro\OAuthTokenCache;
 use App\Integrations\Serpro\ProcurationCatalog;
+use App\Integrations\Serpro\ProtocolPoller;
+use App\Integrations\Serpro\ResponseClassifier;
+use App\Integrations\Serpro\SerproClassification;
 use App\Integrations\Serpro\SerproCredentialResolver;
 use App\Integrations\Serpro\SerproEnvelope;
 use App\Models\Client;
@@ -26,17 +30,18 @@ use InvalidArgumentException;
 use Throwable;
 
 /**
- * Motor de execução do monitoramento (Task 14).
+ * Motor de execução do monitoramento (Tasks 14/16).
  *
  * Owns the run lifecycle: idempotent claim by `(account, idempotency_key)`,
  * the state machine, fencing against `MonitoringEnrollment.version`, dry-run
  * fixture execution and the injected {@see ResultProjector} seam.
  *
- * Explicitly out of scope here (Tasks 15/16/17): queue jobs and backoff,
- * response/message classification and protocol polling, quota reservation.
- * The states and transitions they consume are already in
- * {@see MonitoringRunStatus}; the minimal HTTP status mapping in
- * {@see self::classify()} is the seam Task 16 replaces.
+ * Task 16 wires the response classification: 429/timeout/5xx become
+ * `limited`/`transient` with backoff (never advancing the snapshot),
+ * definitive rejections end as `rejected` without retry and a pending
+ * protocol is polled by {@see ProtocolPoller} without repeating the original
+ * request. A run in a retryable state refuses to send traffic before its
+ * persisted `eta`/`retry_after`.
  *
  * Fail-closed: a call is only attempted when the effective gate is open, and
  * missing credentials, an inactive enrollment or a missing fixture end the
@@ -56,6 +61,9 @@ final class SerproExecutor
         private readonly OAuthTokenCache $tokens,
         private readonly SerproTransport $transport,
         private readonly ResultProjector $projector,
+        private readonly ResponseClassifier $responseClassifier,
+        private readonly ConsultMessageClassifier $messages,
+        private readonly ProtocolPoller $poller,
     ) {}
 
     /**
@@ -137,8 +145,9 @@ final class SerproExecutor
      * Advance a claimed run through the state machine.
      *
      * Idempotent by construction: terminal runs and runs already in flight
-     * return untouched, and `awaiting_protocol` waits for Task 16 polling
-     * instead of repeating the original request.
+     * return untouched, runs in a retryable state refuse to send traffic
+     * before their persisted `eta`/`retry_after`, and `awaiting_protocol`
+     * polls the persisted protocol instead of repeating the original request.
      *
      * @throws SerproBlockedException
      */
@@ -150,10 +159,17 @@ final class SerproExecutor
             return $run;
         }
 
-        if ($run->status === MonitoringRunStatus::AwaitingProtocol) {
-            // Polling the persisted protocol is Task 16; re-running the
-            // original request here would violate the spec.
+        // Carry-over from Task 15 review: a duplicate dispatch must not
+        // bypass backoff. A future eta/retry_after refuses without traffic.
+        if ($this->notYetDue($run)) {
             return $run;
+        }
+
+        $polling = $run->status === MonitoringRunStatus::AwaitingProtocol;
+        $protocol = $polling ? trim((string) $run->protocol) : '';
+
+        if ($polling && $protocol === '') {
+            return $this->finish($run, MonitoringRunStatus::Blocked, 'protocol_missing');
         }
 
         if (! $this->fences($run, $this->enrollmentFor($run))) {
@@ -173,15 +189,44 @@ final class SerproExecutor
             }
 
             $result = $dryRun
-                ? $this->fixtureResult($run)
-                : $this->transportResult($run);
+                ? $this->fixtureResult($run, $polling)
+                : $this->transportResult($run, $polling, $protocol);
         } catch (SerproBlockedException $exception) {
             return $this->finish($run, MonitoringRunStatus::Blocked, $exception->getMessage());
-        } catch (Throwable) {
-            return $this->finish($run, MonitoringRunStatus::Transient, 'transport_error');
+        } catch (Throwable $exception) {
+            $classification = $this->responseClassifier->classifyException($exception);
+
+            return $this->finish($run, MonitoringRunStatus::Transient, $classification->code, retryAfter: $classification->retryAfter);
         }
 
         return $this->settle($run, $result);
+    }
+
+    /**
+     * A run must not send traffic before its persisted readiness time: the
+     * `eta` of a pending protocol, or the latest attempt `retry_after` of a
+     * `limited`/`transient` outcome. The queue job re-releases by the same
+     * values; this guard closes the duplicate-dispatch hole.
+     */
+    private function notYetDue(MonitoringRun $run): bool
+    {
+        $eta = $run->eta;
+
+        if ($eta !== null && $eta->isFuture()) {
+            return true;
+        }
+
+        if (! in_array($run->status, [MonitoringRunStatus::Limited, MonitoringRunStatus::Transient], true)) {
+            return false;
+        }
+
+        $attempt = $run->attempts()->orderByDesc('attempt')->first();
+
+        if ($attempt === null || $attempt->retry_after === null || $attempt->created_at === null) {
+            return false;
+        }
+
+        return $attempt->created_at->copy()->addSeconds((int) $attempt->retry_after)->isFuture();
     }
 
     /**
@@ -236,9 +281,9 @@ final class SerproExecutor
     /**
      * @return array<string, mixed>
      */
-    private function fixtureResult(MonitoringRun $run): array
+    private function fixtureResult(MonitoringRun $run, bool $polling = false): array
     {
-        $fixture = $this->fixtures->load((string) $run->operation_code);
+        $fixture = $this->fixtures->load((string) $run->operation_code, $polling);
 
         if ($fixture === null) {
             // Never invent a result for a dry-run without a fixture.
@@ -251,7 +296,7 @@ final class SerproExecutor
     /**
      * @return array<string, mixed>
      */
-    private function transportResult(MonitoringRun $run): array
+    private function transportResult(MonitoringRun $run, bool $polling = false, string $protocol = ''): array
     {
         if ($this->gate->isGated()) {
             throw new SerproBlockedException('serpro_gated');
@@ -279,24 +324,34 @@ final class SerproExecutor
 
         $oauth = $this->tokens->get($credentials, $environment, $credentialRef);
 
+        // Polling repeats the operation path with the protocol payload; the
+        // original parameters are never resent.
+        $parameters = $polling
+            ? ['protocol' => $protocol, 'poll' => true]
+            : (is_array($run->parameters) ? $run->parameters : []);
+
         $envelope = SerproEnvelope::make(
             SerproEnvelope::partyFor($credentials->contratanteDoc),
             SerproEnvelope::partyFor($author->document, $author->document_type->value),
             SerproEnvelope::partyFor($client->cnpj, 'PJ'),
             (string) $run->operation_code,
-            is_array($run->parameters) ? $run->parameters : [],
+            $parameters,
         );
 
-        $response = $this->transport->call(
-            ProcurationCatalog::pathFor((string) $run->operation_code),
-            $envelope,
-            $oauth['access_token'],
-            array_filter([
-                'idempotency_key' => (string) $run->idempotency_key,
-                'jwt_token' => $oauth['jwt_token'],
-                'environment' => $environment,
-            ], fn (mixed $value): bool => $value !== null),
-        );
+        $options = array_filter([
+            'idempotency_key' => (string) $run->idempotency_key,
+            'jwt_token' => $oauth['jwt_token'],
+            'environment' => $environment,
+        ], fn (mixed $value): bool => $value !== null);
+
+        $response = $polling
+            ? $this->poller->poll($run, $protocol, $envelope, $oauth['access_token'], $options)
+            : $this->transport->call(
+                ProcurationCatalog::pathFor((string) $run->operation_code),
+                $envelope,
+                $oauth['access_token'],
+                $options,
+            );
 
         $status = (int) ($response['status'] ?? 0);
         if ($this->tokens->forgetIfUnauthorized($status, $environment, $credentialRef)) {
@@ -361,53 +416,17 @@ final class SerproExecutor
     }
 
     /**
-     * Minimal HTTP outcome mapping; Task 16 replaces it with the full
-     * response/message classification without touching the state machine.
-     *
-     * @param  array<string, mixed>  $result
-     * @return array{status: MonitoringRunStatus, classification: string, retry_after: int|null}
-     */
-    private function classify(array $result): array
-    {
-        $status = (int) $result['http_status'];
-        $body = is_array($result['body'] ?? null) ? $result['body'] : [];
-        $obtained = (bool) ($body['obtained'] ?? data_get($body, 'protocol.obtained', false));
-
-        if ($result['protocol'] !== null && ! $obtained) {
-            return ['status' => MonitoringRunStatus::AwaitingProtocol, 'classification' => 'protocol_pending', 'retry_after' => null];
-        }
-
-        if (($body['expired'] ?? false) === true) {
-            return ['status' => MonitoringRunStatus::Expired, 'classification' => 'protocol_expired', 'retry_after' => null];
-        }
-
-        if ($status >= 200 && $status < 300) {
-            return ['status' => MonitoringRunStatus::Completed, 'classification' => 'ok', 'retry_after' => null];
-        }
-
-        if ($status === 429) {
-            return ['status' => MonitoringRunStatus::Limited, 'classification' => 'rate_limited', 'retry_after' => $this->retryAfter($result)];
-        }
-
-        if ($status === 0 || $status === 408 || $status >= 500) {
-            return ['status' => MonitoringRunStatus::Transient, 'classification' => 'transient_error', 'retry_after' => $this->retryAfter($result)];
-        }
-
-        return ['status' => MonitoringRunStatus::Rejected, 'classification' => 'definitive_rejection', 'retry_after' => null];
-    }
-
-    /**
      * @param  array<string, mixed>  $result
      */
     private function settle(MonitoringRun $run, array $result): MonitoringRun
     {
-        $outcome = $this->classify($result);
-        $status = $outcome['status'];
+        $classification = $this->classify($result);
+        $status = $this->statusFor($classification);
         $responseCode = (int) $result['http_status'];
 
         if ($status === MonitoringRunStatus::Completed) {
             try {
-                DB::transaction(function () use ($run, $result, $outcome, $responseCode): void {
+                DB::transaction(function () use ($run, $result, $classification, $responseCode): void {
                     // The fencing token is compared on the locked enrollment
                     // INSIDE the completion transaction, before the projector
                     // and again after it. The row lock makes a concurrent
@@ -439,7 +458,7 @@ final class SerproExecutor
 
                     // Attempt record shares the completion transaction, so a
                     // rolled-back completion never leaves a phantom attempt.
-                    $this->recordAttempt($run, MonitoringRunStatus::Completed, $responseCode, $outcome['classification']);
+                    $this->recordAttempt($run, MonitoringRunStatus::Completed, $responseCode, $classification->code);
                 });
             } catch (SupersededRunException) {
                 return $this->discard($run);
@@ -458,12 +477,45 @@ final class SerproExecutor
             'protocol' => $result['protocol'],
             'eta' => $status === MonitoringRunStatus::AwaitingProtocol ? $result['eta'] : null,
             'external_code' => $result['operation_code'],
-            'error_code' => $outcome['classification'],
+            'error_code' => $classification->code,
         ]);
 
-        $this->recordAttempt($run, $status, $responseCode, $outcome['classification'], $outcome['retry_after']);
+        $this->recordAttempt($run, $status, $responseCode, $classification->code, $classification->retryAfter);
 
         return $run;
+    }
+
+    /**
+     * HTTP classification refined by the PGDAS-D business message code.
+     *
+     * @param  array<string, mixed>  $result
+     */
+    private function classify(array $result): SerproClassification
+    {
+        $body = is_array($result['body'] ?? null) ? $result['body'] : [];
+        $headers = is_array($result['headers'] ?? null) ? $result['headers'] : [];
+
+        return $this->messages->classify(
+            $body,
+            $this->responseClassifier->classify((int) $result['http_status'], $body, $headers),
+        );
+    }
+
+    /**
+     * Classification class → state machine status. Unknown classes are
+     * refused instead of silently completing the run.
+     */
+    private function statusFor(SerproClassification $classification): MonitoringRunStatus
+    {
+        return match ($classification->status) {
+            SerproClassification::SUCCESS => MonitoringRunStatus::Completed,
+            SerproClassification::AWAITING_PROTOCOL => MonitoringRunStatus::AwaitingProtocol,
+            SerproClassification::EXPIRED => MonitoringRunStatus::Expired,
+            SerproClassification::RATE_LIMITED => MonitoringRunStatus::Limited,
+            SerproClassification::TRANSIENT => MonitoringRunStatus::Transient,
+            SerproClassification::REJECTED => MonitoringRunStatus::Rejected,
+            default => throw new InvalidArgumentException('unsupported_classification'),
+        };
     }
 
     private function discard(MonitoringRun $run): MonitoringRun
@@ -482,10 +534,11 @@ final class SerproExecutor
         MonitoringRunStatus $status,
         string $errorCode,
         ?int $responseCode = null,
+        ?int $retryAfter = null,
     ): MonitoringRun {
         $run = $run->transitionTo($status, ['error_code' => $errorCode]);
 
-        $this->recordAttempt($run, $status, $responseCode, $errorCode);
+        $this->recordAttempt($run, $status, $responseCode, $errorCode, $retryAfter);
 
         return $run;
     }
@@ -544,20 +597,5 @@ final class SerproExecutor
         } catch (Throwable) {
             return null;
         }
-    }
-
-    /**
-     * @param  array<string, mixed>  $result
-     */
-    private function retryAfter(array $result): ?int
-    {
-        $headers = is_array($result['headers'] ?? null) ? $result['headers'] : [];
-        $value = $headers['Retry-After'] ?? $headers['retry-after'] ?? data_get($result, 'body.retry_after');
-
-        if (is_array($value)) {
-            $value = $value[0] ?? null;
-        }
-
-        return is_numeric($value) ? max(1, (int) $value) : null;
     }
 }
