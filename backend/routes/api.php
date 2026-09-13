@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\MeController;
 use App\Http\Controllers\Api\MonitoringArtifactDownloadController;
+use App\Http\Controllers\Api\MonitoringHealthController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -10,6 +11,10 @@ Route::get('/user', function (Request $request) {
 })->middleware('auth:sanctum');
 
 Route::middleware('auth:sanctum')->get('/me', MeController::class);
+
+Route::middleware('auth:sanctum')
+    ->get('/monitoring/health', MonitoringHealthController::class)
+    ->name('monitoring.health');
 
 Route::middleware(['auth:sanctum', 'signed'])
     ->get('/monitoring/artifacts/{ref}/download', MonitoringArtifactDownloadController::class)
