@@ -169,7 +169,9 @@ func handleReadyz(checker ReadyChecker, log *slog.Logger) http.HandlerFunc {
 		}
 
 		if len(failures) > 0 {
-			log.WarnContext(ctx, "readiness check failed", "error", errors.Join(failures...))
+			log.WarnContext(ctx, "readiness check failed",
+				"request_id", RequestIDFromContext(ctx),
+				"error", errors.Join(failures...))
 			JSON(w, http.StatusServiceUnavailable, readiness{Status: "unready", Checks: checks})
 			return
 		}

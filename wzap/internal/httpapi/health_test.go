@@ -1,9 +1,12 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -183,5 +186,33 @@ func TestCheckerReportsMigrationState(t *testing.T) {
 	results = checker.Checks(ctx)
 	if err := results["migrations"]; err != nil {
 		t.Errorf("migrations probe failed after Migrate: %v", err)
+	}
+}
+
+func TestReadyzLogsFailureWithRequestID(t *testing.T) {
+	var logs bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&logs, nil))
+	srv := New(config.Config{HTTPAddr: "127.0.0.1:0", ServiceToken: testToken}, log,
+		Deps{ReadyChecker: checkFunc(func(context.Context) error { return errors.New("dependency down") })})
+
+	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	req.Header.Set(requestIDHeader, "req-abc")
+	rec := httptest.NewRecorder()
+	srv.Handler.ServeHTTP(rec, req)
+
+	var warning string
+	for _, line := range strings.Split(logs.String(), "\n") {
+		if strings.Contains(line, "readiness check failed") {
+			warning = line
+		}
+	}
+	if warning == "" {
+		t.Fatalf("readiness failure was not logged: %s", logs.String())
+	}
+	if !strings.Contains(warning, "request_id=req-abc") {
+		t.Errorf("warning is missing the request id: %s", warning)
+	}
+	if !strings.Contains(warning, "dependency down") {
+		t.Errorf("warning is missing the probe error: %s", warning)
 	}
 }
