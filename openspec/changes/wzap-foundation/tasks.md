@@ -63,7 +63,7 @@
 
 ## 8. Integração e verificação final
 
-- [ ] 8.1 Escrever o README do wzap com contrato REST, subjects de eventos e checklist de pareamento, verificando revisão dos artefatos
-- [ ] 8.2 Executar verificação local completa (`docker compose up`, prontidão, criação de instância e QR), verificando evidência dos healthchecks
-- [ ] 8.3 Executar `go test ./...`, `golangci-lint run` e `go build` no workspace, verificando saída limpa
+- [x] 8.1 Escrever o README do wzap com contrato REST, subjects de eventos e checklist de pareamento, verificando revisão dos artefatos
+- [x] 8.2 Executar verificação local completa (`docker compose up`, prontidão, criação de instância e QR), verificando evidência dos healthchecks
+- [x] 8.3 Executar `go test ./...`, `golangci-lint run` e `go build` no workspace, verificando saída limpa
 - [ ] 8.4 Executar checklist manual de pareamento e envio real com um número de teste, registrando a evidência no change
