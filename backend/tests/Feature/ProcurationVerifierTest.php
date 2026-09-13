@@ -184,6 +184,54 @@ final class ProcurationVerifierTest extends TestCase
         $this->assertCount(2, $transport->callCalls);
     }
 
+    public function test_definition_requiring_procuracao_without_resolvable_codes_blocks_fail_closed(): void
+    {
+        [, , , $client] = $this->context();
+        $this->openTransport();
+        $transport = $this->fakeTransport([]);
+        $this->app->instance(SerproTransport::class, $transport);
+
+        $definition = MonitoringDefinition::factory()->create([
+            'id' => 'parc-paex',
+            'requires_procuracao' => true,
+            'procuration_codes' => null,
+        ]);
+
+        try {
+            app(ProcurationVerifier::class)->verify($client, $definition);
+            $this->fail('Expected the unresolved procuração requirement to block.');
+        } catch (SerproBlockedException $exception) {
+            $this->assertSame('procuracao_requisito_nao_resolvido', $exception->getMessage());
+        }
+
+        $this->assertSame([], $transport->tokenCalls);
+        $this->assertSame([], $transport->callCalls);
+        $this->assertSame(0, PowerOfAttorney::query()->withoutGlobalScope('account')->count());
+    }
+
+    public function test_definition_without_procuracao_requirement_verifies_without_calls(): void
+    {
+        [, , , $client] = $this->context();
+        $this->openTransport();
+        $transport = $this->fakeTransport([]);
+        $this->app->instance(SerproTransport::class, $transport);
+
+        $definition = MonitoringDefinition::factory()->create([
+            'id' => 'situacao-mei',
+            'requires_procuracao' => false,
+            'procuration_codes' => null,
+        ]);
+
+        $result = app(ProcurationVerifier::class)->verify($client, $definition);
+
+        $this->assertTrue($result['verified']);
+        $this->assertNull($result['reason']);
+        $this->assertSame([], $result['required_groups']);
+        $this->assertFalse($result['from_cache']);
+        $this->assertSame([], $transport->tokenCalls);
+        $this->assertSame([], $transport->callCalls);
+    }
+
     public function test_code_outside_the_allowlist_is_refused_without_an_external_call(): void
     {
         [, , , $client] = $this->context();

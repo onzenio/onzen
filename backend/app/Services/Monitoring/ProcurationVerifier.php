@@ -31,6 +31,8 @@ final class ProcurationVerifier
 
     public const REASON_EXPIRED = 'outorga_expirada';
 
+    public const REASON_UNRESOLVED = 'procuracao_requisito_nao_resolvido';
+
     public function __construct(private readonly ProcurationVerificationCall $live) {}
 
     /**
@@ -41,6 +43,12 @@ final class ProcurationVerifier
      * never granted (`outorga_pendente`) from one whose validity lapsed
      * (`outorga_expirada`). An allowlist violation is refused with an explicit
      * error before any cache read or external call.
+     *
+     * A definition flagged `requires_procuracao` whose required codes do not
+     * resolve (no operation/definition mapping, e.g. `parc-paex`/`parc-sipade`)
+     * is also blocked with `procuracao_requisito_nao_resolvido` instead of
+     * passing with zero evidence — fail-closed. Definitions that do not
+     * require procuração keep verifying without any call.
      *
      * @return array{
      *     verified: bool,
@@ -69,6 +77,12 @@ final class ProcurationVerifier
         self::assertAllowedCodes(self::flatten($groups));
 
         if ($groups === []) {
+            // A procuração exigida sem código resolvível não tem evidência
+            // para verificar: bloqueia em vez de passar em silêncio.
+            if ($definition?->requires_procuracao) {
+                throw new SerproBlockedException(self::REASON_UNRESOLVED);
+            }
+
             return [
                 'verified' => true,
                 'reason' => null,
