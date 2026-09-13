@@ -741,6 +741,49 @@ func TestSendMediaRejectsOversize(t *testing.T) {
 	}
 }
 
+func TestSendMediaRejectsBodyAboveRequestCap(t *testing.T) {
+	store := &fakeMediaStore{}
+	svc := &fakeMessageService{}
+	content := bytes.Repeat([]byte("a"), int(testMaxMediaBytes+mediaFormOverhead)+1)
+
+	rec := serveMediaUpload(t, mediaUploadServer(t, svc, store, nil), uuid.New(),
+		[][2]string{{"to", "5547988359190"}, {"type", "document"}},
+		"grande.pdf", "application/pdf", content, nil)
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnprocessableEntity)
+	}
+	if len(store.saveCalls) != 0 || len(svc.enqueueCalls) != 0 {
+		t.Errorf("Save calls = %d, Enqueue calls = %d, want none of either",
+			len(store.saveCalls), len(svc.enqueueCalls))
+	}
+}
+
+func TestSendMediaRejectsMalformedMultipart(t *testing.T) {
+	id := uuid.New()
+	store := &fakeMediaStore{}
+	svc := &fakeMessageService{}
+	srv := mediaUploadServer(t, svc, store, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/instances/"+id.String()+"/messages/media",
+		strings.NewReader("não é multipart"))
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	req.Header.Set("Content-Type", "multipart/form-data; boundary=xyz")
+	rec := httptest.NewRecorder()
+	srv.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	if code := errorCode(t, rec.Body.Bytes()); code != "invalid_request" {
+		t.Errorf("error code = %q, want invalid_request", code)
+	}
+	if len(store.saveCalls) != 0 || len(svc.enqueueCalls) != 0 {
+		t.Errorf("Save calls = %d, Enqueue calls = %d, want none of either",
+			len(store.saveCalls), len(svc.enqueueCalls))
+	}
+}
+
 func TestSendMediaInstanceNotFound(t *testing.T) {
 	store := &fakeMediaStore{saveFn: func(
 		context.Context, uuid.UUID, string, string, string, string, []byte,
