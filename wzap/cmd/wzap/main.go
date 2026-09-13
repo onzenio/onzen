@@ -63,8 +63,9 @@ func run(args []string) error {
 	}
 }
 
-// serve runs the HTTP server until an interrupt or termination signal, then
-// drains in-flight requests within shutdownTimeout.
+// serve runs the HTTP server until an interrupt or termination signal. The
+// shutdown drains the in-flight requests first, then stops the outbox, the
+// media cleaner and finally the relay, all within shutdownTimeout.
 func serve() error {
 	cfg, err := config.Load()
 	if err != nil {
@@ -165,7 +166,10 @@ func serve() error {
 		Media:        mediaStorage,
 	})
 
-	outboxCtx, stopOutbox := context.WithCancel(ctx)
+	// The workers do not derive from the signal context: SIGTERM must not stop
+	// them behind the shutdown sequence. Each is cancelled explicitly below,
+	// in the order the shutdown comment describes.
+	outboxCtx, stopOutbox := context.WithCancel(context.Background())
 	defer stopOutbox()
 	outboxDone := make(chan struct{})
 	go func() {
@@ -173,7 +177,7 @@ func serve() error {
 		outboxWorker.Run(outboxCtx)
 	}()
 
-	relayCtx, stopRelay := context.WithCancel(ctx)
+	relayCtx, stopRelay := context.WithCancel(context.Background())
 	defer stopRelay()
 	relayDone := make(chan struct{})
 	go func() {
@@ -182,7 +186,7 @@ func serve() error {
 	}()
 
 	cleaner := media.NewCleaner(mediaStorage, log)
-	cleanerCtx, stopCleaner := context.WithCancel(ctx)
+	cleanerCtx, stopCleaner := context.WithCancel(context.Background())
 	defer stopCleaner()
 	cleanerDone := make(chan struct{})
 	go func() {
@@ -201,12 +205,13 @@ func serve() error {
 
 	select {
 	case err := <-serveErr:
-		stopOutbox()
-		<-outboxDone
-		stopCleaner()
-		<-cleanerDone
-		stopRelay()
-		<-relayDone
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+		stopComponents(shutdownCtx, log,
+			shutdownComponent{name: "outbox", stop: stopOutbox, done: outboxDone},
+			shutdownComponent{name: "media cleaner", stop: stopCleaner, done: cleanerDone},
+			shutdownComponent{name: "event relay", stop: stopRelay, done: relayDone},
+		)
 		return fmt.Errorf("serve http: %w", err)
 	case <-ctx.Done():
 	}
@@ -215,28 +220,46 @@ func serve() error {
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		stopOutbox()
-		<-outboxDone
-		stopCleaner()
-		<-cleanerDone
-		stopRelay()
-		<-relayDone
-		return fmt.Errorf("shutdown http server: %w", err)
+
+	shutdownErr := srv.Shutdown(shutdownCtx)
+
+	// The HTTP server drains first so in-flight requests finish and can still
+	// enqueue events. Only then the outbox stops sending, the cleaner stops
+	// deleting media, and the relay stops last, after publishing the events
+	// those requests and the outbox enqueued. Every wait shares the shutdown
+	// deadline, so the whole sequence stays bounded.
+	stopComponents(shutdownCtx, log,
+		shutdownComponent{name: "outbox", stop: stopOutbox, done: outboxDone},
+		shutdownComponent{name: "media cleaner", stop: stopCleaner, done: cleanerDone},
+		shutdownComponent{name: "event relay", stop: stopRelay, done: relayDone},
+	)
+
+	if shutdownErr != nil {
+		return fmt.Errorf("shutdown http server: %w", shutdownErr)
 	}
-
-	// The HTTP server drains first so in-flight requests finish; only then the
-	// outbox stops sending, and the relay stops last, after publishing the
-	// events those requests and the outbox enqueued.
-	stopOutbox()
-	<-outboxDone
-	stopCleaner()
-	<-cleanerDone
-	stopRelay()
-	<-relayDone
-
 	log.Info("wzap stopped")
 	return nil
+}
+
+// shutdownComponent pairs a background worker with its cancel function and the
+// channel closed when its Run returns.
+type shutdownComponent struct {
+	name string
+	stop context.CancelFunc
+	done <-chan struct{}
+}
+
+// stopComponents stops the workers in order, waiting for each one within ctx so
+// a worker slow to return cannot extend the shutdown beyond the deadline.
+func stopComponents(ctx context.Context, log *slog.Logger, components ...shutdownComponent) {
+	for _, component := range components {
+		component.stop()
+		select {
+		case <-component.done:
+		case <-ctx.Done():
+			log.Warn("shutdown wait timed out", "component", component.name)
+		}
+	}
 }
 
 // migrate applies the pending migrations and exits.

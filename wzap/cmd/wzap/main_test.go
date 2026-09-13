@@ -1,9 +1,13 @@
 package main
 
 import (
+	"context"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
+	"time"
 )
 
 func TestReadyURL(t *testing.T) {
@@ -79,5 +83,37 @@ func TestHealthcheck(t *testing.T) {
 func TestRunRejectsUnknownCommand(t *testing.T) {
 	if err := run([]string{"bogus"}); err == nil {
 		t.Fatal("run accepted an unknown subcommand")
+	}
+}
+
+func TestStopComponentsStopsInOrder(t *testing.T) {
+	done := make(chan struct{})
+	close(done)
+	var order []string
+
+	stopComponents(context.Background(), slog.Default(),
+		shutdownComponent{name: "outbox", stop: func() { order = append(order, "outbox") }, done: done},
+		shutdownComponent{name: "media cleaner", stop: func() { order = append(order, "media cleaner") }, done: done},
+		shutdownComponent{name: "event relay", stop: func() { order = append(order, "event relay") }, done: done},
+	)
+
+	want := []string{"outbox", "media cleaner", "event relay"}
+	if !slices.Equal(order, want) {
+		t.Errorf("stop order = %v, want %v", order, want)
+	}
+}
+
+func TestStopComponentsBoundsTheWait(t *testing.T) {
+	never := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	start := time.Now()
+	stopComponents(ctx, slog.Default(),
+		shutdownComponent{name: "stuck", stop: func() {}, done: never},
+	)
+
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Errorf("stopComponents waited %v, want it to return on the context", elapsed)
 	}
 }

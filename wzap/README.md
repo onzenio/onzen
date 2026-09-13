@@ -220,8 +220,10 @@ curl -sS -X POST 127.0.0.1:8081/api/v1/instances/<id>/connect \
 # {"data":{"status":"pairing","qr_code":"2@...","qr_expires_at":"..."}}
 ```
 
-Encerramento: o serviço trata `SIGINT`/`SIGTERM`, drena requisições em voo por
-até 10 s e depois para outbox, limpeza de mídia e relay nessa ordem.
+Encerramento: o serviço trata `SIGINT`/`SIGTERM`, drena as requisições em voo e
+só depois para o outbox, a limpeza de mídia e, por último, o relay — que
+publica os eventos pendentes. Todo o encerramento compartilha um limite de 10 s
+e um segundo sinal o aborta imediatamente.
 
 ## Testes
 
