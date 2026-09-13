@@ -1,0 +1,484 @@
+package whatsmeow
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/url"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/proto/waAdv"
+	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/types"
+	"go.mau.fi/whatsmeow/types/events"
+	"google.golang.org/protobuf/proto"
+
+	"onefisc/wzap/internal/session"
+)
+
+func TestBuildOutboundMessage(t *testing.T) {
+	tests := []struct {
+		name    string
+		msg     session.OutboundMessage
+		check   func(t *testing.T, got *waE2E.Message)
+		wantErr bool
+	}{
+		{
+			name: "text",
+			msg:  session.OutboundMessage{Type: "text", Payload: []byte(`{"text":"olá"}`)},
+			check: func(t *testing.T, got *waE2E.Message) {
+				if got.GetConversation() != "olá" {
+					t.Fatalf("conversation = %q, want olá", got.GetConversation())
+				}
+			},
+		},
+		{
+			name: "location",
+			msg: session.OutboundMessage{
+				Type:    "location",
+				Payload: []byte(`{"latitude":-23.55,"longitude":-46.63,"name":"casa","address":"Rua 1"}`),
+			},
+			check: func(t *testing.T, got *waE2E.Message) {
+				loc := got.GetLocationMessage()
+				if loc == nil || loc.GetDegreesLatitude() != -23.55 || loc.GetDegreesLongitude() != -46.63 {
+					t.Fatalf("location = %v", loc)
+				}
+				if loc.GetName() != "casa" || loc.GetAddress() != "Rua 1" {
+					t.Fatalf("location name/address = %q/%q", loc.GetName(), loc.GetAddress())
+				}
+			},
+		},
+		{
+			name: "contact",
+			msg: session.OutboundMessage{
+				Type:    "contact",
+				Payload: []byte(`{"display_name":"Fulano","vcard":"BEGIN:VCARD\nVERSION:3.0\nEND:VCARD"}`),
+			},
+			check: func(t *testing.T, got *waE2E.Message) {
+				contact := got.GetContactMessage()
+				if contact == nil || contact.GetDisplayName() != "Fulano" {
+					t.Fatalf("contact = %v", contact)
+				}
+				if !strings.HasPrefix(contact.GetVcard(), "BEGIN:VCARD") {
+					t.Fatalf("vcard = %q", contact.GetVcard())
+				}
+			},
+		},
+		{
+			name:    "unsupported type",
+			msg:     session.OutboundMessage{Type: "sticker", Payload: []byte(`{}`)},
+			wantErr: true,
+		},
+		{
+			name:    "invalid payload",
+			msg:     session.OutboundMessage{Type: "text", Payload: []byte(`{`)},
+			wantErr: true,
+		},
+		{
+			name:    "empty text",
+			msg:     session.OutboundMessage{Type: "text", Payload: []byte(`{"text":""}`)},
+			wantErr: true,
+		},
+		{
+			name:    "location missing coordinates",
+			msg:     session.OutboundMessage{Type: "location", Payload: []byte(`{}`)},
+			wantErr: true,
+		},
+		{
+			name:    "contact missing vcard",
+			msg:     session.OutboundMessage{Type: "contact", Payload: []byte(`{"display_name":"Fulano"}`)},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := buildMessage(tt.msg)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("buildMessage(%+v) = %v, want error", tt.msg, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("buildMessage: %v", err)
+			}
+			tt.check(t, got)
+		})
+	}
+}
+
+func TestBuildMediaMessage(t *testing.T) {
+	upload := whatsmeow.UploadResponse{
+		URL:           "https://mmg.whatsapp.net/x",
+		DirectPath:    "/v/t62/x",
+		MediaKey:      []byte{1, 2, 3},
+		FileSHA256:    []byte{4, 5, 6},
+		FileEncSHA256: []byte{7, 8, 9},
+		FileLength:    42,
+	}
+
+	tests := []struct {
+		name  string
+		msg   session.OutboundMessage
+		check func(t *testing.T, got *waE2E.Message)
+	}{
+		{
+			name: "image",
+			msg: session.OutboundMessage{
+				Type:    "image",
+				Payload: []byte(`{"caption":"foto","mime_type":"image/jpeg"}`),
+			},
+			check: func(t *testing.T, got *waE2E.Message) {
+				img := got.GetImageMessage()
+				if img == nil {
+					t.Fatal("image message is nil")
+				}
+				if img.GetCaption() != "foto" || img.GetMimetype() != "image/jpeg" {
+					t.Fatalf("image caption/mime = %q/%q", img.GetCaption(), img.GetMimetype())
+				}
+				if img.GetURL() != upload.URL || img.GetDirectPath() != upload.DirectPath {
+					t.Fatalf("image url/path = %q/%q", img.GetURL(), img.GetDirectPath())
+				}
+				if img.GetFileLength() != upload.FileLength {
+					t.Fatalf("image length = %d, want %d", img.GetFileLength(), upload.FileLength)
+				}
+			},
+		},
+		{
+			name: "video",
+			msg: session.OutboundMessage{
+				Type:    "video",
+				Payload: []byte(`{"caption":"vídeo","mime_type":"video/mp4"}`),
+			},
+			check: func(t *testing.T, got *waE2E.Message) {
+				video := got.GetVideoMessage()
+				if video == nil || video.GetCaption() != "vídeo" || video.GetMimetype() != "video/mp4" {
+					t.Fatalf("video = %v", video)
+				}
+			},
+		},
+		{
+			name: "audio with ptt",
+			msg: session.OutboundMessage{
+				Type:    "audio",
+				Payload: []byte(`{"ptt":true,"mime_type":"audio/ogg; codecs=opus"}`),
+			},
+			check: func(t *testing.T, got *waE2E.Message) {
+				audio := got.GetAudioMessage()
+				if audio == nil || !audio.GetPTT() || audio.GetMimetype() != "audio/ogg; codecs=opus" {
+					t.Fatalf("audio = %v", audio)
+				}
+			},
+		},
+		{
+			name: "document",
+			msg: session.OutboundMessage{
+				Type:    "document",
+				Payload: []byte(`{"filename":"nota.pdf","caption":"nota","mime_type":"application/pdf"}`),
+			},
+			check: func(t *testing.T, got *waE2E.Message) {
+				doc := got.GetDocumentMessage()
+				if doc == nil || doc.GetFileName() != "nota.pdf" || doc.GetCaption() != "nota" {
+					t.Fatalf("document = %v", doc)
+				}
+				if doc.GetMimetype() != "application/pdf" {
+					t.Fatalf("document mime = %q", doc.GetMimetype())
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := newMediaMessage(tt.msg, upload)
+			if err != nil {
+				t.Fatalf("newMediaMessage: %v", err)
+			}
+			tt.check(t, got)
+		})
+	}
+
+	if _, err := newMediaMessage(session.OutboundMessage{Type: "sticker"}, upload); err == nil {
+		t.Fatal("newMediaMessage accepted an unsupported media type")
+	}
+	if _, err := newMediaMessage(session.OutboundMessage{Type: "image"}, upload); err == nil {
+		t.Fatal("newMediaMessage accepted a media message without a mime type")
+	}
+}
+
+func TestInboundMessageFromEvent(t *testing.T) {
+	instanceID := uuid.New()
+	ts := time.Date(2026, 9, 13, 10, 0, 0, 0, time.UTC)
+
+	textEvent := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat:   types.NewJID("5511999999999", types.DefaultUserServer),
+				Sender: types.NewJID("5511888888888", types.DefaultUserServer),
+			},
+			ID:        "3EB0ABC",
+			Type:      "text",
+			Timestamp: ts,
+		},
+		Message: &waE2E.Message{Conversation: proto.String("bom dia")},
+	}
+
+	got := inboundMessage(instanceID, textEvent, nil)
+	if got.InstanceID != instanceID || got.MessageID != "3EB0ABC" {
+		t.Fatalf("identity = %v/%q", got.InstanceID, got.MessageID)
+	}
+	if got.ChatJID != "5511999999999@s.whatsapp.net" || got.SenderJID != "5511888888888@s.whatsapp.net" {
+		t.Fatalf("chat/sender = %q/%q", got.ChatJID, got.SenderJID)
+	}
+	if got.IsGroup || got.Type != "text" || got.Text != "bom dia" {
+		t.Fatalf("body = (group=%v, type=%q, text=%q)", got.IsGroup, got.Type, got.Text)
+	}
+	if !got.Timestamp.Equal(ts) {
+		t.Fatalf("timestamp = %v, want %v", got.Timestamp, ts)
+	}
+	if got.MediaAvailable {
+		t.Fatal("text message reported media")
+	}
+
+	groupEvent := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat:    types.NewJID("123456", types.GroupServer),
+				Sender:  types.NewJID("5511888888888", types.DefaultUserServer),
+				IsGroup: true,
+			},
+			ID:   "3EB0DEF",
+			Type: "image",
+		},
+		Message: &waE2E.Message{
+			ImageMessage: &waE2E.ImageMessage{
+				Mimetype: proto.String("image/jpeg"),
+				Caption:  proto.String("olha isso"),
+			},
+		},
+	}
+
+	got = inboundMessage(instanceID, groupEvent, nil)
+	if !got.IsGroup || !got.MediaAvailable || got.MediaMime != "image/jpeg" {
+		t.Fatalf("group media = (group=%v, available=%v, mime=%q)", got.IsGroup, got.MediaAvailable, got.MediaMime)
+	}
+	if got.Text != "olha isso" {
+		t.Fatalf("media caption = %q, want olha isso", got.Text)
+	}
+	if got.MediaDownload != nil {
+		t.Fatal("media download must be absent without a client")
+	}
+
+	documentEvent := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{Chat: types.NewJID("5511999999999", types.DefaultUserServer)},
+			ID:            "3EB0GHI",
+			Type:          "document",
+		},
+		Message: &waE2E.Message{
+			DocumentMessage: &waE2E.DocumentMessage{
+				Mimetype: proto.String("application/pdf"),
+				FileName: proto.String("contrato.pdf"),
+			},
+		},
+	}
+
+	got = inboundMessage(instanceID, documentEvent, nil)
+	if !got.MediaAvailable || got.MediaFilename != "contrato.pdf" || got.MediaMime != "application/pdf" {
+		t.Fatalf("document = (available=%v, filename=%q, mime=%q)", got.MediaAvailable, got.MediaFilename, got.MediaMime)
+	}
+}
+
+func TestReceiptFromEvent(t *testing.T) {
+	instanceID := uuid.New()
+	ts := time.Date(2026, 9, 13, 11, 0, 0, 0, time.UTC)
+	evt := &events.Receipt{
+		MessageSource: types.MessageSource{
+			Chat:   types.NewJID("5511999999999", types.DefaultUserServer),
+			Sender: types.NewJID("5511888888888", types.DefaultUserServer),
+		},
+		MessageIDs: []types.MessageID{"A1", "A2"},
+		Timestamp:  ts,
+		Type:       types.ReceiptTypeRead,
+	}
+
+	got := receiptEvent(instanceID, evt)
+	if got.InstanceID != instanceID || got.Status != string(types.ReceiptTypeRead) {
+		t.Fatalf("receipt = %+v", got)
+	}
+	if len(got.MessageIDs) != 2 || got.MessageIDs[0] != "A1" || got.MessageIDs[1] != "A2" {
+		t.Fatalf("receipt ids = %v", got.MessageIDs)
+	}
+	if got.ChatJID != "5511999999999@s.whatsapp.net" || got.SenderJID != "5511888888888@s.whatsapp.net" {
+		t.Fatalf("receipt chat/sender = %q/%q", got.ChatJID, got.SenderJID)
+	}
+	if !got.Timestamp.Equal(ts) {
+		t.Fatalf("receipt timestamp = %v, want %v", got.Timestamp, ts)
+	}
+}
+
+func TestConnectionUpdate(t *testing.T) {
+	tests := []struct {
+		name       string
+		evt        any
+		wantStatus session.Status
+		wantReason string
+		wantOK     bool
+	}{
+		{"connected", &events.Connected{}, session.StatusConnected, "", true},
+		{"disconnected", &events.Disconnected{}, session.StatusDisconnected, "", true},
+		{"logged out", &events.LoggedOut{Reason: events.ConnectFailureLoggedOut}, session.StatusDisconnected, "401", true},
+		{"temporary ban", &events.TemporaryBan{Code: events.TempBanSentToTooManyPeople, Expire: time.Hour}, session.StatusError, "banned", true},
+		{"stream replaced", &events.StreamReplaced{}, session.StatusError, "stream replaced", true},
+		{"client outdated", &events.ClientOutdated{}, session.StatusError, "outdated", true},
+		{"connect failure", &events.ConnectFailure{Reason: events.ConnectFailureGeneric, Message: "nope"}, session.StatusError, "nope", true},
+		{"stream error", &events.StreamError{Code: "500"}, session.StatusError, "500", true},
+		{"unrelated", &events.Message{}, "", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			status, reason, ok := connectionUpdate(tt.evt)
+			if ok != tt.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tt.wantOK)
+			}
+			if !ok {
+				return
+			}
+			if status != tt.wantStatus {
+				t.Fatalf("status = %q, want %q", status, tt.wantStatus)
+			}
+			if !strings.Contains(reason, tt.wantReason) {
+				t.Fatalf("reason = %q, want it to contain %q", reason, tt.wantReason)
+			}
+		})
+	}
+}
+
+func TestParsePresence(t *testing.T) {
+	chat, err := parsePresence("composing")
+	if err != nil || !chat.isChat || chat.chat != types.ChatPresenceComposing {
+		t.Fatalf("composing = (%+v, %v)", chat, err)
+	}
+	chat, err = parsePresence("paused")
+	if err != nil || !chat.isChat || chat.chat != types.ChatPresencePaused {
+		t.Fatalf("paused = (%+v, %v)", chat, err)
+	}
+	user, err := parsePresence("available")
+	if err != nil || user.isChat || user.user != types.PresenceAvailable {
+		t.Fatalf("available = (%+v, %v)", user, err)
+	}
+	if _, err := parsePresence("typing"); err == nil {
+		t.Fatal("parsePresence accepted an unsupported state")
+	}
+}
+
+func TestNewSessionRejectsNilDevice(t *testing.T) {
+	if _, err := newSession(uuid.New(), nil, nil, nil); err == nil {
+		t.Fatal("newSession accepted a nil device")
+	}
+}
+
+func TestDeviceStoreIntegration(t *testing.T) {
+	dsn := os.Getenv("WZAP_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set WZAP_TEST_DATABASE_URL to run Postgres integration tests")
+	}
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("parse WZAP_TEST_DATABASE_URL: %v", err)
+	}
+	if !strings.HasSuffix(cfg.ConnConfig.Database, "_test") {
+		t.Fatalf("refusing to run against database %q: name must end in _test", cfg.ConnConfig.Database)
+	}
+
+	admin, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("open admin connection: %v", err)
+	}
+	defer func() { _ = admin.Close() }()
+
+	ctx := context.Background()
+	schema := fmt.Sprintf("wzap_session_test_%d", time.Now().UnixNano())
+	if _, err := admin.ExecContext(ctx, "CREATE SCHEMA "+schema); err != nil {
+		t.Fatalf("create schema: %v", err)
+	}
+	defer func() {
+		if _, err := admin.ExecContext(ctx, "DROP SCHEMA "+schema+" CASCADE"); err != nil {
+			t.Errorf("drop schema: %v", err)
+		}
+	}()
+
+	container, err := openDeviceStore(ctx, dsnWithSearchPath(t, dsn, schema), slog.Default())
+	if err != nil {
+		t.Fatalf("openDeviceStore: %v", err)
+	}
+	defer func() { _ = container.Close() }()
+
+	devices, err := container.GetAllDevices(ctx)
+	if err != nil {
+		t.Fatalf("GetAllDevices: %v", err)
+	}
+	if len(devices) != 0 {
+		t.Fatalf("fresh schema has %d devices, want 0", len(devices))
+	}
+
+	jid := types.NewJID("5511999999999", types.DefaultUserServer)
+	device := container.NewDevice()
+	device.ID = &jid
+	device.PushName = "wzap-test"
+	device.Account = &waAdv.ADVSignedDeviceIdentity{
+		Details:             []byte{},
+		AccountSignature:    make([]byte, 64),
+		AccountSignatureKey: make([]byte, 32),
+		DeviceSignature:     make([]byte, 64),
+	}
+	if err := device.Save(ctx); err != nil {
+		t.Fatalf("save device: %v", err)
+	}
+
+	stored, err := container.GetDevice(ctx, jid)
+	if err != nil {
+		t.Fatalf("GetDevice: %v", err)
+	}
+	if stored == nil || stored.PushName != "wzap-test" || stored.ID == nil || stored.ID.String() != jid.String() {
+		t.Fatalf("stored device = %+v", stored)
+	}
+}
+
+// dsnWithSearchPath points the sqlstore connections at the isolated test
+// schema, keeping the whatsmeow tables out of the shared public schema.
+func dsnWithSearchPath(t *testing.T, dsn, schema string) string {
+	t.Helper()
+	parsed, err := url.Parse(dsn)
+	if err != nil {
+		t.Fatalf("parse database url: %v", err)
+	}
+	query := parsed.Query()
+	query.Set("search_path", schema)
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
+}
+
+func TestSessionErrorsAreDistinct(t *testing.T) {
+	sentinels := []error{session.ErrTransient, session.ErrNotConnected, session.ErrInvalidRecipient}
+	for i, err := range sentinels {
+		if err == nil {
+			t.Fatalf("sentinel %d is nil", i)
+		}
+		for j, other := range sentinels {
+			if i != j && errors.Is(err, other) {
+				t.Fatalf("sentinel %d matches sentinel %d", i, j)
+			}
+		}
+	}
+}
