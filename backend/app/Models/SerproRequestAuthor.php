@@ -60,6 +60,20 @@ class SerproRequestAuthor extends Model
     }
 
     /**
+     * Drop the Account certificate linkage (after removal), leaving the
+     * author ineligible until a new certificate is linked.
+     */
+    public function releaseCertificate(): self
+    {
+        $this->certificate_thumbprint = null;
+        $this->certificate_expires_at = null;
+        $this->status = AuthorStatus::Ineligible;
+        $this->save();
+
+        return $this;
+    }
+
+    /**
      * Re-evaluate eligibility against the linked certificate validity.
      */
     public function refreshEligibility(?CarbonInterface $at = null): self

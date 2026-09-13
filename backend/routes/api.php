@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\MonitoringActionController;
 use App\Http\Controllers\Api\MonitoringAlertController;
 use App\Http\Controllers\Api\MonitoringArtifactDownloadController;
 use App\Http\Controllers\Api\MonitoringAuthorController;
+use App\Http\Controllers\Api\MonitoringCertificateController;
 use App\Http\Controllers\Api\MonitoringChangeController;
 use App\Http\Controllers\Api\MonitoringDashboardController;
 use App\Http\Controllers\Api\MonitoringEnrollmentController;
@@ -71,6 +72,14 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::get('/monitoring/authors', [MonitoringAuthorController::class, 'index'])
         ->name('monitoring.authors.index');
 
+    Route::get('/monitoring/certificate', [MonitoringCertificateController::class, 'show'])
+        ->name('monitoring.certificate.show');
+
+    Route::post('/monitoring/certificate', [MonitoringCertificateController::class, 'store'])
+        ->name('monitoring.certificate.store');
+
+    Route::delete('/monitoring/certificate', [MonitoringCertificateController::class, 'destroy'])
+        ->name('monitoring.certificate.destroy');
     Route::post('/monitoring/authors', [MonitoringAuthorController::class, 'store'])
         ->name('monitoring.authors.store');
 

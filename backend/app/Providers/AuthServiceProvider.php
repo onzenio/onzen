@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use App\Models\Account;
+use App\Models\AccountCertificate;
 use App\Models\AuditLog;
 use App\Models\Client;
 use App\Models\Invitation;
@@ -11,6 +12,7 @@ use App\Models\MonitoringArtifact;
 use App\Models\MonitoringEnrollment;
 use App\Models\Plan;
 use App\Models\SerproRequestAuthor;
+use App\Policies\AccountCertificatePolicy;
 use App\Policies\AccountPolicy;
 use App\Policies\AuditLogPolicy;
 use App\Policies\ClientPolicy;
@@ -39,6 +41,7 @@ class AuthServiceProvider extends ServiceProvider
         MonitoringAlert::class => MonitoringAlertPolicy::class,
         MonitoringEnrollment::class => MonitoringEnrollmentPolicy::class,
         SerproRequestAuthor::class => SerproRequestAuthorPolicy::class,
+        AccountCertificate::class => AccountCertificatePolicy::class,
     ];
 
     public function boot(): void
