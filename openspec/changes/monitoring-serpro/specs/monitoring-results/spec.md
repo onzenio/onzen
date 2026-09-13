@@ -6,7 +6,7 @@ Transforma as respostas das consultas em resultados normalizados, snapshots idem
 
 ### Requirement: Normalização por família
 
-O sistema SHALL normalizar os resultados por família de consulta (PGDAS-D, Regime de Apuração, DEFIS, MEI, DCTFWeb, MIT, Situação Fiscal, Caixa Postal, DTE e Pagamentos), extraindo os campos essenciais de cada família com fallback neutro quando um campo não existir, sem fabricar valores.
+O sistema SHALL normalizar os resultados por família de consulta (PGDAS-D, Regime de Apuração, DEFIS, MEI, DCTFWeb, MIT, Situação Fiscal e Caixa Postal, incluindo DTE), extraindo os campos essenciais de cada família com fallback neutro quando um campo não existir, sem fabricar valores. Pagamentos é catalogada e executável, mas permanece sem normalizador (resultado sinalizado como não normalizado) até um change futuro.
 
 #### Scenario: Campos essenciais extraídos
 - **WHEN** uma consulta de uma família suportada conclui com sucesso

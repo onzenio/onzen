@@ -74,7 +74,7 @@ Alternativa descartada: execução síncrona na requisição (SERPRO tem protoco
 
 ### 9. Resultados, parcelamentos e ações
 
-Normalizadores e projetores por família são portados como unidades testáveis; snapshots usam fingerprint do resultado normalizado; mudanças geram alertas; a cadeia PGDAS-D encadeia índice→recibo→extrato. Parcelamentos mantêm pedidos/parcelas/pagamentos normalizados. A emissão de DAS usa o executor de ação com confirmação, idempotency key, poll de protocolo e artefato.
+Normalizadores e projetores por família são portados como unidades testáveis; snapshots usam fingerprint do resultado normalizado; mudanças geram alertas; a cadeia PGDAS-D encadeia índice→recibo→extrato. Divergências do port registradas: `GERARDAS12` é rotulado com a família `pgdasd` (o legado usava `generic`) e `catalog_version` usa `MonitoringDefinition::CATALOG_VERSION` (a chave de config do legado não existe no OneFisc); `pagamentos` permanece sem normalizador e é sinalizado como não normalizado. Parcelamentos mantêm pedidos/parcelas/pagamentos normalizados. A emissão de DAS usa o executor de ação com confirmação, idempotency key, poll de protocolo e artefato.
 
 Alternativa descartada: guardar só o payload bruto e normalizar na leitura (perde detecção de mudança e torna a UI refém do formato SERPRO).
 
