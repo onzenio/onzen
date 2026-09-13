@@ -1,0 +1,20 @@
+{
+  "source": "exemplos/retorno_parcelas_para_gerar",
+  "operation": "PARCELASPARAGERAR",
+  "dry_run": true,
+  "http_status": 200,
+  "body": {
+    "dados": {
+      "numero": "PARC-001",
+      "parcelas": [
+        {
+          "numeroParcela": 1,
+          "id": "PARC-001-1",
+          "status": "available",
+          "valor": 100.04,
+          "vencimento": "2026-02-28"
+        }
+      ]
+    }
+  }
+}

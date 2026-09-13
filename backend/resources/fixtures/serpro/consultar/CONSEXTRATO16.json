@@ -1,0 +1,16 @@
+{
+  "source": "exemplos/retorno_consultar_extrato_do_das",
+  "operation": "CONSEXTRATO16",
+  "dry_run": true,
+  "http_status": 200,
+  "body": {
+    "status": "Sucesso-PGDASD",
+    "codigo": "Sucesso-PGDASD",
+    "dados": {
+      "numeroDas": "85800000000000000013",
+      "periodoApuracao": "202601",
+      "nomeArquivoExtrato": "extrato.pdf",
+      "extratoPdf": "JVBERi0x"
+    }
+  }
+}

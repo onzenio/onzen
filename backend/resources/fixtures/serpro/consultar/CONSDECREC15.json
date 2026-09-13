@@ -1,0 +1,20 @@
+{
+  "source": "exemplos/retorno_consultar_declaracao_recibo",
+  "operation": "CONSDECREC15",
+  "dry_run": true,
+  "http_status": 200,
+  "body": {
+    "status": "Sucesso-PGDASD",
+    "codigo": "Sucesso-PGDASD",
+    "dados": {
+      "periodoApuracao": "202601",
+      "numeroDeclaracao": "00000000000000000013",
+      "nomeArquivoRecibo": "recibo.pdf",
+      "nomeArquivoDeclaracao": "declaracao.pdf",
+      "nomeArquivoMaed": "maed.pdf",
+      "reciboPdf": "JVBERi0x",
+      "declaracaoPdf": "JVBERi0x",
+      "maedPdf": "JVBERi0x"
+    }
+  }
+}

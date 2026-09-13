@@ -1,0 +1,26 @@
+{
+  "source": "schema-trial-cenarios_pgdasd",
+  "note": "Official exemplos/retorno_consultar_declaracoes pages returned HTTP 500; fields follow Integra Contador CONSDECLARACAO13 schema and trial docs.",
+  "operation": "CONSDECLARACAO13",
+  "dry_run": true,
+  "http_status": 200,
+  "body": {
+    "status": "Sucesso-PGDASD",
+    "codigo": "Sucesso-PGDASD",
+    "dados": {
+      "anoCalendario": "2026",
+      "declaracoes": [
+        {
+          "periodoApuracao": "202601",
+          "tipoOperacao": "Original",
+          "numeroDeclaracao": "00000000000000000013",
+          "malha": "N",
+          "numeroDas": "85800000000000000013",
+          "dasPago": false,
+          "dataHoraTransmissao": "2026-02-10T14:22:00Z",
+          "dataHoraEmissaoDas": "2026-02-10T14:25:00Z"
+        }
+      ]
+    }
+  }
+}

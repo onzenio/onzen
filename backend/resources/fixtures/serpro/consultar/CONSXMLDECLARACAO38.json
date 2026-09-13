@@ -1,0 +1,13 @@
+{
+  "source": "exemplos/retorno_consultar_xml_declaracao_dctfweb",
+  "operation": "CONSXMLDECLARACAO38",
+  "dry_run": true,
+  "http_status": 200,
+  "body": {
+    "dados": {
+      "periodoApuracao": "2026-01",
+      "nomeArquivoXml": "dctfweb.xml",
+      "declaracaoXml": "PD94bWwg"
+    }
+  }
+}

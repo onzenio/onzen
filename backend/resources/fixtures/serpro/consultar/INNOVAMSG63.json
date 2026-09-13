@@ -1,0 +1,12 @@
+{
+  "source": "exemplos/retorno_indicador_novas_mensagens",
+  "operation": "INNOVAMSG63",
+  "dry_run": true,
+  "http_status": 200,
+  "body": {
+    "dados": {
+      "possuiNovasMensagens": true,
+      "quantidade": 1
+    }
+  }
+}

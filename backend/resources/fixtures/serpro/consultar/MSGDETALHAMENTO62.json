@@ -1,0 +1,15 @@
+{
+  "source": "exemplos/retorno_detalhar_mensagem_caixa_postal",
+  "operation": "MSGDETALHAMENTO62",
+  "dry_run": true,
+  "http_status": 200,
+  "body": {
+    "dados": {
+      "idMensagem": "MSG-61-001",
+      "assunto": "Intimação de malha",
+      "conteudo": "Mensagem sanitizada de dry-run.",
+      "lida": false,
+      "dataHora": "2026-02-18T09:00:00Z"
+    }
+  }
+}

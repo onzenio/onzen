@@ -1,0 +1,14 @@
+{
+  "source": "exemplos/retorno_listar_apuracoes_mit",
+  "operation": "LISTAAPURACOES317",
+  "dry_run": true,
+  "http_status": 200,
+  "body": {
+    "dados": {
+      "apuracoes": [
+        { "periodoApuracao": "2026-01", "situacao": "apurada" },
+        { "periodoApuracao": "2025-12", "situacao": "encerrada" }
+      ]
+    }
+  }
+}

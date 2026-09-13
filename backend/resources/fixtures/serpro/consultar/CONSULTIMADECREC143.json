@@ -1,0 +1,16 @@
+{
+  "source": "exemplos/retorno_consultar_ultima_declaracao_recibo_defis",
+  "operation": "CONSULTIMADECREC143",
+  "dry_run": true,
+  "http_status": 200,
+  "body": {
+    "dados": {
+      "anoCalendario": "2025",
+      "numeroDeclaracao": "DEFIS000000000000142",
+      "nomeArquivoRecibo": "recibo-defis.pdf",
+      "nomeArquivoDeclaracao": "declaracao-defis.pdf",
+      "reciboPdf": "JVBERi0x",
+      "declaracaoPdf": "JVBERi0x"
+    }
+  }
+}

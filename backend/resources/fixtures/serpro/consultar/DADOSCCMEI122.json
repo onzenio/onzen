@@ -1,0 +1,14 @@
+{
+  "source": "exemplos/retorno_consultar_dados_ccmei",
+  "operation": "DADOSCCMEI122",
+  "dry_run": true,
+  "http_status": 200,
+  "body": {
+    "dados": {
+      "cnpj": "00000000000191",
+      "situacaoCadastral": "ATIVA",
+      "dataInicio": "2020-03-01",
+      "nomeEmpresarial": "MEI Fixture"
+    }
+  }
+}

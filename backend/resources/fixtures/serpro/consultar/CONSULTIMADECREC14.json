@@ -1,0 +1,19 @@
+{
+  "source": "exemplos/retorno_consultar_ultima_declaracao_recibo",
+  "operation": "CONSULTIMADECREC14",
+  "dry_run": true,
+  "http_status": 200,
+  "body": {
+    "status": "Sucesso-PGDASD",
+    "codigo": "Sucesso-PGDASD",
+    "dados": {
+      "anoCalendario": "2026",
+      "periodoApuracao": "202601",
+      "numeroDeclaracao": "00000000000000000013",
+      "nomeArquivoRecibo": "recibo.pdf",
+      "nomeArquivoDeclaracao": "declaracao.pdf",
+      "reciboPdf": "JVBERi0x",
+      "declaracaoPdf": "JVBERi0x"
+    }
+  }
+}

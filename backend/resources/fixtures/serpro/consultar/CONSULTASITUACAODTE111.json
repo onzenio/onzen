@@ -1,0 +1,13 @@
+{
+  "source": "exemplos/retorno_consultar_situacao_dte",
+  "operation": "CONSULTASITUACAODTE111",
+  "dry_run": true,
+  "http_status": 200,
+  "body": {
+    "dados": {
+      "adesaoCaixaPostalSn": true,
+      "adesaoEcac": true,
+      "situacao": "aderente"
+    }
+  }
+}
