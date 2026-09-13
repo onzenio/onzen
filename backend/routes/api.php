@@ -1,12 +1,17 @@
 <?php
 
+use App\Http\Controllers\Api\ClientCndController;
 use App\Http\Controllers\Api\MeController;
+use App\Http\Controllers\Api\MonitoringAlertController;
 use App\Http\Controllers\Api\MonitoringArtifactDownloadController;
 use App\Http\Controllers\Api\MonitoringAuthorController;
+use App\Http\Controllers\Api\MonitoringChangeController;
+use App\Http\Controllers\Api\MonitoringDashboardController;
 use App\Http\Controllers\Api\MonitoringEnrollmentController;
 use App\Http\Controllers\Api\MonitoringHealthController;
 use App\Http\Controllers\Api\MonitoringPowerOfAttorneyController;
 use App\Http\Controllers\Api\MonitoringRunController;
+use App\Http\Controllers\Api\MonitoringSnapshotController;
 use App\Http\Controllers\Api\SerproAdminController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -22,8 +27,26 @@ Route::middleware('auth:sanctum')
     ->name('monitoring.health');
 
 Route::middleware('auth:sanctum')->group(function (): void {
+    Route::get('/monitoring/dashboard', MonitoringDashboardController::class)
+        ->name('monitoring.dashboard');
+
+    Route::get('/monitoring/runs', [MonitoringRunController::class, 'index'])
+        ->name('monitoring.runs.index');
+
+    Route::get('/monitoring/alerts', [MonitoringAlertController::class, 'index'])
+        ->name('monitoring.alerts.index');
+
+    Route::post('/monitoring/alerts/{alert}/acknowledge', [MonitoringAlertController::class, 'acknowledge'])
+        ->name('monitoring.alerts.acknowledge');
+
     Route::get('/monitoring/enrollments', [MonitoringEnrollmentController::class, 'index'])
         ->name('monitoring.enrollments.index');
+
+    Route::get('/monitoring/enrollments/{enrollment}/snapshots', [MonitoringSnapshotController::class, 'index'])
+        ->name('monitoring.enrollments.snapshots');
+
+    Route::get('/monitoring/enrollments/{enrollment}/changes', [MonitoringChangeController::class, 'index'])
+        ->name('monitoring.enrollments.changes');
 
     Route::post('/monitoring/enrollments', [MonitoringEnrollmentController::class, 'store'])
         ->name('monitoring.enrollments.store');
@@ -51,6 +74,9 @@ Route::middleware('auth:sanctum')->group(function (): void {
 
     Route::post('/monitoring/authors/{author}/term', [MonitoringAuthorController::class, 'submitTerm'])
         ->name('monitoring.authors.term');
+
+    Route::get('/monitoring/clients/{client}/cnd', ClientCndController::class)
+        ->name('monitoring.clients.cnd');
 
     Route::get('/monitoring/clients/{client}/powers-of-attorney', [MonitoringPowerOfAttorneyController::class, 'index'])
         ->name('monitoring.powers.index');

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Enums\MonitoringRunStatus;
 use App\Exceptions\SerproBlockedException;
 use App\Http\Controllers\Controller;
 use App\Jobs\ExecuteSerproJob;
@@ -9,9 +10,11 @@ use App\Models\MonitoringEnrollment;
 use App\Models\MonitoringRun;
 use App\Models\User;
 use App\Services\Monitoring\MonitoringScheduler;
+use App\Support\MonitoringReadPayload;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 /**
  * Disparo de execuções (Task 18): manual por associação (202 com o
@@ -25,6 +28,55 @@ class MonitoringRunController extends Controller
     use AuthorizesRequests;
 
     public function __construct(private readonly MonitoringScheduler $scheduler) {}
+
+    /**
+     * Listagem paginada das execuções da Account efetiva (Task 25).
+     *
+     * Somente metadados factuais: status, gatilho, operação, protocolo, ETA,
+     * erro e timestamps. `parameters` são entradas de consulta não sensíveis
+     * e permanecem no payload; chaves internas ou sensíveis são removidas.
+     */
+    public function index(Request $request): JsonResponse
+    {
+        $this->authorize('viewAny', MonitoringEnrollment::class);
+
+        $filters = $request->validate([
+            'enrollment_id' => ['nullable', 'integer', 'min:1'],
+            'status' => ['nullable', Rule::in(array_map(
+                fn (MonitoringRunStatus $status): string => $status->value,
+                MonitoringRunStatus::cases(),
+            ))],
+            'trigger' => ['nullable', Rule::in([
+                MonitoringRun::TRIGGER_MANUAL,
+                MonitoringRun::TRIGGER_AUTOMATIC,
+            ])],
+            'operation_code' => ['nullable', 'string', 'max:120'],
+            'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
+        ]);
+
+        $enrollmentId = $filters['enrollment_id'] ?? null;
+
+        if ($enrollmentId !== null) {
+            // Cross-account filters answer an indistinguishable 404 instead
+            // of silently returning an empty page.
+            MonitoringEnrollment::query()->findOrFail($enrollmentId);
+        }
+
+        $operationCode = isset($filters['operation_code'])
+            ? strtoupper(trim($filters['operation_code']))
+            : null;
+
+        $page = MonitoringRun::query()
+            ->when($enrollmentId !== null, fn ($query) => $query->where('enrollment_id', $enrollmentId))
+            ->when(isset($filters['status']), fn ($query) => $query->where('status', $filters['status']))
+            ->when(isset($filters['trigger']), fn ($query) => $query->where('trigger', $filters['trigger']))
+            ->when($operationCode !== null && $operationCode !== '', fn ($query) => $query->where('operation_code', $operationCode))
+            ->orderByDesc('id')
+            ->paginate((int) ($filters['per_page'] ?? 25))
+            ->through(fn (MonitoringRun $run): array => MonitoringReadPayload::run($run));
+
+        return response()->json($page);
+    }
 
     public function run(Request $request, MonitoringEnrollment $enrollment): JsonResponse
     {
