@@ -19,6 +19,7 @@ use App\Models\SerproSettings;
 use App\Services\Monitoring\SerproExecutor;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\File;
+use RuntimeException;
 use Tests\Support\FakeResultProjector;
 use Tests\Support\FakeSerproTransport;
 use Tests\TestCase;
@@ -217,6 +218,71 @@ final class SerproExecutionTest extends TestCase
         $this->assertSame(0, $projector->calls());
     }
 
+    public function test_result_is_discarded_when_the_enrollment_version_advances_while_projecting(): void
+    {
+        $account = $this->createAccount();
+        $enrollment = $this->enrollment($account, 'CONSDECLARACAO13');
+
+        $projector = new class($enrollment) implements ResultProjector
+        {
+            public int $calls = 0;
+
+            public function __construct(private readonly MonitoringEnrollment $enrollment) {}
+
+            public function project(MonitoringRun $run, array $result): void
+            {
+                $this->calls++;
+
+                // A projection write inside the completion transaction that
+                // must be rolled back when the fencing token is superseded.
+                $run->forceFill(['external_code' => 'projected'])->save();
+
+                // A version bump landing while the result is projected.
+                $this->enrollment->pause('outorga republicada');
+            }
+        };
+        $this->app->instance(ResultProjector::class, $projector);
+
+        $run = $this->executor()->execute($this->executor()->claim($enrollment, 'fenced-while-projecting'));
+
+        $this->assertSame(1, $projector->calls);
+        $this->assertSame(MonitoringRunStatus::Discarded, $run->status);
+        $this->assertSame('superseded', $run->error_code);
+        $this->assertNotSame('projected', $run->external_code, 'The projection write must be rolled back.');
+        $this->assertDatabaseHas('monitoring_attempts', [
+            'run_id' => $run->id,
+            'status' => 'discarded',
+            'classification' => 'superseded',
+        ]);
+    }
+
+    public function test_projection_failure_ends_the_run_as_failed_and_records_the_attempt(): void
+    {
+        $account = $this->createAccount();
+        $enrollment = $this->enrollment($account, 'CONSDECLARACAO13');
+
+        $this->app->instance(ResultProjector::class, new class implements ResultProjector
+        {
+            public function project(MonitoringRun $run, array $result): void
+            {
+                throw new RuntimeException('projection exploded');
+            }
+        });
+
+        $run = $this->executor()->execute($this->executor()->claim($enrollment, 'projection-failure-key'));
+
+        $this->assertSame(MonitoringRunStatus::Failed, $run->status);
+        $this->assertSame('projection_failed', $run->error_code);
+        $this->assertNotNull($run->finished_at);
+        $this->assertSame(0, $this->projector->calls());
+
+        $this->assertDatabaseHas('monitoring_attempts', [
+            'run_id' => $run->id,
+            'status' => 'failed',
+            'classification' => 'projection_failed',
+        ]);
+    }
+
     public function test_protocol_response_waits_with_protocol_persisted(): void
     {
         $projector = $this->projector;
@@ -342,6 +408,11 @@ final class SerproExecutionTest extends TestCase
         $projector = $this->projector;
         $account = $this->createAccount();
         SerproSettings::current()->update(['transport_approved' => true, 'transport_approved_at' => now()]);
+        SerproRequestAuthor::factory()->create([
+            'account_id' => $account->id,
+            'status' => AuthorStatus::Active,
+            'certificate_expires_at' => now()->addYear(),
+        ]);
         $transport = new FakeSerproTransport;
         $this->app->instance(SerproTransport::class, $transport);
         $enrollment = $this->enrollment($account, 'CONSDECLARACAO13');
@@ -352,6 +423,45 @@ final class SerproExecutionTest extends TestCase
 
         $this->assertSame(MonitoringRunStatus::Blocked, $run->status);
         $this->assertSame('serpro_credential_missing', $run->error_code);
+        $this->assertCount(0, $transport->tokenCalls);
+        $this->assertCount(0, $transport->callCalls);
+        $this->assertSame(0, $projector->calls());
+    }
+
+    public function test_missing_author_blocks_before_any_traffic(): void
+    {
+        $projector = $this->projector;
+        $account = $this->createAccount();
+        $transport = $this->openTransport($account, withAuthor: false);
+        $enrollment = $this->enrollment($account, 'CONSDECLARACAO13');
+
+        $run = $this->executor()->execute(
+            $this->executor()->claim($enrollment, 'no-author-key'),
+        );
+
+        $this->assertSame(MonitoringRunStatus::Blocked, $run->status);
+        $this->assertSame('author_pending', $run->error_code);
+        $this->assertCount(0, $transport->tokenCalls);
+        $this->assertCount(0, $transport->callCalls);
+        $this->assertSame(0, $projector->calls());
+    }
+
+    public function test_ineligible_author_blocks_before_any_traffic(): void
+    {
+        $projector = $this->projector;
+        $account = $this->createAccount();
+        $transport = $this->openTransport($account, author: [
+            'certificate_expires_at' => now()->subDay(),
+        ]);
+        $enrollment = $this->enrollment($account, 'CONSDECLARACAO13');
+
+        $run = $this->executor()->execute(
+            $this->executor()->claim($enrollment, 'ineligible-author-key'),
+        );
+
+        $this->assertSame(MonitoringRunStatus::Blocked, $run->status);
+        $this->assertSame('author_ineligible', $run->error_code);
+        $this->assertCount(0, $transport->tokenCalls);
         $this->assertCount(0, $transport->callCalls);
         $this->assertSame(0, $projector->calls());
     }
@@ -415,7 +525,7 @@ final class SerproExecutionTest extends TestCase
         ]);
     }
 
-    private function openTransport(Account $account): FakeSerproTransport
+    private function openTransport(Account $account, bool $withAuthor = true, array $author = []): FakeSerproTransport
     {
         SerproSettings::current()->update([
             'transport_approved' => true,
@@ -434,10 +544,14 @@ final class SerproExecutionTest extends TestCase
             'credential_ref' => $ref,
         ]);
 
-        SerproRequestAuthor::factory()->create([
-            'account_id' => $account->id,
-            'status' => AuthorStatus::Active,
-        ]);
+        if ($withAuthor) {
+            SerproRequestAuthor::factory()->create([
+                'account_id' => $account->id,
+                'status' => AuthorStatus::Active,
+                'certificate_expires_at' => now()->addYear(),
+                ...$author,
+            ]);
+        }
 
         $transport = new FakeSerproTransport;
         $this->app->instance(SerproTransport::class, $transport);

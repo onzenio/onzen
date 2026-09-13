@@ -4,9 +4,9 @@ namespace App\Services\Monitoring;
 
 use App\Contracts\ResultProjector;
 use App\Contracts\SerproTransport;
-use App\Enums\AuthorStatus;
 use App\Enums\MonitoringRunStatus;
 use App\Exceptions\SerproBlockedException;
+use App\Exceptions\SupersededRunException;
 use App\Integrations\Serpro\ConsultFixtureProvider;
 use App\Integrations\Serpro\ConsultOperationResolver;
 use App\Integrations\Serpro\OAuthTokenCache;
@@ -181,13 +181,6 @@ final class SerproExecutor
             return $this->finish($run, MonitoringRunStatus::Transient, 'transport_error');
         }
 
-        // The external work is done: re-check the fencing token before any
-        // result leaves the executor. A version bump during the call
-        // supersedes this run and its result is discarded.
-        if (! $this->fences($run, $this->enrollmentFor($run))) {
-            return $this->discard($run);
-        }
-
         return $this->settle($run, $result);
     }
 
@@ -216,6 +209,20 @@ final class SerproExecutor
             ->withoutGlobalScope('account')
             ->where('account_id', $run->account_id)
             ->whereKey($run->enrollment_id)
+            ->first();
+    }
+
+    /**
+     * The enrollment read under a row lock, used inside the completion
+     * transaction so a concurrent version bump serializes against it.
+     */
+    private function lockedEnrollment(MonitoringRun $run): ?MonitoringEnrollment
+    {
+        return MonitoringEnrollment::query()
+            ->withoutGlobalScope('account')
+            ->where('account_id', $run->account_id)
+            ->whereKey($run->enrollment_id)
+            ->lockForUpdate()
             ->first();
     }
 
@@ -261,16 +268,16 @@ final class SerproExecutor
             throw new SerproBlockedException('client_missing');
         }
 
+        // Fail-closed eligibility before any credential or token work: an
+        // existing author whose certificate is expired (or whose status is
+        // not active) must block with zero network traffic.
+        $author = $this->eligibleAuthor((int) $run->account_id);
+
         $contract = SerproContract::query()->where('environment', $environment)->first();
         $credentials = $this->credentials->resolve($contract);
         $credentialRef = (string) ($contract?->credential_ref ?? '');
 
         $oauth = $this->tokens->get($credentials, $environment, $credentialRef);
-
-        $author = $this->eligibleAuthor((int) $run->account_id);
-        if ($author === null) {
-            throw new SerproBlockedException('author_pending');
-        }
 
         $envelope = SerproEnvelope::make(
             SerproEnvelope::partyFor($credentials->contratanteDoc),
@@ -299,15 +306,35 @@ final class SerproExecutor
         return $this->normalize($run, $response, self::SOURCE_SERPRO);
     }
 
-    private function eligibleAuthor(int $accountId): ?SerproRequestAuthor
+    /**
+     * The newest eligible Author of the Account.
+     *
+     * Fail-closed and factual: no author at all is `author_pending`; authors
+     * that exist but lack an active certificate (or are marked ineligible)
+     * are `author_ineligible`. Both refuse before any credential/token work.
+     *
+     * @throws SerproBlockedException
+     */
+    private function eligibleAuthor(int $accountId): SerproRequestAuthor
     {
-        return SerproRequestAuthor::query()
+        $authors = SerproRequestAuthor::query()
             ->withoutGlobalScope('account')
             ->where('account_id', $accountId)
-            ->where('status', AuthorStatus::Active)
             ->orderByDesc('created_at')
             ->orderByDesc('id')
-            ->first();
+            ->get();
+
+        if ($authors->isEmpty()) {
+            throw new SerproBlockedException('author_pending');
+        }
+
+        foreach ($authors as $author) {
+            if ($author->isEligible()) {
+                return $author;
+            }
+        }
+
+        throw new SerproBlockedException('author_ineligible');
     }
 
     /**
@@ -380,10 +407,17 @@ final class SerproExecutor
 
         if ($status === MonitoringRunStatus::Completed) {
             try {
-                DB::transaction(function () use ($run, $result): void {
-                    // Projector is called only on a successful, non-superseded
-                    // completion; a projection failure never leaves the run
-                    // completed without the projected state.
+                DB::transaction(function () use ($run, $result, $outcome, $responseCode): void {
+                    // The fencing token is compared on the locked enrollment
+                    // INSIDE the completion transaction, before the projector
+                    // and again after it. The row lock makes a concurrent
+                    // version bump serialize against the commit; the second
+                    // check catches a bump that landed while projecting and
+                    // rolls the projection back instead of committing it.
+                    if (! $this->fences($run, $this->lockedEnrollment($run))) {
+                        throw new SupersededRunException;
+                    }
+
                     $this->projector->project($run, [
                         'source' => $result['source'],
                         'operation_code' => $result['operation_code'],
@@ -393,19 +427,31 @@ final class SerproExecutor
                         'body' => $result['body'],
                     ]);
 
+                    if (! $this->fences($run, $this->lockedEnrollment($run))) {
+                        throw new SupersededRunException;
+                    }
+
                     $run->transitionTo(MonitoringRunStatus::Completed, [
                         'protocol' => $result['protocol'],
                         'external_code' => $result['operation_code'],
                         'error_code' => null,
                     ]);
+
+                    // Attempt record shares the completion transaction, so a
+                    // rolled-back completion never leaves a phantom attempt.
+                    $this->recordAttempt($run, MonitoringRunStatus::Completed, $responseCode, $outcome['classification']);
                 });
+            } catch (SupersededRunException) {
+                return $this->discard($run);
             } catch (Throwable) {
                 return $this->finish($run, MonitoringRunStatus::Failed, 'projection_failed', $responseCode);
             }
 
-            $this->recordAttempt($run, $status, $responseCode, $outcome['classification']);
-
             return $run->refresh();
+        }
+
+        if (! $this->fences($run, $this->enrollmentFor($run))) {
+            return $this->discard($run);
         }
 
         $run = $run->transitionTo($status, [
