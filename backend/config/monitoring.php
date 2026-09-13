@@ -13,6 +13,7 @@ return [
     ],
     'queue' => env('MONITORING_SERPRO_QUEUE', 'serpro'),
     'queue_connection' => env('MONITORING_SERPRO_QUEUE_CONNECTION', 'serpro'),
+    // Caminhos relativos são resolvidos contra base_path(); valores absolutos passam direto.
     'fixtures_path' => env('MONITORING_SERPRO_FIXTURES_PATH', 'resources/fixtures/serpro/consultar'),
     'limits' => [
         'max_attempts' => (int) env('MONITORING_SERPRO_MAX_ATTEMPTS', 8),
