@@ -678,6 +678,27 @@ func TestFingerprintMultipartCoversFieldsAndFile(t *testing.T) {
 	}
 }
 
+func TestFingerprintMultipartSeparatesAmbiguousParts(t *testing.T) {
+	id := uuid.New()
+	fingerprint := func(fields [][2]string) string {
+		t.Helper()
+		sum, cleanup, err := fingerprintRequest(multipartRequest(t, id, fields, "", "", ""), testMultipartLimit)
+		if cleanup != nil {
+			defer cleanup()
+		}
+		if err != nil {
+			t.Fatalf("fingerprintRequest: %v", err)
+		}
+		return sum
+	}
+
+	split := fingerprint([][2]string{{"caption", "a"}, {"to", "b"}})
+	joined := fingerprint([][2]string{{"caption", "a\nfield\x00to\x00b"}})
+	if split == joined {
+		t.Error("parts that concatenate identically share a fingerprint, want length-prefixed parts")
+	}
+}
+
 func TestFingerprintLargeMultipartCoversFieldsAndKeepsBody(t *testing.T) {
 	id := uuid.New()
 	fields := [][2]string{{"to", "5547988359190"}, {"type", "image"}, {"caption", "olha"}}

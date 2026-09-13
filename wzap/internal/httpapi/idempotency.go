@@ -314,11 +314,14 @@ func routeFingerprint(r *http.Request) string {
 	return hex.EncodeToString(sum.Sum(nil))
 }
 
-// partsFingerprint hashes the method, route and sorted multipart parts.
+// partsFingerprint hashes the method, route and sorted multipart parts. Each
+// part is length-prefixed, so a value containing the part separator cannot be
+// re-segmented into a different set of parts.
 func partsFingerprint(r *http.Request, parts []string) string {
 	sum := sha256.New()
 	writeRoute(sum, r)
 	for _, part := range parts {
+		fmt.Fprintf(sum, "%d:", len(part))
 		sum.Write([]byte(part))
 		sum.Write([]byte{'\n'})
 	}
