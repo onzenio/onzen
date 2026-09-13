@@ -7,7 +7,7 @@
 
 ## 2. Persistência
 
-- [ ] 2.1 Criar as migrations iniciais (`instances`, `outbound_messages`, `idempotency_keys`, `jid_cache`, `media`, `event_outbox`), verificando aplicação em banco limpo
+- [ ] 2.1 Criar as migrations iniciais (`instances`, `message_queue`, `idempotency_keys`, `contacts`, `media`, `event_outbox`), verificando aplicação em banco limpo
 - [ ] 2.2 Implementar repositórios de instância e de mensagem, verificando testes de integração contra Postgres
 - [ ] 2.3 Implementar repositório de idempotência com aquisição atômica e expiração, verificando testes de corrida, replay e expiração
 - [ ] 2.4 Implementar cache de JID e repositório do outbox de eventos, verificando testes de expiração e de pendências
@@ -63,7 +63,7 @@
 
 ## 8. Integração e verificação final
 
-- [ ] 8.1 Escrever o README do wzap com contrato REST, subjects de eventos e checklist de pareamento, verificando revisão dos artefatos
-- [ ] 8.2 Executar verificação local completa (`docker compose up`, prontidão, criação de instância e QR), verificando evidência dos healthchecks
-- [ ] 8.3 Executar `go test ./...`, `golangci-lint run` e `go build` no workspace, verificando saída limpa
+- [x] 8.1 Escrever o README do wzap com contrato REST, subjects de eventos e checklist de pareamento, verificando revisão dos artefatos
+- [x] 8.2 Executar verificação local completa (`docker compose up`, prontidão, criação de instância e QR), verificando evidência dos healthchecks
+- [x] 8.3 Executar `go test ./...`, `golangci-lint run` e `go build` no workspace, verificando saída limpa
 - [ ] 8.4 Executar checklist manual de pareamento e envio real com um número de teste, registrando a evidência no change
