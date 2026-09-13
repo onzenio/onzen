@@ -7,6 +7,7 @@ use App\Enums\UserRole;
 use Carbon\CarbonInterface;
 use Database\Factories\InvitationFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -23,6 +24,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property int|null $invited_by_user_id
  */
 #[Fillable(['account_id', 'name', 'email', 'role', 'token_hash', 'expires_at', 'accepted_at', 'invited_by_user_id'])]
+#[Hidden(['token_hash'])]
 class Invitation extends Model
 {
     /** @use HasFactory<InvitationFactory> */
