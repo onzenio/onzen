@@ -14,7 +14,7 @@ return new class extends Migration
         Schema::create('query_quota_consumptions', function (Blueprint $table) {
             $table->id();
             $table->foreignId('account_id')->constrained('accounts');
-            $table->foreignId('run_id')->unique()->constrained('monitoring_runs')->cascadeOnDelete();
+            $table->foreignId('run_id')->unique()->constrained('monitoring_runs')->restrictOnDelete();
             $table->string('trigger');
             $table->string('period', 7);
             $table->timestamp('created_at')->nullable();

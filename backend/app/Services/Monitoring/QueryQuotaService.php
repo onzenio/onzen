@@ -6,6 +6,7 @@ use App\Exceptions\SerproBlockedException;
 use App\Models\Account;
 use App\Models\MonitoringRun;
 use App\Models\QueryQuotaConsumption;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -42,6 +43,38 @@ final class QueryQuotaService
      * @throws SerproBlockedException
      */
     public function reserve(Account $account, MonitoringRun $run): void
+    {
+        // A run may only be charged to its own Account: the consumption is
+        // the account-scoped truth for replays, so a mismatched caller would
+        // write the debit under the wrong Account and let the real one replay
+        // for free. Fail closed with a factual code.
+        if ((int) $run->account_id !== (int) $account->getKey()) {
+            throw new SerproBlockedException('quota_account_mismatch');
+        }
+
+        try {
+            $this->reserveInTransaction($account, $run);
+        } catch (UniqueConstraintViolationException $exception) {
+            // Two transactions raced past the replay check: the unique
+            // `run_id` means one of them won and its committed row IS the
+            // reservation. This call is a replay, not a failure — unless no
+            // row survived, which keeps the original error factual.
+            $reserved = QueryQuotaConsumption::query()
+                ->withoutGlobalScope('account')
+                ->where('run_id', $run->getKey())
+                ->exists();
+
+            if (! $reserved) {
+                throw $exception;
+            }
+        }
+    }
+
+    /**
+     * @throws ValidationException
+     * @throws SerproBlockedException
+     */
+    private function reserveInTransaction(Account $account, MonitoringRun $run): void
     {
         DB::transaction(function () use ($account, $run): void {
             $accountId = (int) $account->getKey();

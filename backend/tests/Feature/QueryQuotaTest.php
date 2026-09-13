@@ -7,6 +7,7 @@ use App\Contracts\SerproTransport;
 use App\Contracts\VaultResolver;
 use App\Enums\AuthorStatus;
 use App\Enums\MonitoringRunStatus;
+use App\Exceptions\SerproBlockedException;
 use App\Jobs\ExecuteSerproJob;
 use App\Models\Account;
 use App\Models\Client;
@@ -20,8 +21,10 @@ use App\Models\SerproSettings;
 use App\Services\Monitoring\QueryQuotaService;
 use App\Services\Monitoring\SerproExecutor;
 use App\Support\CurrentAccount;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use Illuminate\Validation\ValidationException;
 use Tests\Support\FakeResultProjector;
@@ -89,6 +92,66 @@ final class QueryQuotaTest extends TestCase
 
         $this->assertDatabaseCount('query_quota_consumptions', 1);
         $this->assertSame(1, $quota->usage($account)['consumed']);
+    }
+
+    public function test_a_preexisting_consumption_is_an_idempotent_success_not_a_500(): void
+    {
+        $account = $this->accountWithVolume(1);
+        $run = $this->makeRun($account);
+
+        // The winner of a concurrent reservation is already committed when
+        // this caller reaches the insert: the unique `run_id` must resolve to
+        // success (replay), never to a surfaced database error.
+        DB::table('query_quota_consumptions')->insert([
+            'account_id' => $account->id,
+            'run_id' => $run->id,
+            'trigger' => MonitoringRun::TRIGGER_MANUAL,
+            'period' => $this->period(),
+            'created_at' => now(),
+        ]);
+
+        $this->quota()->reserve($account, $run);
+
+        $this->assertDatabaseCount('query_quota_consumptions', 1);
+        $this->assertSame(1, $this->quota()->usage($account)['consumed']);
+    }
+
+    public function test_reservation_refuses_a_run_from_another_account(): void
+    {
+        $owner = $this->accountWithVolume(2);
+        $other = $this->accountWithVolume(2);
+        $run = $this->makeRun($owner);
+        $quota = $this->quota();
+
+        try {
+            $quota->reserve($other, $run);
+            $this->fail('A run may only be charged to its own Account.');
+        } catch (SerproBlockedException $exception) {
+            $this->assertSame('quota_account_mismatch', $exception->getMessage());
+        }
+
+        $this->assertDatabaseCount('query_quota_consumptions', 0);
+        $this->assertSame(0, $quota->usage($owner)['consumed']);
+        $this->assertSame(0, $quota->usage($other)['consumed']);
+    }
+
+    public function test_deleting_a_run_with_a_consumption_is_refused_and_the_consumption_remains(): void
+    {
+        $account = $this->accountWithVolume(2);
+        $run = $this->makeRun($account);
+
+        $this->quota()->reserve($account, $run);
+
+        try {
+            $run->delete();
+            $this->fail('A run with a consumption must not be deleted.');
+        } catch (QueryException) {
+            // The FK restrict protects the immutable consumption.
+        }
+
+        $this->assertDatabaseHas('monitoring_runs', ['id' => $run->id]);
+        $this->assertDatabaseHas('query_quota_consumptions', ['run_id' => $run->id]);
+        $this->assertSame(1, $this->quota()->usage($account)['consumed']);
     }
 
     public function test_exhausted_volume_blocks_with_422_upgrade_message_and_no_consumption(): void
