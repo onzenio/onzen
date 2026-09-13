@@ -14,15 +14,20 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/nats-io/nats.go"
+
 	"onefisc/wzap/internal/config"
+	"onefisc/wzap/internal/events"
 	"onefisc/wzap/internal/httpapi"
 	"onefisc/wzap/internal/storage/postgres"
 	"onefisc/wzap/internal/version"
 )
 
 const (
-	shutdownTimeout    = 10 * time.Second
-	healthcheckTimeout = 5 * time.Second
+	shutdownTimeout     = 10 * time.Second
+	healthcheckTimeout  = 5 * time.Second
+	natsConnectTimeout  = 5 * time.Second
+	streamEnsureTimeout = 5 * time.Second
 )
 
 func main() {
@@ -78,7 +83,48 @@ func serve() error {
 		}
 	}
 
-	srv := httpapi.New(cfg, log, httpapi.Deps{ReadyChecker: httpapi.NewChecker(pool)})
+	nc, err := nats.Connect(cfg.NATSURL,
+		nats.Name("wzap"),
+		nats.Timeout(natsConnectTimeout),
+		nats.ReconnectWait(2*time.Second),
+		nats.MaxReconnects(-1),
+		nats.RetryOnFailedConnect(true),
+	)
+	if err != nil {
+		return fmt.Errorf("connect nats: %w", err)
+	}
+	defer nc.Close()
+
+	publisher, err := events.NewNATSPublisher(nc, cfg.NATSStream, cfg.EventRetentionDays)
+	if err != nil {
+		return fmt.Errorf("event publisher: %w", err)
+	}
+
+	ensureCtx, cancelEnsure := context.WithTimeout(ctx, streamEnsureTimeout)
+	ensureErr := publisher.EnsureStream(ensureCtx)
+	cancelEnsure()
+	switch {
+	case ensureErr != nil && nc.IsConnected():
+		return fmt.Errorf("ensure event stream: %w", ensureErr)
+	case ensureErr != nil:
+		// The broker is down at boot: serve anyway, report it through /readyz
+		// and let the relay ensure the stream once the broker returns.
+		log.Warn("event stream not ready at startup", "error", ensureErr)
+	}
+
+	outbox := postgres.NewEventOutboxRepository(pool)
+	relay := events.NewRelay(outbox, publisher, log, cfg.EventRetentionDays)
+	checker := httpapi.NewChecker(pool, httpapi.NamedProbe{Name: "nats", Run: publisher.Ready})
+
+	srv := httpapi.New(cfg, log, httpapi.Deps{ReadyChecker: checker})
+
+	relayCtx, stopRelay := context.WithCancel(ctx)
+	defer stopRelay()
+	relayDone := make(chan struct{})
+	go func() {
+		defer close(relayDone)
+		relay.Run(relayCtx)
+	}()
 
 	log.Info("wzap listening", "version", version.Version, "addr", cfg.HTTPAddr)
 
@@ -91,6 +137,8 @@ func serve() error {
 
 	select {
 	case err := <-serveErr:
+		stopRelay()
+		<-relayDone
 		return fmt.Errorf("serve http: %w", err)
 	case <-ctx.Done():
 	}
@@ -100,11 +148,15 @@ func serve() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
+		stopRelay()
+		<-relayDone
 		return fmt.Errorf("shutdown http server: %w", err)
 	}
 
-	// Background workers (outbox relay, session manager) are stopped here once
-	// they exist; the HTTP server drains first so in-flight requests finish.
+	// The HTTP server drains first so in-flight requests finish; only then the
+	// relay stops, after publishing the events those requests enqueued.
+	stopRelay()
+	<-relayDone
 
 	log.Info("wzap stopped")
 	return nil

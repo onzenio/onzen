@@ -163,6 +163,27 @@ func TestCheckerAggregatesProbes(t *testing.T) {
 	}
 }
 
+func TestNewCheckerRunsNamedProbes(t *testing.T) {
+	pool := postgrestest.NewPool(t)
+	probeErr := errors.New("broker unavailable")
+	checker := NewChecker(pool,
+		NamedProbe{Name: "broker", Run: func(context.Context) error { return probeErr }},
+		NamedProbe{Name: "cache", Run: func(context.Context) error { return nil }},
+	)
+
+	ctx := context.Background()
+	results := checker.Checks(ctx)
+	if !errors.Is(results["broker"], probeErr) {
+		t.Errorf("broker probe result = %v, want %v", results["broker"], probeErr)
+	}
+	if results["cache"] != nil {
+		t.Errorf("cache probe result = %v, want nil", results["cache"])
+	}
+	if err := checker.Check(ctx); err == nil || !strings.Contains(err.Error(), "broker") {
+		t.Errorf("Check error = %v, want it to name the failing broker probe", err)
+	}
+}
+
 func TestCheckerReportsMigrationState(t *testing.T) {
 	pool := postgrestest.NewPool(t)
 	ctx := context.Background()

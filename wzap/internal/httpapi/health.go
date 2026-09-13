@@ -15,9 +15,9 @@ import (
 	"onefisc/wzap/internal/storage/migrations"
 )
 
-// Checker aggregates the readiness probes of the service dependencies. The
-// broker probe joins the Postgres ping and the migration state when the NATS
-// connection exists.
+// Checker aggregates the readiness probes of the service dependencies: the
+// Postgres ping and migration state plus any probe passed by the wiring layer
+// (the broker connection check, for example).
 type Checker struct {
 	probes []probe
 }
@@ -28,15 +28,25 @@ type probe struct {
 	run  func(ctx context.Context) error
 }
 
-// NewChecker builds the readiness checker over the Postgres pool: a ping and
-// the state of the embedded migrations.
-func NewChecker(pool *pgxpool.Pool) *Checker {
-	return &Checker{probes: []probe{
+// NamedProbe is an additional readiness dependency check.
+type NamedProbe struct {
+	Name string
+	Run  func(ctx context.Context) error
+}
+
+// NewChecker builds the readiness checker over the Postgres pool, appending
+// the extra named probes after the built-in ones.
+func NewChecker(pool *pgxpool.Pool, extra ...NamedProbe) *Checker {
+	checker := &Checker{probes: []probe{
 		{name: "postgres", run: pool.Ping},
 		{name: "migrations", run: func(ctx context.Context) error {
 			return migrationsApplied(ctx, pool)
 		}},
 	}}
+	for _, add := range extra {
+		checker.probes = append(checker.probes, probe{name: add.Name, run: add.Run})
+	}
+	return checker
 }
 
 // Check runs every probe and joins the failures into a single error.
