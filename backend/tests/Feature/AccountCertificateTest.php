@@ -144,6 +144,33 @@ class AccountCertificateTest extends TestCase
         $this->assertStringNotContainsString('secret:new-cert-ref', $encoded);
     }
 
+    public function test_replacement_audits_the_certificate_account_when_the_actor_belongs_to_another_account(): void
+    {
+        $actorAccount = $this->createAccount();
+        $certificateAccount = $this->createAccount();
+        $actor = $this->createUser($actorAccount);
+        $certificate = AccountCertificate::factory()->for($certificateAccount, 'account')->create([
+            'vault_ref' => 'secret:old-cert-ref',
+            'thumbprint' => 'old-thumbprint',
+        ]);
+
+        $certificate->replace([
+            'vault_ref' => 'secret:new-cert-ref',
+            'thumbprint' => 'new-thumbprint',
+        ], $actor);
+
+        $log = AuditLog::query()->where('action', 'account.certificate_replaced')->sole();
+
+        $this->assertSame($certificateAccount->id, $log->origin_account_id);
+        $this->assertSame($actor->id, $log->actor_user_id);
+        $this->assertSame('old-thumbprint', $log->metadata['previous_thumbprint']);
+        $this->assertSame('new-thumbprint', $log->metadata['thumbprint']);
+
+        $encoded = (string) json_encode($log->metadata);
+        $this->assertStringNotContainsString('secret:old-cert-ref', $encoded);
+        $this->assertStringNotContainsString('secret:new-cert-ref', $encoded);
+    }
+
     public function test_replacement_syncs_linked_authors_to_the_new_certificate(): void
     {
         $account = $this->createAccount();

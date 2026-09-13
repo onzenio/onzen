@@ -7,6 +7,7 @@ use App\Models\Account;
 use App\Models\AuditLog;
 use App\Models\User;
 use App\Support\CurrentAccount;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 use Throwable;
@@ -28,6 +29,17 @@ class AuditService
     private const SENSITIVE_KEY_FRAGMENTS = ['password', 'secret', 'pfx', 'token'];
 
     /**
+     * Record an audit entry. Canonical contract:
+     * `record(?User $actor, string $action, array $metadata = [], ?Account $account = null)`.
+     *
+     * Callers pass the affected Account as `$account`; origin resolution order
+     * is `$account` → actor's account → CurrentAccount → platform Account A.
+     *
+     * Best-effort: returns the AuditLog on success and null when auditing
+     * fails (technical error is logged, secrets are never logged). The insert
+     * runs in a nested transaction (savepoint when already inside one) so a
+     * failed audit never aborts the caller's transaction on PostgreSQL.
+     *
      * @param  array<string, mixed>  $metadata
      */
     public function record(?User $actor, string $action, array $metadata = [], ?Account $account = null): ?AuditLog
@@ -42,17 +54,19 @@ class AuditService
                 throw new RuntimeException('No origin Account available to record the audit entry.');
             }
 
-            $log = new AuditLog([
-                'actor_user_id' => $actor?->id,
-                'origin_account_id' => $origin->id,
-                'target_account_id' => null,
-                'action' => $action,
-                'metadata' => $this->redact($metadata),
-            ]);
-            $log->created_at = now();
-            $log->save();
+            return DB::transaction(function () use ($actor, $origin, $action, $metadata): AuditLog {
+                $log = new AuditLog([
+                    'actor_user_id' => $actor?->id,
+                    'origin_account_id' => $origin->id,
+                    'target_account_id' => null,
+                    'action' => $action,
+                    'metadata' => $this->redact($metadata),
+                ]);
+                $log->created_at = now();
+                $log->save();
 
-            return $log;
+                return $log;
+            });
         } catch (Throwable $exception) {
             Log::error('audit.record_failed', [
                 'action' => $action,

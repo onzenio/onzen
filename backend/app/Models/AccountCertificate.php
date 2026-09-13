@@ -93,7 +93,7 @@ class AccountCertificate extends Model
                 'previous_expires_at' => $previousExpiresAt?->toIso8601String(),
                 'thumbprint' => $this->thumbprint,
                 'expires_at' => $this->expires_at?->toIso8601String(),
-            ]);
+            ], $this->account);
 
             return $this;
         });

@@ -3,11 +3,14 @@
 namespace Tests\Feature;
 
 use App\Enums\AccountProfile;
+use App\Models\Account;
 use App\Models\AuditLog;
+use App\Models\Client;
 use App\Models\User;
 use App\Services\AuditService;
 use App\Support\CurrentAccount;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 use Tests\TestCase;
@@ -115,5 +118,48 @@ class AuditServiceTest extends TestCase
 
         $this->assertNull($log);
         $this->assertDatabaseCount('audit_logs', 0);
+    }
+
+    public function test_audit_insert_uses_a_savepoint_inside_an_outer_transaction(): void
+    {
+        $account = $this->createAccount();
+        $actor = $this->createUser($account);
+        $observedLevel = null;
+        $outerLevel = null;
+
+        AuditLog::creating(function () use (&$observedLevel): void {
+            $observedLevel = DB::transactionLevel();
+        });
+
+        DB::transaction(function () use ($actor, &$outerLevel): void {
+            $outerLevel = DB::transactionLevel();
+            $this->service->record($actor, 'serpro.credentials_replaced');
+        });
+
+        $this->assertSame($outerLevel + 1, $observedLevel);
+        $this->assertDatabaseCount('audit_logs', 1);
+    }
+
+    public function test_audit_failure_inside_an_outer_transaction_does_not_abort_it(): void
+    {
+        $account = $this->createAccount();
+        $actor = $this->createUser($account);
+        Log::shouldReceive('error')->once();
+
+        $client = DB::transaction(function () use ($actor, $account): Client {
+            $ghost = new Account;
+            $ghost->id = 999_999_999;
+
+            $log = $this->service->record($actor, 'serpro.credentials_replaced', [], $ghost);
+            $this->assertNull($log);
+
+            return Client::factory()->create([
+                'account_id' => $account->id,
+                'cnpj' => '12345678000195',
+            ]);
+        });
+
+        $this->assertTrue($client->exists);
+        $this->assertDatabaseHas('clients', ['id' => $client->id]);
     }
 }
