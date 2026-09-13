@@ -179,14 +179,20 @@ func instanceID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
 	return id, true
 }
 
-// parseInstancesLimit reads the limit query parameter, falling back to the
-// default and capping the page size at maxInstancesLimit.
+// parseInstancesLimit reads the limit query parameter with the instance
+// defaults.
 func parseInstancesLimit(raw string) int {
+	return parseLimit(raw, defaultInstancesLimit, maxInstancesLimit)
+}
+
+// parseLimit reads a limit query parameter, falling back to fallback when it is
+// missing or malformed and capping the page size at maxLimit.
+func parseLimit(raw string, fallback, maxLimit int) int {
 	limit, err := strconv.Atoi(raw)
 	if err != nil || limit <= 0 {
-		return defaultInstancesLimit
+		return fallback
 	}
-	return min(limit, maxInstancesLimit)
+	return min(limit, maxLimit)
 }
 
 // decodeJSONBody decodes the request body into target.

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"onefisc/wzap/internal/config"
+	"onefisc/wzap/internal/storage"
 )
 
 // ReadyChecker reports whether the service dependencies are ready to serve
@@ -23,6 +24,8 @@ type Deps struct {
 	ReadyChecker ReadyChecker
 	Instances    InstanceService
 	Numbers      NumberResolver
+	Messages     MessageService
+	Idempotency  storage.IdempotencyRepository
 }
 
 // New builds the HTTP server with the middleware chain, the health endpoints
@@ -43,6 +46,11 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *http.Server {
 	api.HandleFunc("GET /api/v1/instances/{id}/qr", handleQRInstance(deps.Instances))
 	api.HandleFunc("GET /api/v1/instances/{id}/status", handleInstanceStatus(deps.Instances))
 	api.HandleFunc("POST /api/v1/instances/{id}/numbers/check", handleCheckNumber(deps.Instances, deps.Numbers))
+	api.Handle("POST /api/v1/instances/{id}/messages/text", Idempotency(deps.Idempotency, log)(handleSendText(deps.Messages)))
+	api.Handle("POST /api/v1/instances/{id}/messages/location", Idempotency(deps.Idempotency, log)(handleSendLocation(deps.Messages)))
+	api.Handle("POST /api/v1/instances/{id}/messages/contact", Idempotency(deps.Idempotency, log)(handleSendContact(deps.Messages)))
+	api.HandleFunc("GET /api/v1/instances/{id}/messages", handleListMessages(deps.Messages))
+	api.HandleFunc("GET /api/v1/instances/{id}/messages/{message_id}", handleGetMessage(deps.Messages))
 	mux.Handle("/api/v1/", Auth(cfg.ServiceToken)(api))
 
 	return &http.Server{

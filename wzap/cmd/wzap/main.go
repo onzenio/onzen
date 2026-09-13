@@ -118,6 +118,8 @@ func serve() error {
 	}
 
 	instances := postgres.NewInstanceRepository(pool)
+	messageRepo := postgres.NewMessageRepository(pool)
+	idempotencyRepo := postgres.NewIdempotencyRepository(pool)
 	outbox := postgres.NewEventOutboxRepository(pool)
 	relay := events.NewRelay(outbox, publisher, log, cfg.EventRetentionDays)
 	checker := httpapi.NewChecker(pool, httpapi.NamedProbe{Name: "nats", Run: publisher.Ready})
@@ -131,6 +133,7 @@ func serve() error {
 
 	service := instance.NewService(instances, sessions, nil)
 	numbers := message.NewJIDResolver(sessions, postgres.NewJIDCacheRepository(pool), log)
+	messages := message.NewService(instances, numbers, messageRepo)
 
 	// Restore the persisted sessions before serving. Per-instance failures are
 	// reflected in instances.status by the manager; only an aborted restore is
@@ -142,7 +145,13 @@ func serve() error {
 		log.Warn("restore sessions not completed", "error", restoreErr)
 	}
 
-	srv := httpapi.New(cfg, log, httpapi.Deps{ReadyChecker: checker, Instances: service, Numbers: numbers})
+	srv := httpapi.New(cfg, log, httpapi.Deps{
+		ReadyChecker: checker,
+		Instances:    service,
+		Numbers:      numbers,
+		Messages:     messages,
+		Idempotency:  idempotencyRepo,
+	})
 
 	relayCtx, stopRelay := context.WithCancel(ctx)
 	defer stopRelay()
