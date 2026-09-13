@@ -64,6 +64,14 @@ use Throwable;
  * positive resumes the Client's outorga-paused associations. With the
  * transport gated (dry-run) the gate does not act.
  *
+ * Task 24 adds the PGDAS-D consult chain: a completed index run whose
+ * projection published a new/changed snapshot hands off to
+ * {@see PgdasdConsultChain} inside the same completion transaction, before
+ * the completed transition. The chain only creates pending child runs and
+ * dispatches their opaque ids after commit; quota, eligibility and fencing
+ * are enforced by this executor when each child executes, and a chain failure
+ * rolls the completion back so novelty is never committed without children.
+ *
  * Fail-closed: a call is only attempted when the effective gate is open, and
  * missing credentials, an inactive enrollment or a missing fixture end the
  * run with a factual code. Nothing sensitive is logged or persisted.
@@ -90,6 +98,7 @@ final class SerproExecutor
         private readonly QueryQuotaService $quota,
         private readonly SerproEvents $events,
         private readonly ProcurationGate $procuration,
+        private readonly PgdasdConsultChain $chain,
     ) {}
 
     /**
@@ -513,7 +522,9 @@ final class SerproExecutor
                     // version bump serialize against the commit; the second
                     // check catches a bump that landed while projecting and
                     // rolls the projection back instead of committing it.
-                    if (! $this->fences($run, $this->lockedEnrollment($run))) {
+                    $enrollment = $this->lockedEnrollment($run);
+
+                    if ($enrollment === null || ! $this->fences($run, $enrollment)) {
                         throw new SupersededRunException;
                     }
 
@@ -526,9 +537,25 @@ final class SerproExecutor
                         'body' => $result['body'],
                     ]);
 
-                    if (! $this->fences($run, $this->lockedEnrollment($run))) {
+                    $enrollment = $this->lockedEnrollment($run);
+
+                    if ($enrollment === null || ! $this->fences($run, $enrollment)) {
                         throw new SupersededRunException;
                     }
+
+                    // Task 24: a PGDAS-D index projection that published a
+                    // new/changed snapshot enqueues the next steps of the
+                    // consult chain in the same completion transaction. The
+                    // chain only creates pending runs (quota, eligibility and
+                    // fencing are enforced by this executor when each child
+                    // executes) and dispatches the opaque run id after commit.
+                    // A chain failure rolls the completion back, so novelty is
+                    // never committed without its children.
+                    $this->chain->enqueueAfterIndex($run, $enrollment, [
+                        'source' => $result['source'],
+                        'operation_code' => $result['operation_code'],
+                        'body' => $result['body'],
+                    ]);
 
                     $run->transitionTo(MonitoringRunStatus::Completed, [
                         'protocol' => $protocol,
