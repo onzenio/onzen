@@ -19,13 +19,22 @@ import (
 )
 
 // runtimeRepo is an in-memory storage.InstanceRepository for the runtime tests.
-// Only Get and Update are exercised by the runtime; the remaining methods are
-// stubs that must never be reached.
+// Only SetConnectionState (and the Get behind it) is exercised by the runtime;
+// the remaining methods are stubs that must never be reached.
 type runtimeRepo struct {
-	instances map[uuid.UUID]model.Instance
-	getErr    error
-	updateErr error
-	updates   []model.Instance
+	instances   map[uuid.UUID]model.Instance
+	getErr      error
+	updateErr   error
+	connections []connectionUpdate
+}
+
+// connectionUpdate records one SetConnectionState invocation.
+type connectionUpdate struct {
+	id              uuid.UUID
+	status          string
+	jid             string
+	lastError       string
+	lastConnectedAt *time.Time
 }
 
 func newRuntimeRepo(instances ...model.Instance) *runtimeRepo {
@@ -60,14 +69,8 @@ func (r *runtimeRepo) List(context.Context, int, string) ([]model.Instance, stri
 	return nil, "", errors.New("runtimeRepo.List: unexpected call")
 }
 
-func (r *runtimeRepo) Update(_ context.Context, instance model.Instance) (*model.Instance, error) {
-	r.updates = append(r.updates, instance)
-	if r.updateErr != nil {
-		return nil, r.updateErr
-	}
-	r.instances[instance.ID] = instance
-	stored := instance
-	return &stored, nil
+func (r *runtimeRepo) Update(context.Context, model.Instance) (*model.Instance, error) {
+	return nil, errors.New("runtimeRepo.Update: unexpected call")
 }
 
 func (r *runtimeRepo) Delete(context.Context, uuid.UUID) error {
@@ -76,6 +79,31 @@ func (r *runtimeRepo) Delete(context.Context, uuid.UUID) error {
 
 func (r *runtimeRepo) SetConnection(context.Context, uuid.UUID, string, string) error {
 	return errors.New("runtimeRepo.SetConnection: unexpected call")
+}
+
+// SetConnectionState records the targeted update and applies it to the
+// in-memory row, mirroring the repository semantics.
+func (r *runtimeRepo) SetConnectionState(_ context.Context, id uuid.UUID, status, jid, lastError string, connectedAt *time.Time) error {
+	r.connections = append(r.connections, connectionUpdate{
+		id: id, status: status, jid: jid, lastError: lastError, lastConnectedAt: connectedAt,
+	})
+	if r.updateErr != nil {
+		return r.updateErr
+	}
+	instance, ok := r.instances[id]
+	if !ok {
+		return storage.ErrNotFound
+	}
+	instance.Status = status
+	if jid != "" {
+		instance.WhatsAppJID = jid
+	}
+	instance.LastError = lastError
+	if connectedAt != nil {
+		instance.LastConnectedAt = connectedAt
+	}
+	r.instances[id] = instance
+	return nil
 }
 
 // fakeWriter records the events written to the outbox.
@@ -134,8 +162,16 @@ func TestRuntimeOnConnectionUpdatesInstanceAndEnqueuesEvent(t *testing.T) {
 	if stored.LastConnectedAt == nil {
 		t.Error("stored last_connected_at = nil, want the connection time")
 	}
-	if len(repo.updates) != 1 || repo.updates[0].ID != id {
-		t.Errorf("repo Update calls = %+v, want the instance %s", repo.updates, id)
+	if len(repo.connections) != 1 {
+		t.Fatalf("SetConnectionState calls = %+v, want one", repo.connections)
+	}
+	update := repo.connections[0]
+	if update.id != id || update.status != string(session.StatusConnected) ||
+		update.jid != "5511999999999@s.whatsapp.net" || update.lastError != "" {
+		t.Errorf("SetConnectionState call = %+v, want the connected transition", update)
+	}
+	if update.lastConnectedAt == nil {
+		t.Error("SetConnectionState call is missing last_connected_at")
 	}
 
 	if len(writer.subjects) != 1 {
@@ -184,6 +220,13 @@ func TestRuntimeOnConnectionFailureRecordsReason(t *testing.T) {
 	}
 	if stored.LastConnectedAt == nil || !stored.LastConnectedAt.Equal(connectedAt) {
 		t.Errorf("stored last_connected_at = %v, want the previous %v", stored.LastConnectedAt, connectedAt)
+	}
+
+	if len(repo.connections) != 1 {
+		t.Fatalf("SetConnectionState calls = %+v, want one", repo.connections)
+	}
+	if update := repo.connections[0]; update.lastError != "temporary ban" || update.lastConnectedAt != nil {
+		t.Errorf("SetConnectionState call = %+v, want the reason without a connection time", update)
 	}
 
 	payload := decodeConnectionPayload(t, writer.events[0])

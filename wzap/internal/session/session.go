@@ -110,7 +110,9 @@ type Session interface {
 	// SendPresence reports chat presence ("composing"/"paused") or user
 	// presence ("available"/"unavailable") for a chat.
 	SendPresence(ctx context.Context, chatJID, state string) error
-	// Disconnect closes the connection without deleting the credentials.
+	// Disconnect asks WhatsApp to log the companion device out, then closes
+	// the connection. A session that was never online or whose device is
+	// already gone disconnects locally without failing.
 	Disconnect(ctx context.Context) error
 	// Status returns the current lifecycle state.
 	Status() Status

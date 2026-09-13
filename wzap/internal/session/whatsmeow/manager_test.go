@@ -489,6 +489,36 @@ func TestRemoveDeletesCredentials(t *testing.T) {
 	}
 }
 
+func TestRemoveLogsOutFromWhatsApp(t *testing.T) {
+	manager := newTestManager(t)
+	id := uuid.New()
+	jid := saveTestDevice(t, manager.devices, "5511999999999")
+	sess, err := manager.Create(&model.Instance{ID: id, WhatsAppJID: jid.String()})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	logouts := 0
+	sess.(*instanceSession).logoutFn = func(context.Context) error {
+		logouts++
+		return whatsmeow.ErrNotConnected
+	}
+
+	if err := manager.Remove(context.Background(), id); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+
+	if logouts != 1 {
+		t.Errorf("logout attempts = %d, want 1", logouts)
+	}
+	stored, err := manager.devices.GetDevice(context.Background(), jid)
+	if err != nil {
+		t.Fatalf("GetDevice after Remove: %v", err)
+	}
+	if stored != nil {
+		t.Error("device credentials still stored after Remove")
+	}
+}
+
 func TestRemoveKeepsSessionWhenDeleteFails(t *testing.T) {
 	manager := newTestManager(t)
 	id := uuid.New()
@@ -556,6 +586,10 @@ func (r *fakeInstanceRepo) Update(context.Context, model.Instance) (*model.Insta
 
 func (r *fakeInstanceRepo) SetConnection(context.Context, uuid.UUID, string, string) error {
 	return errors.New("fakeInstanceRepo.SetConnection: unexpected call")
+}
+
+func (r *fakeInstanceRepo) SetConnectionState(context.Context, uuid.UUID, string, string, string, *time.Time) error {
+	return errors.New("fakeInstanceRepo.SetConnectionState: unexpected call")
 }
 
 func (r *fakeInstanceRepo) Delete(context.Context, uuid.UUID) error {

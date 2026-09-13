@@ -332,6 +332,10 @@ type instanceSession struct {
 	// reconnectFn brings the session online during an auto-reconnect. It
 	// defaults to connectExisting and is replaced in the transition tests.
 	reconnectFn func(ctx context.Context) error
+	// logoutFn removes the companion device from WhatsApp. It defaults to the
+	// client Logout and is replaced in the tests to assert the attempt without
+	// a network handshake.
+	logoutFn func(ctx context.Context) error
 
 	mu           sync.RWMutex
 	status       session.Status
@@ -517,11 +521,14 @@ func (s *instanceSession) SendPresence(ctx context.Context, chatJID, state strin
 	return s.client.SendPresence(ctx, target.user)
 }
 
-// Disconnect closes the connection without deleting the credentials, stops any
-// pending auto-reconnect and clears the paired identity of the session.
-func (s *instanceSession) Disconnect(context.Context) error {
+// Disconnect asks WhatsApp to drop the companion device while the connection
+// is still up, then closes it, stops any pending auto-reconnect and clears the
+// paired identity of the session. A logout the server cannot be reached for is
+// not fatal: the local teardown still completes.
+func (s *instanceSession) Disconnect(ctx context.Context) error {
 	s.cancelQR()
 	s.cancelReconnect()
+	s.logoutTolerantly(ctx)
 	s.client.Disconnect()
 
 	s.mu.Lock()
@@ -533,10 +540,13 @@ func (s *instanceSession) Disconnect(context.Context) error {
 	return nil
 }
 
-// remove disconnects the client and deletes its stored credentials.
+// remove asks WhatsApp to drop the companion device, disconnects the client and
+// deletes its stored credentials. It is safe to call it after Disconnect, when
+// the logout attempt only sees a dropped connection.
 func (s *instanceSession) remove(ctx context.Context) error {
 	s.cancelQR()
 	s.cancelReconnect()
+	s.logoutTolerantly(ctx)
 	s.client.Disconnect()
 	if s.client.Store.ID != nil {
 		if err := s.client.Store.Delete(ctx); err != nil {
@@ -549,6 +559,33 @@ func (s *instanceSession) remove(ctx context.Context) error {
 		s.setStatus(session.StatusDisconnected, "", "session removed")
 	}
 	return nil
+}
+
+// logout asks WhatsApp to remove the companion device, defaulting to the
+// client Logout. Tests replace logoutFn to assert the attempt.
+func (s *instanceSession) logout(ctx context.Context) error {
+	if s.logoutFn != nil {
+		return s.logoutFn(ctx)
+	}
+	if s.client == nil {
+		return nil
+	}
+	return s.client.Logout(ctx)
+}
+
+// logoutTolerantly attempts the WhatsApp logout. A session that was never
+// online and a device that is already gone are treated as done: the local
+// teardown continues in every case and only unexpected failures are logged.
+func (s *instanceSession) logoutTolerantly(ctx context.Context) {
+	err := s.logout(ctx)
+	switch {
+	case err == nil,
+		errors.Is(err, whatsmeow.ErrNotConnected),
+		errors.Is(err, whatsmeow.ErrNotLoggedIn),
+		errors.Is(err, store.ErrDeviceDeleted):
+		return
+	}
+	s.log.Warn("logout from whatsapp failed", "instance_id", s.instanceID, "error", err)
 }
 
 // connectExisting brings an already paired device online.

@@ -41,6 +41,12 @@ type InstanceRepository interface {
 	// touches the other columns, so a concurrent writer cannot be overwritten
 	// with stale values.
 	SetConnection(ctx context.Context, id uuid.UUID, status, whatsappJID string) error
+	// SetConnectionState records a connection transition in place: status and
+	// last_error always, whatsapp_jid when it is not empty (keeping the stored
+	// one otherwise) and last_connected_at when connectedAt is set. Like
+	// SetConnection it never touches the other columns, so a concurrent
+	// writer is not overwritten with stale values.
+	SetConnectionState(ctx context.Context, id uuid.UUID, status, whatsappJID, lastError string, connectedAt *time.Time) error
 	Delete(ctx context.Context, id uuid.UUID) error
 }
 

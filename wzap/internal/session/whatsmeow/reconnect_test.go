@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types/events"
 
@@ -361,6 +362,48 @@ func TestDisconnectClearsIdentityAndEmitsEvent(t *testing.T) {
 	}
 	if got := sink.count(); got != 2 {
 		t.Errorf("connection events = %d, want 2 (connected then disconnected)", got)
+	}
+}
+
+func TestDisconnectLogsOutFromWhatsApp(t *testing.T) {
+	sink := &recordingSink{}
+	sess, err := newSession(uuid.New(), &store.Device{}, nil, sink, testMediaLimit)
+	if err != nil {
+		t.Fatalf("newSession: %v", err)
+	}
+	logouts := 0
+	sess.logoutFn = func(context.Context) error {
+		logouts++
+		return whatsmeow.ErrNotConnected
+	}
+
+	if err := sess.Disconnect(context.Background()); err != nil {
+		t.Fatalf("Disconnect: %v", err)
+	}
+
+	if logouts != 1 {
+		t.Fatalf("logout attempts = %d, want 1", logouts)
+	}
+}
+
+func TestRemoveLogsOutEvenWhenItFails(t *testing.T) {
+	sink := &recordingSink{}
+	sess, err := newSession(uuid.New(), &store.Device{}, nil, sink, testMediaLimit)
+	if err != nil {
+		t.Fatalf("newSession: %v", err)
+	}
+	logouts := 0
+	sess.logoutFn = func(context.Context) error {
+		logouts++
+		return errors.New("whatsapp unreachable")
+	}
+
+	if err := sess.remove(context.Background()); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+
+	if logouts != 1 {
+		t.Fatalf("logout attempts = %d, want 1", logouts)
 	}
 }
 

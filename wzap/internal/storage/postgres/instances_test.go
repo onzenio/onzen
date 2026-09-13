@@ -417,6 +417,62 @@ func TestInstanceRepositorySetConnection(t *testing.T) {
 	}
 }
 
+func TestInstanceRepositorySetConnectionState(t *testing.T) {
+	ctx := context.Background()
+	pool := newTestPool(t)
+	repo := NewInstanceRepository(pool)
+
+	instance := createTestInstance(t, repo, "original", "original-ref")
+	connectedAt := time.Now().Add(-time.Minute).UTC()
+	instance.Status = "connected"
+	instance.WhatsAppJID = "5511999999999@s.whatsapp.net"
+	instance.LastConnectedAt = &connectedAt
+	if _, err := repo.Update(ctx, *instance); err != nil {
+		t.Fatalf("Update seed: %v", err)
+	}
+
+	// An error transition with an empty JID keeps the stored JID and
+	// last_connected_at, and replaces last_error.
+	if err := repo.SetConnectionState(ctx, instance.ID, "error", "", "temporary ban", nil); err != nil {
+		t.Fatalf("SetConnectionState: %v", err)
+	}
+	got, err := repo.Get(ctx, instance.ID)
+	if err != nil {
+		t.Fatalf("Get after SetConnectionState: %v", err)
+	}
+	if got.Status != "error" || got.LastError != "temporary ban" {
+		t.Errorf("state = %+v, want status error with the reason", got)
+	}
+	if got.WhatsAppJID != "5511999999999@s.whatsapp.net" {
+		t.Errorf("whatsapp_jid = %q, want the stored JID kept", got.WhatsAppJID)
+	}
+	if got.Name != "original" || got.ExternalRef != "original-ref" {
+		t.Errorf("SetConnectionState touched identity fields: %+v", got)
+	}
+	requireTimePtrNear(t, "SetConnectionState: LastConnectedAt", got.LastConnectedAt, connectedAt)
+
+	// A connected transition stamps last_connected_at and clears last_error.
+	newConnectedAt := time.Now().UTC()
+	if err := repo.SetConnectionState(ctx, instance.ID, "connected", "5511888888888@s.whatsapp.net", "", &newConnectedAt); err != nil {
+		t.Fatalf("SetConnectionState(connected): %v", err)
+	}
+	got, err = repo.Get(ctx, instance.ID)
+	if err != nil {
+		t.Fatalf("Get after SetConnectionState(connected): %v", err)
+	}
+	if got.Status != "connected" || got.WhatsAppJID != "5511888888888@s.whatsapp.net" {
+		t.Errorf("connected state = %+v, want the new status and JID", got)
+	}
+	if got.LastError != "" {
+		t.Errorf("last_error = %q, want empty after a clean connect", got.LastError)
+	}
+	requireTimePtrNear(t, "SetConnectionState(connected): LastConnectedAt", got.LastConnectedAt, newConnectedAt)
+
+	if err := repo.SetConnectionState(ctx, uuid.New(), "disconnected", "", "", nil); !errors.Is(err, storage.ErrNotFound) {
+		t.Errorf("SetConnectionState(unknown) error = %v, want ErrNotFound", err)
+	}
+}
+
 func TestInstanceRepositoryDelete(t *testing.T) {
 	ctx := context.Background()
 	pool := newTestPool(t)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -150,6 +151,30 @@ func (r *InstanceRepository) SetConnection(ctx context.Context, id uuid.UUID, st
 	}
 	if tag.RowsAffected() == 0 {
 		return fmt.Errorf("set instance connection: %w", storage.ErrNotFound)
+	}
+	return nil
+}
+
+// SetConnectionState records a connection transition on an instance without
+// touching identity columns: status and last_error always, whatsapp_jid when
+// whatsappJID is not empty (keeping the stored one otherwise) and
+// last_connected_at when connectedAt is set.
+func (r *InstanceRepository) SetConnectionState(ctx context.Context, id uuid.UUID, status, whatsappJID, lastError string, connectedAt *time.Time) error {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE instances
+		SET status = $2,
+		    whatsapp_jid = COALESCE(NULLIF($3, ''), whatsapp_jid),
+		    last_error = NULLIF($4, ''),
+		    last_connected_at = COALESCE($5, last_connected_at),
+		    updated_at = now()
+		WHERE id = $1`,
+		id, status, whatsappJID, lastError, connectedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("set instance connection state: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("set instance connection state: %w", storage.ErrNotFound)
 	}
 	return nil
 }

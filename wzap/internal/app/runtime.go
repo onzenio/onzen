@@ -43,9 +43,9 @@ type Runtime struct {
 	maxMediaBytes int64
 	log           *slog.Logger
 
-	// mu serializes connection updates: the repository update is a
-	// read-modify-write of the whole row, so concurrent session events could
-	// otherwise overwrite each other.
+	// mu serializes connection projections so the persisted transitions and
+	// the events describing them keep a consistent order. The repository
+	// update itself is targeted, so it cannot resurrect stale columns.
 	mu sync.Mutex
 }
 
@@ -130,27 +130,19 @@ func (r *Runtime) OnConnection(ctx context.Context, instanceID uuid.UUID, status
 	}
 }
 
-// applyConnection stores the connection state of instanceID. The JID is kept
-// while it is unknown so a transient failure keeps the paired identity, and
-// last_connected_at is stamped on every transition to connected.
+// applyConnection stores the connection state of instanceID with a targeted
+// update, so a concurrent PATCH cannot be overwritten with stale columns. The
+// JID is kept while it is unknown so a transient failure keeps the paired
+// identity, and last_connected_at is stamped on every transition to connected.
 func applyConnection(ctx context.Context, instances storage.InstanceRepository, instanceID uuid.UUID, status session.Status, jid, reason string) error {
-	instance, err := instances.Get(ctx, instanceID)
-	if err != nil {
-		return fmt.Errorf("get instance: %w", err)
-	}
-
-	instance.Status = string(status)
-	if jid != "" {
-		instance.WhatsAppJID = jid
-	}
-	instance.LastError = reason
+	var connectedAt *time.Time
 	if status == session.StatusConnected {
 		now := time.Now().UTC()
-		instance.LastConnectedAt = &now
+		connectedAt = &now
 	}
 
-	if _, err := instances.Update(ctx, *instance); err != nil {
-		return fmt.Errorf("update instance: %w", err)
+	if err := instances.SetConnectionState(ctx, instanceID, string(status), jid, reason, connectedAt); err != nil {
+		return fmt.Errorf("set instance connection: %w", err)
 	}
 	return nil
 }

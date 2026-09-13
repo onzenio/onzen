@@ -138,6 +138,11 @@ func (r *fakeRepo) SetConnection(_ context.Context, id uuid.UUID, status, jid st
 	return nil
 }
 
+// SetConnectionState is only exercised by the session runtime, not this service.
+func (r *fakeRepo) SetConnectionState(context.Context, uuid.UUID, string, string, string, *time.Time) error {
+	return errors.New("fakeRepo.SetConnectionState: unexpected call")
+}
+
 // Delete removes instance, or returns storage.ErrNotFound.
 func (r *fakeRepo) Delete(_ context.Context, id uuid.UUID) error {
 	r.deleteCalls = append(r.deleteCalls, id)
