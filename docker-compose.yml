@@ -127,6 +127,31 @@ services:
             backend:
                 condition: service_healthy
 
+    # Dedicated Laravel queue worker for the `serpro` connection (Monitoring
+    # consult runs). A separate service was chosen over extending the generic
+    # `queue` worker above: that one keeps the default queue untouched and
+    # uses `queue:listen --tries=1`, while SERPRO needs its own tries/timeout
+    # and the `serpro` retry_after (300s) must exceed --timeout (270s) so a
+    # still-running job is never re-released.
+    serpro-queue:
+        <<: *backend
+        command: ["php", "artisan", "queue:work", "serpro", "--tries=8", "--timeout=270"]
+        environment:
+            <<: *backend-env
+        depends_on:
+            backend:
+                condition: service_healthy
+        healthcheck:
+            # queue workers serve no HTTP, so the image-level /up probe can
+            # never pass here. Probe the worker process instead; only
+            # queue:work is accepted. The bracket keeps the pattern from
+            # matching this check's own line.
+            test: ['CMD-SHELL', 'for f in /proc/[0-9]*/cmdline; do grep -qaE "[q]ueue:work" "$$f" 2>/dev/null && exit 0; done; exit 1']
+            interval: 30s
+            timeout: 5s
+            retries: 3
+            start_period: 30s
+
     frontend:
         <<: *frontend
         command: ["pnpm", "dev", "--host", "0.0.0.0", "--port", "3000"]
