@@ -78,8 +78,11 @@ final class ProcurationVerifier
 
         if ($groups === []) {
             // A procuração exigida sem código resolvível não tem evidência
-            // para verificar: bloqueia em vez de passar em silêncio.
-            if ($definition?->requires_procuracao) {
+            // para verificar: bloqueia em vez de passar em silêncio. A mesma
+            // trava vale para a chamada sem definição: sem contrato para
+            // interpretar, um resultado vazio é indistinguível de uma
+            // exigência não resolvida — fail-closed (Task 20, carry-over).
+            if ($definition === null || $definition->requires_procuracao) {
                 throw new SerproBlockedException(self::REASON_UNRESOLVED);
             }
 
@@ -141,6 +144,20 @@ final class ProcurationVerifier
     public function recentlyVerified(Client $client): bool
     {
         return Cache::has(self::verifyCacheKey($client));
+    }
+
+    /**
+     * The cached grant set (código → vencimento `Y-m-d`), or null when the
+     * Client has no verification inside the cache window. Read-only: never
+     * triggers an external call.
+     *
+     * @return array<string, string>|null
+     */
+    public function cachedGrants(Client $client): ?array
+    {
+        $cached = Cache::get(self::verifyCacheKey($client));
+
+        return is_array($cached) ? $cached : null;
     }
 
     /**
@@ -387,6 +404,19 @@ final class ProcurationVerifier
         }
 
         return $updated;
+    }
+
+    /**
+     * Factual reason for a set of missing groups: `outorga_pendente` when no
+     * registry row exists for the missing codes, `outorga_expirada` when rows
+     * exist but their validity lapsed. Public so the divergences listing
+     * (Task 20) reports the same classification the verifier returns.
+     *
+     * @param  list<list<string>>  $missingGroups
+     */
+    public function reasonForMissing(Client $client, array $missingGroups): string
+    {
+        return $this->reasonFor($client, $missingGroups);
     }
 
     /**

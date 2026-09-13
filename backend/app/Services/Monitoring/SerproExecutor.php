@@ -57,6 +57,13 @@ use Throwable;
  * `serpro_run_finished` exactly once per terminal/retryable outcome, with
  * redacted reasons. Emission is best-effort and never breaks the run.
  *
+ * Task 20 adds the outorga gate: before any credential/token/fixture/transport
+ * work, {@see ProcurationGate} verifies the Client's procuração for the
+ * enrollment definition. A factual negative pauses the association with
+ * `outorga pendente` and ends the run `blocked` with the factual reason; a
+ * positive resumes the Client's outorga-paused associations. With the
+ * transport gated (dry-run) the gate does not act.
+ *
  * Fail-closed: a call is only attempted when the effective gate is open, and
  * missing credentials, an inactive enrollment or a missing fixture end the
  * run with a factual code. Nothing sensitive is logged or persisted.
@@ -82,6 +89,7 @@ final class SerproExecutor
         private readonly ProtocolPoller $poller,
         private readonly QueryQuotaService $quota,
         private readonly SerproEvents $events,
+        private readonly ProcurationGate $procuration,
     ) {}
 
     /**
@@ -193,7 +201,9 @@ final class SerproExecutor
             return $this->finish($run, MonitoringRunStatus::Blocked, 'protocol_missing');
         }
 
-        if (! $this->fences($run, $this->enrollmentFor($run))) {
+        $enrollment = $this->enrollmentFor($run);
+
+        if (! $this->fences($run, $enrollment)) {
             return $this->discard($run);
         }
 
@@ -232,6 +242,17 @@ final class SerproExecutor
         $this->emitSerproEvent('serpro_run_started', fn () => $this->events->runStarted($run));
 
         try {
+            // Task 20: the outorga gate runs before any credential/token/
+            // fixture/transport work. A factual negative pauses the
+            // association with `outorga pendente`; the run ends blocked with
+            // the factual cause and never projects. An unavailable
+            // verification blocks with its cause without pausing.
+            $procuration = $enrollment === null ? null : $this->procuration->check($enrollment, $run);
+
+            if ($procuration !== null) {
+                return $this->finish($run, MonitoringRunStatus::Blocked, $procuration);
+            }
+
             if (trim((string) $run->operation_code) === '') {
                 throw new SerproBlockedException('consult_operation_unresolved');
             }

@@ -2,8 +2,10 @@
 
 use App\Http\Controllers\Api\MeController;
 use App\Http\Controllers\Api\MonitoringArtifactDownloadController;
+use App\Http\Controllers\Api\MonitoringAuthorController;
 use App\Http\Controllers\Api\MonitoringEnrollmentController;
 use App\Http\Controllers\Api\MonitoringHealthController;
+use App\Http\Controllers\Api\MonitoringPowerOfAttorneyController;
 use App\Http\Controllers\Api\MonitoringRunController;
 use App\Http\Controllers\Api\SerproAdminController;
 use Illuminate\Http\Request;
@@ -40,6 +42,24 @@ Route::middleware('auth:sanctum')->group(function (): void {
 
     Route::post('/monitoring/sync', [MonitoringRunController::class, 'sync'])
         ->name('monitoring.sync');
+
+    Route::get('/monitoring/authors', [MonitoringAuthorController::class, 'index'])
+        ->name('monitoring.authors.index');
+
+    Route::post('/monitoring/authors', [MonitoringAuthorController::class, 'store'])
+        ->name('monitoring.authors.store');
+
+    Route::post('/monitoring/authors/{author}/term', [MonitoringAuthorController::class, 'submitTerm'])
+        ->name('monitoring.authors.term');
+
+    Route::get('/monitoring/clients/{client}/powers-of-attorney', [MonitoringPowerOfAttorneyController::class, 'index'])
+        ->name('monitoring.powers.index');
+
+    Route::post('/monitoring/clients/{client}/powers-of-attorney/verify', [MonitoringPowerOfAttorneyController::class, 'verify'])
+        ->name('monitoring.powers.verify');
+
+    Route::get('/monitoring/powers-of-attorney/divergences', [MonitoringPowerOfAttorneyController::class, 'divergences'])
+        ->name('monitoring.powers.divergences');
 
     Route::get('/admin/serpro', [SerproAdminController::class, 'show'])
         ->name('admin.serpro.show');

@@ -9,6 +9,7 @@ use App\Models\Invitation;
 use App\Models\MonitoringArtifact;
 use App\Models\MonitoringEnrollment;
 use App\Models\Plan;
+use App\Models\SerproRequestAuthor;
 use App\Policies\AccountPolicy;
 use App\Policies\AuditLogPolicy;
 use App\Policies\ClientPolicy;
@@ -17,6 +18,7 @@ use App\Policies\MonitoringArtifactPolicy;
 use App\Policies\MonitoringEnrollmentPolicy;
 use App\Policies\PlanPolicy;
 use App\Policies\SerproAdminPolicy;
+use App\Policies\SerproRequestAuthorPolicy;
 use Illuminate\Foundation\Support\Providers\AuthServiceProvider as ServiceProvider;
 use Illuminate\Support\Facades\Gate;
 
@@ -33,6 +35,7 @@ class AuthServiceProvider extends ServiceProvider
         AuditLog::class => AuditLogPolicy::class,
         MonitoringArtifact::class => MonitoringArtifactPolicy::class,
         MonitoringEnrollment::class => MonitoringEnrollmentPolicy::class,
+        SerproRequestAuthor::class => SerproRequestAuthorPolicy::class,
     ];
 
     public function boot(): void
