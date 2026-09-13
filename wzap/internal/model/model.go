@@ -38,3 +38,30 @@ type OutboundMessage struct {
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 }
+
+// IdempotencyRecord is the stored outcome of a request accepted under an
+// idempotency key. Status is "in_progress" while the original request runs and
+// "completed" once its response was captured. ResponseStatus and ResponseBody
+// are only meaningful when completed.
+type IdempotencyRecord struct {
+	InstanceID     uuid.UUID
+	Key            string
+	Fingerprint    string
+	Status         string
+	ResponseStatus int
+	ResponseBody   []byte
+	CreatedAt      time.Time
+	ExpiresAt      time.Time
+}
+
+// OutboxEvent is an event awaiting publication to the broker. PublishedAt is
+// nil until the relay publishes it; Attempts counts failed publish attempts.
+type OutboxEvent struct {
+	ID          uuid.UUID
+	Subject     string
+	Envelope    []byte
+	Attempts    int
+	LastError   string
+	CreatedAt   time.Time
+	PublishedAt *time.Time
+}

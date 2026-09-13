@@ -19,6 +19,12 @@ var (
 	ErrExternalRefTaken = errors.New("external ref already taken")
 	// ErrInvalidCursor reports that a pagination cursor is not a valid identifier.
 	ErrInvalidCursor = errors.New("invalid cursor")
+	// ErrFingerprintMismatch reports that an idempotency key was reused with a
+	// different request fingerprint.
+	ErrFingerprintMismatch = errors.New("idempotency fingerprint mismatch")
+	// ErrInProgress reports that an idempotency key is owned by a request that
+	// has not completed yet.
+	ErrInProgress = errors.New("idempotency key in progress")
 )
 
 // InstanceRepository persists WhatsApp instances. List pages backwards by
@@ -52,4 +58,49 @@ type MessageRepository interface {
 	UpdateReceipt(ctx context.Context, whatsAppMessageID, status string, at time.Time) (bool, error)
 	// RequeueStuck moves sending messages updated before olderThan back to queued.
 	RequeueStuck(ctx context.Context, olderThan time.Time) (int64, error)
+}
+
+// IdempotencyRepository persists request outcomes keyed by
+// (instance, Idempotency-Key).
+type IdempotencyRepository interface {
+	// Acquire tries to own key. It returns acquired true with the fresh record
+	// when it won the key. A key that expired is treated as absent and
+	// reacquired. When another request already completed the key, it returns
+	// the stored record with acquired false. Reusing a key with a different
+	// fingerprint returns ErrFingerprintMismatch; an in-flight key returns
+	// ErrInProgress.
+	Acquire(ctx context.Context, instanceID uuid.UUID, key, fingerprint string, expiresAt time.Time) (*model.IdempotencyRecord, bool, error)
+	// Complete stores the original response under key. It returns ErrNotFound
+	// when the key does not exist.
+	Complete(ctx context.Context, instanceID uuid.UUID, key string, status int, body []byte) error
+	// Release frees key so a corrected request can retry under it. Releasing an
+	// absent key is a no-op.
+	Release(ctx context.Context, instanceID uuid.UUID, key string) error
+	// DeleteExpired removes keys whose expires_at is in the past.
+	DeleteExpired(ctx context.Context) (int64, error)
+}
+
+// JIDCacheRepository persists phone to JID resolutions until their expiry.
+type JIDCacheRepository interface {
+	// Get returns the cached JID for phone. Expired entries count as a miss.
+	Get(ctx context.Context, phone string) (jid string, ok bool, err error)
+	// Put upserts the JID resolved for phone.
+	Put(ctx context.Context, phone, jid string, expiresAt time.Time) error
+	// DeleteExpired removes entries whose expires_at is in the past.
+	DeleteExpired(ctx context.Context) (int64, error)
+}
+
+// EventOutboxRepository persists events until the relay publishes them.
+type EventOutboxRepository interface {
+	Enqueue(ctx context.Context, id uuid.UUID, subject string, envelope []byte) error
+	// ClaimPending returns up to limit unpublished events, oldest first.
+	ClaimPending(ctx context.Context, limit int) ([]model.OutboxEvent, error)
+	// MarkPublished stamps the event as published. It returns ErrNotFound when
+	// the event does not exist.
+	MarkPublished(ctx context.Context, id uuid.UUID) error
+	// MarkAttempt records a failed publish attempt. It returns ErrNotFound when
+	// the event does not exist.
+	MarkAttempt(ctx context.Context, id uuid.UUID, errMsg string) error
+	// DeletePublishedBefore removes published events stamped before t.
+	DeletePublishedBefore(ctx context.Context, t time.Time) (int64, error)
 }
