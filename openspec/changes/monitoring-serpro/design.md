@@ -52,6 +52,8 @@ Portar `ConsultCatalog`, `ProcurationCatalog` e `SerproEnvelope`; definições t
 
 Alternativa descartada: catálogo só em config PHP (a UI precisaria de código para listar; o `_legacy` já demonstrou o valor do catálogo em tabela).
 
+O provedor de fixtures devolve o envelope bruto do arquivo; a conversão para o resultado/DTO de execução acontece no executor, mantendo o dry-run sem inventar dados.
+
 ### 6. Fila dedicada e agendamentos
 
 Conexão `serpro` no `config/queue.php` (driver database, tabela `jobs`), jobs `ExecuteSerproJob`/`ExecuteSerproActionJob` com tentativas e backoff, e serviço worker dedicado no `docker-compose.yml` (`queue:work serpro`). Comandos agendados: ciclo mensal de consultas automáticas (dia 1, somente Consultar) e rotina diária de renovação de termos/reverificação de procurações.
