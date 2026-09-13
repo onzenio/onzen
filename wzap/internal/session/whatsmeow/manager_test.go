@@ -17,6 +17,7 @@ import (
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waAdv"
 	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -497,6 +498,26 @@ func TestRemoveKeepsSessionWhenDeleteFails(t *testing.T) {
 	}
 }
 
+func TestCreateMissingDeviceReturnsErrNoDevice(t *testing.T) {
+	manager := newTestManager(t)
+
+	_, err := manager.Create(&model.Instance{ID: uuid.New(), WhatsAppJID: "5511999999999@s.whatsapp.net"})
+	if !errors.Is(err, session.ErrNoDevice) {
+		t.Fatalf("Create error = %v, want ErrNoDevice", err)
+	}
+}
+
+func TestConnectDeletedDeviceReturnsErrNoDevice(t *testing.T) {
+	sess, err := newSession(uuid.New(), &store.Device{Deleted: true}, nil, nil)
+	if err != nil {
+		t.Fatalf("newSession: %v", err)
+	}
+
+	if _, _, err := sess.Connect(context.Background()); !errors.Is(err, session.ErrNoDevice) {
+		t.Fatalf("Connect error = %v, want ErrNoDevice", err)
+	}
+}
+
 // fakeInstanceRepo feeds RestoreAll the persisted instances. Only List is
 // expected to be reached.
 type fakeInstanceRepo struct {
@@ -575,6 +596,26 @@ func TestRestoreAllReflectsFailure(t *testing.T) {
 	}
 	if event.jid != jid.String() {
 		t.Errorf("restore failure JID = %q, want %q", event.jid, jid.String())
+	}
+}
+
+func TestRestoreAllMissingDeviceReflectsErrNoDevice(t *testing.T) {
+	manager := newTestManager(t)
+	sink := &recordingSink{}
+	manager.sink = sink
+	manager.instances = &fakeInstanceRepo{instances: []model.Instance{{
+		ID: uuid.New(), Status: "connected", WhatsAppJID: "5511999999999@s.whatsapp.net",
+	}}}
+
+	if err := manager.RestoreAll(context.Background()); err != nil {
+		t.Fatalf("RestoreAll: %v", err)
+	}
+	event := sink.last(t)
+	if event.status != session.StatusError {
+		t.Errorf("missing device event status = %q, want %q", event.status, session.StatusError)
+	}
+	if !strings.Contains(event.reason, "5511999999999@s.whatsapp.net") {
+		t.Errorf("missing device reason = %q, want it to name the device", event.reason)
 	}
 }
 
@@ -682,7 +723,7 @@ func dsnWithSearchPath(t *testing.T, dsn, schema string) string {
 }
 
 func TestSessionErrorsAreDistinct(t *testing.T) {
-	sentinels := []error{session.ErrTransient, session.ErrNotConnected, session.ErrInvalidRecipient}
+	sentinels := []error{session.ErrTransient, session.ErrNotConnected, session.ErrInvalidRecipient, session.ErrNoDevice}
 	for i, err := range sentinels {
 		if err == nil {
 			t.Fatalf("sentinel %d is nil", i)

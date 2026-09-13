@@ -141,7 +141,7 @@ func (s *Service) Connect(ctx context.Context, id uuid.UUID) (ConnectResult, err
 		return ConnectResult{}, mapError("connect instance", err)
 	}
 
-	sess, err := s.sessions.Create(instance)
+	sess, err := s.sessionFor(ctx, instance)
 	if err != nil {
 		return ConnectResult{}, fmt.Errorf("connect instance: create session: %w", err)
 	}
@@ -157,7 +157,7 @@ func (s *Service) Connect(ctx context.Context, id uuid.UUID) (ConnectResult, err
 		return result, nil
 	}
 
-	qr, expiresAt, err := sess.Connect(ctx)
+	sess, qr, expiresAt, err := s.connectPairing(ctx, instance, sess)
 	if err != nil {
 		return ConnectResult{}, fmt.Errorf("connect instance: %w", err)
 	}
@@ -182,7 +182,7 @@ func (s *Service) QR(ctx context.Context, id uuid.UUID) (ConnectResult, error) {
 		return ConnectResult{}, mapError("get qr", err)
 	}
 
-	sess, err := s.sessions.Create(instance)
+	sess, err := s.sessionFor(ctx, instance)
 	if err != nil {
 		return ConnectResult{}, fmt.Errorf("get qr: create session: %w", err)
 	}
@@ -198,7 +198,7 @@ func (s *Service) QR(ctx context.Context, id uuid.UUID) (ConnectResult, error) {
 		return result, nil
 	}
 
-	qr, expiresAt, err := sess.Connect(ctx)
+	sess, qr, expiresAt, err := s.connectPairing(ctx, instance, sess)
 	if err != nil {
 		return ConnectResult{}, fmt.Errorf("get qr: %w", err)
 	}
@@ -221,6 +221,51 @@ func pairingResult(ctx context.Context, sess session.Session) (ConnectResult, er
 		return ConnectResult{}, err
 	}
 	return ConnectResult{Status: session.StatusPairing, QRCode: qr, QRExpiresAt: &expiresAt}, nil
+}
+
+// sessionFor returns the session of instance, resetting a pairing whose
+// persisted device is gone. The credentials cannot be recovered, so the
+// instance is treated as unpaired: the stale JID is cleared and a fresh device
+// is built so the caller can pair again instead of failing forever.
+func (s *Service) sessionFor(ctx context.Context, instance *model.Instance) (session.Session, error) {
+	sess, err := s.sessions.Create(instance)
+	if err == nil {
+		return sess, nil
+	}
+	if !errors.Is(err, session.ErrNoDevice) {
+		return nil, err
+	}
+	return s.resetPairing(ctx, instance)
+}
+
+// resetPairing forgets the unrecoverable pairing of instance and returns a
+// fresh session ready to pair again. Removing the session first keeps the
+// manager consistent when a session with a deleted device is still registered.
+func (s *Service) resetPairing(ctx context.Context, instance *model.Instance) (session.Session, error) {
+	if err := s.sessions.Remove(ctx, instance.ID); err != nil {
+		return nil, fmt.Errorf("reset pairing: remove session: %w", err)
+	}
+	if err := s.repo.SetConnection(ctx, instance.ID, string(session.StatusDisconnected), ""); err != nil {
+		return nil, mapError("reset pairing", err)
+	}
+	instance.WhatsAppJID = ""
+	return s.sessions.Create(instance)
+}
+
+// connectPairing calls Session.Connect, resetting a pairing whose device was
+// deleted underneath the session (an external logout) and retrying once.
+func (s *Service) connectPairing(ctx context.Context, instance *model.Instance, sess session.Session) (session.Session, string, time.Time, error) {
+	qr, expiresAt, err := sess.Connect(ctx)
+	if !errors.Is(err, session.ErrNoDevice) {
+		return sess, qr, expiresAt, err
+	}
+
+	sess, err = s.resetPairing(ctx, instance)
+	if err != nil {
+		return nil, "", time.Time{}, err
+	}
+	qr, expiresAt, err = sess.Connect(ctx)
+	return sess, qr, expiresAt, err
 }
 
 // markPairing persists the pairing state of instance so the status endpoint
@@ -248,17 +293,18 @@ func (s *Service) Restore(ctx context.Context) error {
 // Disconnect ends the session of an instance definitively: it disconnects the
 // session, clears its paired identity and connection state, and deletes the
 // stored credentials so the instance cannot be brought back online without a
-// new pairing. The session emits the connection event that records the
-// transition; the partial update keeps other columns untouched. On a
-// credential removal failure the row is already cleared, so retrying finishes
-// the removal.
+// new pairing. An instance whose device is already gone is treated as
+// disconnected: the stale JID is cleared and 204 is answered. The session emits
+// the connection event that records the transition; the partial update keeps
+// other columns untouched. On a credential removal failure the row is already
+// cleared, so retrying finishes the removal.
 func (s *Service) Disconnect(ctx context.Context, id uuid.UUID) error {
 	instance, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return mapError("disconnect instance", err)
 	}
 
-	sess, err := s.sessions.Create(instance)
+	sess, err := s.sessionFor(ctx, instance)
 	if err != nil {
 		return fmt.Errorf("disconnect instance: create session: %w", err)
 	}

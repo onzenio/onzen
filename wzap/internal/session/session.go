@@ -35,6 +35,10 @@ var (
 	ErrNotConnected = errors.New("session not connected")
 	// ErrInvalidRecipient marks a malformed recipient JID.
 	ErrInvalidRecipient = errors.New("session invalid recipient")
+	// ErrNoDevice marks an instance whose persisted device is gone, for
+	// example after an external logout or a device removal. The pairing cannot
+	// be resumed and the instance must be paired again.
+	ErrNoDevice = errors.New("session device not found")
 )
 
 // OutboundMessage is the normalized message handed to a session for delivery.

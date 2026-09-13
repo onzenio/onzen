@@ -22,6 +22,9 @@ const pairingFirstQRTimeout = 30 * time.Second
 // rotation.
 func (s *instanceSession) Connect(ctx context.Context) (string, time.Time, error) {
 	s.cancelReconnect()
+	if s.client.Store.Deleted {
+		return "", time.Time{}, fmt.Errorf("connect session: device deleted: %w", session.ErrNoDevice)
+	}
 	if s.client.IsConnected() && s.Status() == session.StatusConnected {
 		return "", time.Time{}, errors.New("session already connected")
 	}

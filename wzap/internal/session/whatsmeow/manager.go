@@ -218,7 +218,7 @@ func (m *Manager) restore(ctx context.Context, instance model.Instance) error {
 		return fmt.Errorf("load device %s: %w", jid, err)
 	}
 	if device == nil {
-		return fmt.Errorf("device %s not found", jid)
+		return fmt.Errorf("device %s: %w", jid, session.ErrNoDevice)
 	}
 	return m.attachAndConnect(ctx, instance.ID, device)
 }
@@ -288,7 +288,7 @@ func (m *Manager) deviceFor(ctx context.Context, instance *model.Instance) (*sto
 		return nil, fmt.Errorf("create session: load device %s: %w", jid, err)
 	}
 	if device == nil {
-		return nil, fmt.Errorf("create session: device %s not found", jid)
+		return nil, fmt.Errorf("create session: device %s: %w", jid, session.ErrNoDevice)
 	}
 	return device, nil
 }

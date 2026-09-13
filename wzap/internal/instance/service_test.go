@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -20,6 +22,9 @@ var (
 	_ storage.InstanceRepository = (*fakeRepo)(nil)
 	_ MediaRemover               = (*fakeMedia)(nil)
 	_ session.Manager            = (*recordingManager)(nil)
+	_ session.Manager            = (*stalePairingManager)(nil)
+	_ session.Manager            = (*staleConnectManager)(nil)
+	_ session.Session            = (*oneShotNoDeviceSession)(nil)
 )
 
 // fakeRepo is an in-memory storage.InstanceRepository for the service tests. It
@@ -184,6 +189,72 @@ func (m *recordingManager) Remove(ctx context.Context, instanceID uuid.UUID) err
 		*m.order = append(*m.order, "session")
 	}
 	return m.Fake.Remove(ctx, instanceID)
+}
+
+// stalePairingManager fails its first Create with session.ErrNoDevice, like the
+// manager does when the persisted device of an instance is gone.
+type stalePairingManager struct {
+	*sessiontest.Fake
+	mu       sync.Mutex
+	failures int
+	attempts []model.Instance
+}
+
+// Create fails with ErrNoDevice while failures remain, recording every attempt.
+func (m *stalePairingManager) Create(instance *model.Instance) (session.Session, error) {
+	m.mu.Lock()
+	m.attempts = append(m.attempts, *instance)
+	fail := m.failures > 0
+	if fail {
+		m.failures--
+	}
+	m.mu.Unlock()
+	if fail {
+		return nil, fmt.Errorf("create session: device %s: %w", instance.WhatsAppJID, session.ErrNoDevice)
+	}
+	return m.Fake.Create(instance)
+}
+
+// createAttempts returns the instances passed to Create, in order.
+func (m *stalePairingManager) createAttempts() []model.Instance {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]model.Instance(nil), m.attempts...)
+}
+
+// oneShotNoDeviceSession is a FakeSession whose first Connect reports
+// ErrNoDevice, simulating a device deleted by an external logout while the
+// session is still registered.
+type oneShotNoDeviceSession struct {
+	*sessiontest.FakeSession
+	mu    sync.Mutex
+	fails int
+}
+
+// Connect fails with ErrNoDevice while fails remain, then delegates.
+func (s *oneShotNoDeviceSession) Connect(ctx context.Context) (string, time.Time, error) {
+	s.mu.Lock()
+	fail := s.fails > 0
+	if fail {
+		s.fails--
+	}
+	s.mu.Unlock()
+	if fail {
+		return "", time.Time{}, fmt.Errorf("connect session: %w", session.ErrNoDevice)
+	}
+	return s.FakeSession.Connect(ctx)
+}
+
+// staleConnectManager returns a registered session whose device was deleted.
+type staleConnectManager struct {
+	*sessiontest.Fake
+	sess *oneShotNoDeviceSession
+}
+
+// Create returns the stale session, as the manager does for a registered
+// instance.
+func (m *staleConnectManager) Create(*model.Instance) (session.Session, error) {
+	return m.sess, nil
 }
 
 // strptr returns a pointer to s for the partial update inputs.
@@ -824,5 +895,107 @@ func TestServiceDisconnectStopsOnSessionFailure(t *testing.T) {
 	}
 	if stored := repo.instances[id]; stored.WhatsAppJID != "5511999999999@s.whatsapp.net" {
 		t.Errorf("stored whatsapp_jid = %q, want it unchanged", stored.WhatsAppJID)
+	}
+}
+
+func TestServiceDisconnectWithoutDeviceClearsPairing(t *testing.T) {
+	id := uuid.New()
+	repo := newFakeRepo(model.Instance{
+		ID: id, Name: "loja", Status: string(session.StatusError),
+		WhatsAppJID: "5511999999999@s.whatsapp.net",
+	})
+	sessions := &stalePairingManager{Fake: sessiontest.New(nil), failures: 1}
+	svc := NewService(repo, sessions, &fakeMedia{})
+
+	if err := svc.Disconnect(context.Background(), id); err != nil {
+		t.Fatalf("Disconnect: %v", err)
+	}
+
+	stored := repo.instances[id]
+	if stored.Status != string(session.StatusDisconnected) || stored.WhatsAppJID != "" {
+		t.Errorf("stored instance = %+v, want disconnected without a JID", stored)
+	}
+	attempts := sessions.createAttempts()
+	if len(attempts) != 2 {
+		t.Fatalf("session Create attempts = %d, want 2 (stale then fresh)", len(attempts))
+	}
+	if attempts[0].WhatsAppJID != "5511999999999@s.whatsapp.net" || attempts[1].WhatsAppJID != "" {
+		t.Errorf("Create attempts JIDs = %q/%q, want the stale JID then none",
+			attempts[0].WhatsAppJID, attempts[1].WhatsAppJID)
+	}
+	if removed := sessions.RemoveCalls(); len(removed) != 2 || removed[1] != id {
+		t.Errorf("session Remove calls = %v, want the reset and the final removal of %s", removed, id)
+	}
+}
+
+func TestServiceConnectWithoutDeviceStartsFreshPairing(t *testing.T) {
+	id := uuid.New()
+	repo := newFakeRepo(model.Instance{
+		ID: id, Name: "loja", Status: string(session.StatusError),
+		WhatsAppJID: "5511999999999@s.whatsapp.net",
+	})
+	sessions := &stalePairingManager{Fake: sessiontest.New(nil), failures: 1}
+	svc := NewService(repo, sessions, &fakeMedia{})
+
+	result, err := svc.Connect(context.Background(), id)
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	if result.Status != session.StatusPairing || result.QRCode != "fake-qr-"+id.String() {
+		t.Errorf("Connect result = %+v, want a fresh pairing QR", result)
+	}
+	stored := repo.instances[id]
+	if stored.Status != string(session.StatusPairing) || stored.WhatsAppJID != "" {
+		t.Errorf("stored instance = %+v, want pairing without a JID", stored)
+	}
+	attempts := sessions.createAttempts()
+	if len(attempts) != 2 || attempts[1].WhatsAppJID != "" {
+		t.Errorf("Create attempts = %d, want the retry without a JID", len(attempts))
+	}
+}
+
+func TestServiceQRWithoutDeviceStartsFreshPairing(t *testing.T) {
+	id := uuid.New()
+	repo := newFakeRepo(model.Instance{
+		ID: id, Name: "loja", Status: string(session.StatusError),
+		WhatsAppJID: "5511999999999@s.whatsapp.net",
+	})
+	sessions := &stalePairingManager{Fake: sessiontest.New(nil), failures: 1}
+	svc := NewService(repo, sessions, &fakeMedia{})
+
+	result, err := svc.QR(context.Background(), id)
+	if err != nil {
+		t.Fatalf("QR: %v", err)
+	}
+	if result.Status != session.StatusPairing || result.QRCode != "fake-qr-"+id.String() {
+		t.Errorf("QR result = %+v, want a fresh pairing QR", result)
+	}
+	if stored := repo.instances[id]; stored.WhatsAppJID != "" {
+		t.Errorf("stored whatsapp_jid = %q, want it cleared", stored.WhatsAppJID)
+	}
+}
+
+func TestServiceConnectResetsSessionWithoutDevice(t *testing.T) {
+	id := uuid.New()
+	repo := newFakeRepo(model.Instance{
+		ID: id, Name: "loja", Status: string(session.StatusDisconnected),
+		WhatsAppJID: "5511999999999@s.whatsapp.net",
+	})
+	sess := &oneShotNoDeviceSession{FakeSession: sessiontest.NewSession(id, nil), fails: 1}
+	sessions := &staleConnectManager{Fake: sessiontest.New(nil), sess: sess}
+	svc := NewService(repo, sessions, &fakeMedia{})
+
+	result, err := svc.Connect(context.Background(), id)
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	if result.Status != session.StatusPairing {
+		t.Errorf("Connect status = %q, want %q after the reset", result.Status, session.StatusPairing)
+	}
+	if got := sess.ConnectCalls(); got != 1 {
+		t.Errorf("successful session Connect calls = %d, want 1 (the retry)", got)
+	}
+	if stored := repo.instances[id]; stored.Status != string(session.StatusPairing) || stored.WhatsAppJID != "" {
+		t.Errorf("stored instance = %+v, want pairing without a JID", stored)
 	}
 }
