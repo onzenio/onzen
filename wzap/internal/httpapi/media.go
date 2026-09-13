@@ -13,9 +13,13 @@ import (
 	"onefisc/wzap/internal/model"
 )
 
-// MediaStore is the media download contract consumed by the handlers.
+// MediaStore is the media storage contract consumed by the handlers: Open
+// serves a download and Save stores an upload. *media.Storage implements it.
 type MediaStore interface {
 	Open(ctx context.Context, id uuid.UUID) (io.ReadCloser, *model.Media, error)
+	Save(
+		ctx context.Context, instanceID uuid.UUID, direction, messageID, mimetype, filename string, data []byte,
+	) (*model.Media, error)
 }
 
 // handleGetMedia streams one media content. The success body is the raw

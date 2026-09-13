@@ -12,6 +12,7 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -33,10 +34,18 @@ const (
 	idempotencyTTL = 24 * time.Hour
 	// idempotencyKeyMaxLen caps the key size accepted from clients.
 	idempotencyKeyMaxLen = 255
-	// fingerprintBodyLimit bounds the body the middleware buffers to compute the
-	// request fingerprint, so a large upload cannot exhaust memory. A bigger
-	// body falls back to a method+route fingerprint.
+	// fingerprintBodyLimit bounds the JSON body the middleware buffers to
+	// compute the request fingerprint. A bigger body falls back to a
+	// method+route fingerprint.
 	fingerprintBodyLimit = 1 << 20
+	// fingerprintMultipartOverhead is the slack above the configured upload
+	// limit that still gets an exact multipart fingerprint: the multipart
+	// boundaries, part headers and text fields around the file content.
+	fingerprintMultipartOverhead = 1 << 20
+	// fingerprintMultipartFallback bounds the multipart body the middleware
+	// spools when no upload limit was configured. A bigger body falls back to
+	// a method+route fingerprint.
+	fingerprintMultipartFallback = 64 << 20
 )
 
 // Idempotency makes a retried send safe: the first request stores its response
@@ -52,7 +61,17 @@ const (
 // message. A 503 is the exception: the send path answers it before reaching
 // WhatsApp, so the key is released and the retry the body asks for is possible.
 // A panic or a handler that writes nothing also releases it.
-func Idempotency(repo storage.IdempotencyRepository, log *slog.Logger) func(http.Handler) http.Handler {
+//
+// maxUploadBytes is the largest multipart upload accepted by the routes the
+// middleware wraps; it lets a media upload be fingerprinted exactly instead of
+// falling back to the route. A non-positive value uses a generous fallback.
+func Idempotency(
+	repo storage.IdempotencyRepository, log *slog.Logger, maxUploadBytes int64,
+) func(http.Handler) http.Handler {
+	multipartLimit := maxUploadBytes + fingerprintMultipartOverhead
+	if maxUploadBytes <= 0 {
+		multipartLimit = fingerprintMultipartFallback
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if repo == nil || r.Method != http.MethodPost {
@@ -78,7 +97,11 @@ func Idempotency(repo storage.IdempotencyRepository, log *slog.Logger) func(http
 				return
 			}
 
-			fingerprint, err := fingerprintRequest(r)
+			fingerprint, cleanup, err := fingerprintRequest(r, multipartLimit)
+			if cleanup != nil {
+				// The spooled upload is only needed while the handler runs.
+				defer cleanup()
+			}
 			if err != nil {
 				Error(w, r, http.StatusBadRequest, "invalid_request", "invalid request body")
 				return
@@ -199,29 +222,89 @@ func (c *responseCapture) Write(b []byte) (int, error) {
 // Unwrap exposes the underlying writer to http.ResponseController.
 func (c *responseCapture) Unwrap() http.ResponseWriter { return c.ResponseWriter }
 
-// fingerprintRequest returns a stable hash of a send: method, route and body.
-// Multipart bodies are hashed by their text fields only, because hashing the
-// upload would require buffering it; a same-key retry with the same text fields
-// therefore replays even when the file bytes differ (documented limitation).
-// A body larger than fingerprintBodyLimit is hashed by method and route only,
-// and is left intact for the handler.
-func fingerprintRequest(r *http.Request) (string, error) {
-	body, complete, err := readBodyPrefix(r)
-	if err != nil {
-		return "", err
-	}
-	if !complete {
-		return routeFingerprint(r), nil
+// fingerprintRequest returns a stable hash of a send: method, route and body,
+// plus a cleanup function the caller must run once the handler is done with the
+// request body (nil when nothing has to be released).
+//
+// A multipart body is parsed as it streams: its text fields and each file's
+// name, content type and content hash take part in the fingerprint, so a
+// same-key retry is only a replay when the upload is really the same. The body
+// is spooled to a temporary file while it is parsed and handed back to the
+// handler, so file content is never held in memory. A body above the
+// configured upload limit falls back to a method+route fingerprint, which is
+// harmless because the handler rejects it before anything is enqueued.
+//
+// A non-multipart body larger than fingerprintBodyLimit is also hashed by
+// method and route only, and is left intact for the handler.
+func fingerprintRequest(r *http.Request, multipartLimit int64) (string, func(), error) {
+	contentType := r.Header.Get("Content-Type")
+	if mediaType, params, err := mime.ParseMediaType(contentType); err == nil && strings.HasPrefix(mediaType, "multipart/") {
+		return fingerprintMultipart(r, params["boundary"], multipartLimit)
 	}
 
-	if fields, ok := multipartFields(r.Header.Get("Content-Type"), body); ok {
-		return fieldsFingerprint(r, fields), nil
+	body, complete, err := readBodyPrefix(r)
+	if err != nil {
+		return "", nil, err
+	}
+	if !complete {
+		return routeFingerprint(r), nil, nil
 	}
 
 	sum := sha256.New()
 	writeRoute(sum, r)
 	sum.Write(body)
-	return hex.EncodeToString(sum.Sum(nil)), nil
+	return hex.EncodeToString(sum.Sum(nil)), nil, nil
+}
+
+// fingerprintMultipart spools the multipart body of r while hashing its parts,
+// then restores it for the handler. The cleanup closes and removes the spool.
+func fingerprintMultipart(r *http.Request, boundary string, limit int64) (string, func(), error) {
+	if boundary == "" {
+		return "", nil, errors.New("multipart body without a boundary")
+	}
+
+	spool, err := os.CreateTemp("", ".wzap-fingerprint-*")
+	if err != nil {
+		// The body cannot be parsed and restored without a spool: degrade to
+		// the route fingerprint and leave it for the handler.
+		return routeFingerprint(r), nil, nil
+	}
+	cleanup := func() {
+		_ = spool.Close()
+		_ = os.Remove(spool.Name())
+	}
+
+	written, err := io.Copy(spool, io.LimitReader(r.Body, limit+1))
+	if err != nil {
+		cleanup()
+		return "", nil, err
+	}
+	if written > limit {
+		// Too large to fingerprint exactly: the handler will reject it, so
+		// restore the body and fall back to the route.
+		if _, err := spool.Seek(0, io.SeekStart); err != nil {
+			cleanup()
+			return "", nil, err
+		}
+		r.Body = io.NopCloser(io.MultiReader(spool, r.Body))
+		return routeFingerprint(r), cleanup, nil
+	}
+
+	if _, err := spool.Seek(0, io.SeekStart); err != nil {
+		cleanup()
+		return "", nil, err
+	}
+	parts, err := multipartParts(boundary, spool)
+	if err != nil {
+		cleanup()
+		return "", nil, err
+	}
+	if _, err := spool.Seek(0, io.SeekStart); err != nil {
+		cleanup()
+		return "", nil, err
+	}
+	r.Body = spool
+	return partsFingerprint(r, parts), cleanup, nil
 }
 
 // routeFingerprint hashes the method and route of r.
@@ -231,12 +314,12 @@ func routeFingerprint(r *http.Request) string {
 	return hex.EncodeToString(sum.Sum(nil))
 }
 
-// fieldsFingerprint hashes the method, route and sorted multipart text fields.
-func fieldsFingerprint(r *http.Request, fields []string) string {
+// partsFingerprint hashes the method, route and sorted multipart parts.
+func partsFingerprint(r *http.Request, parts []string) string {
 	sum := sha256.New()
 	writeRoute(sum, r)
-	for _, field := range fields {
-		sum.Write([]byte(field))
+	for _, part := range parts {
+		sum.Write([]byte(part))
 		sum.Write([]byte{'\n'})
 	}
 	return hex.EncodeToString(sum.Sum(nil))
@@ -273,42 +356,38 @@ func readBodyPrefix(r *http.Request) ([]byte, bool, error) {
 	return prefix, true, nil
 }
 
-// multipartFields parses a multipart body and returns its text fields as sorted
-// "name\x00value" pairs; file parts are skipped on purpose. The boolean is
-// false when the content type is not multipart, the boundary is missing or the
-// body is malformed.
-func multipartFields(contentType string, body []byte) ([]string, bool) {
-	mediaType, params, err := mime.ParseMediaType(contentType)
-	if err != nil || !strings.HasPrefix(mediaType, "multipart/") {
-		return nil, false
-	}
-	boundary := params["boundary"]
-	if boundary == "" {
-		return nil, false
-	}
-
-	reader := multipart.NewReader(bytes.NewReader(body), boundary)
-	fields := []string{}
+// multipartParts parses a multipart body and returns its canonical parts as
+// sorted strings. A text field is "field\x00name\x00value"; a file part is
+// "file\x00name\x00filename\x00content-type\x00sha256". Sorting makes the
+// fingerprint independent of the field and part order.
+func multipartParts(boundary string, body io.Reader) ([]string, error) {
+	reader := multipart.NewReader(body, boundary)
+	parts := []string{}
 	for {
 		part, err := reader.NextPart()
 		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
-			return nil, false
+			return nil, err
 		}
+
 		if part.FileName() != "" {
-			// Draining the part advances the parser; the file content is
-			// deliberately not fingerprinted.
-			_, _ = io.Copy(io.Discard, part)
+			sum := sha256.New()
+			if _, err := io.Copy(sum, part); err != nil {
+				return nil, err
+			}
+			parts = append(parts, "file\x00"+part.FormName()+"\x00"+part.FileName()+
+				"\x00"+part.Header.Get("Content-Type")+"\x00"+hex.EncodeToString(sum.Sum(nil)))
 			continue
 		}
+
 		value, err := io.ReadAll(part)
 		if err != nil {
-			return nil, false
+			return nil, err
 		}
-		fields = append(fields, part.FormName()+"\x00"+string(value))
+		parts = append(parts, "field\x00"+part.FormName()+"\x00"+string(value))
 	}
-	slices.Sort(fields)
-	return fields, true
+	slices.Sort(parts)
+	return parts, nil
 }

@@ -194,6 +194,7 @@ type outboxFixture struct {
 	manager  *sessiontest.Fake
 	writer   *fakeWriter
 	session  *sessiontest.FakeSession
+	media    *fakeMediaPaths
 	instance uuid.UUID
 	now      time.Time
 }
@@ -218,13 +219,14 @@ func newOutboxFixture(messages ...model.OutboundMessage) *outboxFixture {
 		manager:  manager,
 		writer:   &fakeWriter{},
 		session:  sess,
+		media:    &fakeMediaPaths{},
 		instance: instanceID,
 		now:      time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC),
 	}
 	// One worker keeps the claim/process order deterministic; the worker pool
 	// concurrency itself is covered by the locker tests. Humanization stays
 	// off unless a test enables it explicitly.
-	fixture.outbox = NewOutbox(fixture.repo, manager, fixture.writer, discardLogger(), 1, instancelock.New(), false)
+	fixture.outbox = NewOutbox(fixture.repo, manager, fixture.writer, fixture.media, discardLogger(), 1, instancelock.New(), false)
 	fixture.outbox.now = func() time.Time { return fixture.now }
 	return fixture
 }
@@ -626,6 +628,44 @@ func TestOutboxClaimFailureDoesNotStopWorkers(t *testing.T) {
 
 	if len(fixture.repo.claimCallLimits()) == 0 {
 		t.Fatal("ClaimQueued was never called")
+	}
+}
+
+func TestOutboxSendsMediaMessage(t *testing.T) {
+	mediaID := uuid.New()
+	fixture := newOutboxFixture(model.OutboundMessage{
+		Type:         TypeMedia,
+		RecipientJID: "5547988359190@s.whatsapp.net",
+		Payload:      []byte(`{"caption":"olha","filename":"foto.jpg"}`),
+		MediaID:      &mediaID,
+		Status:       StatusQueued,
+	})
+	messageID := fixture.repo.queue[0].ID
+	fixture.media.pathFn = func(_ context.Context, id uuid.UUID) (string, *model.Media, error) {
+		if id != mediaID {
+			t.Errorf("Path id = %s, want %s", id, mediaID)
+		}
+		return "/data/media/foto", &model.Media{ID: mediaID, Mimetype: "image/jpeg", Filename: "foto.jpg"}, nil
+	}
+
+	runOutbox(t, fixture)
+
+	if len(fixture.repo.sentIDs()) != 1 {
+		t.Fatalf("sent = %d messages, want the media message delivered", len(fixture.repo.sentIDs()))
+	}
+	if _, ok := fixture.repo.sentIDs()[messageID]; !ok {
+		t.Error("the media message was not marked sent")
+	}
+	if len(fixture.repo.failedMessages()) != 0 {
+		t.Fatalf("failed = %v, want none", fixture.repo.failedMessages())
+	}
+
+	calls := fixture.session.SendCalls()
+	if len(calls) != 1 {
+		t.Fatalf("session sends = %d, want 1", len(calls))
+	}
+	if calls[0].Type != "image" || calls[0].MediaPath != "/data/media/foto" {
+		t.Errorf("session message = %+v, want the image upload from /data/media/foto", calls[0])
 	}
 }
 

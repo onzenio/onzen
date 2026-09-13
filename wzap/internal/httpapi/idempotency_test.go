@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/textproto"
 	"strings"
 	"testing"
 	"time"
@@ -133,10 +135,18 @@ func idempotencyRequest(id uuid.UUID, key, body string) *http.Request {
 	return req
 }
 
+// testMultipartBytes is the largest accepted upload the middleware tests
+// configure; the middleware adds its own framing slack.
+const testMultipartBytes = 1 << 20
+
+// testMultipartLimit is the body size the middleware spools for a multipart
+// fingerprint under testMultipartBytes.
+const testMultipartLimit = testMultipartBytes + fingerprintMultipartOverhead
+
 // serveIdempotency runs req through the middleware wrapping next.
 func serveIdempotency(repo storage.IdempotencyRepository, next http.Handler, req *http.Request) *httptest.ResponseRecorder {
 	rec := httptest.NewRecorder()
-	Idempotency(repo, discardLogger())(next).ServeHTTP(rec, req)
+	Idempotency(repo, discardLogger(), testMultipartBytes)(next).ServeHTTP(rec, req)
 	return rec
 }
 
@@ -252,9 +262,12 @@ func TestIdempotencyInFlightConflict(t *testing.T) {
 	repo := newFakeIdempotency()
 	id := uuid.New()
 	request := idempotencyRequest(id, "key-1", `{"to":"5547"}`)
-	fingerprint, err := fingerprintRequest(request)
+	fingerprint, cleanup, err := fingerprintRequest(request, testMultipartBytes)
 	if err != nil {
 		t.Fatalf("fingerprintRequest: %v", err)
+	}
+	if cleanup != nil {
+		defer cleanup()
 	}
 	repo.putRecord(model.IdempotencyRecord{
 		InstanceID: id, Key: "key-1", Fingerprint: fingerprint, Status: "in_progress",
@@ -420,7 +433,7 @@ func TestIdempotencyReleasesOnPanic(t *testing.T) {
 			}
 			Error(w, r, http.StatusInternalServerError, "internal_error", "internal server error")
 		}()
-		Idempotency(repo, discardLogger())(panicking).ServeHTTP(w, r)
+		Idempotency(repo, discardLogger(), testMultipartBytes)(panicking).ServeHTTP(w, r)
 	})
 
 	rec := httptest.NewRecorder()
@@ -533,11 +546,14 @@ func TestIdempotencyRejectsUnreadableBody(t *testing.T) {
 func TestFingerprintCoversMethodRouteAndBody(t *testing.T) {
 	id := uuid.New()
 	base := idempotencyRequest(id, "key-1", `{"to":"5547","text":"hi"}`)
-	baseFingerprint, err := fingerprintRequest(base)
+	baseFingerprint, cleanup, err := fingerprintRequest(base, testMultipartBytes)
 	if err != nil {
 		t.Fatalf("fingerprintRequest: %v", err)
 	}
-	same, err := fingerprintRequest(idempotencyRequest(id, "key-1", `{"to":"5547","text":"hi"}`))
+	if cleanup != nil {
+		t.Error("a JSON body needs no cleanup")
+	}
+	same, _, err := fingerprintRequest(idempotencyRequest(id, "key-1", `{"to":"5547","text":"hi"}`), testMultipartBytes)
 	if err != nil {
 		t.Fatalf("fingerprintRequest: %v", err)
 	}
@@ -545,7 +561,7 @@ func TestFingerprintCoversMethodRouteAndBody(t *testing.T) {
 		t.Errorf("equal requests got fingerprints %q and %q", baseFingerprint, same)
 	}
 
-	otherBody, err := fingerprintRequest(idempotencyRequest(id, "key-1", `{"to":"5547","text":"bye"}`))
+	otherBody, _, err := fingerprintRequest(idempotencyRequest(id, "key-1", `{"to":"5547","text":"bye"}`), testMultipartBytes)
 	if err != nil {
 		t.Fatalf("fingerprintRequest: %v", err)
 	}
@@ -555,7 +571,7 @@ func TestFingerprintCoversMethodRouteAndBody(t *testing.T) {
 
 	otherPath := httptest.NewRequest(http.MethodPost, "/api/v1/instances/"+id.String()+"/messages/location", strings.NewReader(`{"to":"5547","text":"hi"}`))
 	otherPath.SetPathValue("id", id.String())
-	otherPathFingerprint, err := fingerprintRequest(otherPath)
+	otherPathFingerprint, _, err := fingerprintRequest(otherPath, testMultipartBytes)
 	if err != nil {
 		t.Fatalf("fingerprintRequest: %v", err)
 	}
@@ -564,9 +580,10 @@ func TestFingerprintCoversMethodRouteAndBody(t *testing.T) {
 	}
 }
 
-// multipartRequest builds a multipart POST with the given fields and one file
-// part.
-func multipartRequest(t *testing.T, id uuid.UUID, fields [][2]string, filename, fileContent string) *http.Request {
+// multipartBody builds a multipart/form-data body with the given text fields
+// and, when filename is not empty, one file part. It returns the body and its
+// Content-Type.
+func multipartBody(t *testing.T, fields [][2]string, filename, contentType string, fileContent []byte) ([]byte, string) {
 	t.Helper()
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
@@ -575,53 +592,145 @@ func multipartRequest(t *testing.T, id uuid.UUID, fields [][2]string, filename, 
 			t.Fatalf("WriteField: %v", err)
 		}
 	}
-	part, err := writer.CreateFormFile("file", filename)
-	if err != nil {
-		t.Fatalf("CreateFormFile: %v", err)
-	}
-	if _, err := io.WriteString(part, fileContent); err != nil {
-		t.Fatalf("write file part: %v", err)
+	if filename != "" {
+		header := textproto.MIMEHeader{}
+		header.Set("Content-Disposition",
+			mime.FormatMediaType("form-data", map[string]string{"name": "file", "filename": filename}))
+		header.Set("Content-Type", contentType)
+		part, err := writer.CreatePart(header)
+		if err != nil {
+			t.Fatalf("CreatePart: %v", err)
+		}
+		if _, err := part.Write(fileContent); err != nil {
+			t.Fatalf("write file part: %v", err)
+		}
 	}
 	if err := writer.Close(); err != nil {
 		t.Fatalf("close writer: %v", err)
 	}
+	return body.Bytes(), writer.FormDataContentType()
+}
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/instances/"+id.String()+"/messages/media", &body)
+// multipartRequest builds a multipart POST with the given fields and one file
+// part.
+func multipartRequest(t *testing.T, id uuid.UUID, fields [][2]string, filename, contentType, fileContent string) *http.Request {
+	t.Helper()
+	body, formType := multipartBody(t, fields, filename, contentType, []byte(fileContent))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/instances/"+id.String()+"/messages/media", bytes.NewReader(body))
 	req.SetPathValue("id", id.String())
-	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Content-Type", formType)
 	return req
 }
 
-func TestFingerprintMultipartUsesTextFieldsOnly(t *testing.T) {
+// withIdempotencyKey sets the Idempotency-Key header on req.
+func withIdempotencyKey(req *http.Request, key string) *http.Request {
+	req.Header.Set(idempotencyKeyHeader, key)
+	return req
+}
+
+func TestFingerprintMultipartCoversFieldsAndFile(t *testing.T) {
 	id := uuid.New()
 	fields := [][2]string{{"to", "5547988359190"}, {"type", "image"}, {"caption", "olha"}}
+	fingerprint := func(req *http.Request) string {
+		t.Helper()
+		sum, cleanup, err := fingerprintRequest(req, testMultipartLimit)
+		if cleanup != nil {
+			defer cleanup()
+		}
+		if err != nil {
+			t.Fatalf("fingerprintRequest: %v", err)
+		}
+		return sum
+	}
 
-	first, err := fingerprintRequest(multipartRequest(t, id, fields, "foto.jpg", "first bytes"))
-	if err != nil {
-		t.Fatalf("fingerprintRequest: %v", err)
-	}
-	sameFields, err := fingerprintRequest(multipartRequest(t, id, fields, "foto.jpg", "utterly different bytes"))
-	if err != nil {
-		t.Fatalf("fingerprintRequest: %v", err)
-	}
-	if first != sameFields {
-		t.Error("multipart file content changed the fingerprint, want the documented limitation (file is not hashed)")
+	first := fingerprint(multipartRequest(t, id, fields, "foto.jpg", "image/jpeg", "first bytes"))
+	same := fingerprint(multipartRequest(t, id, fields, "foto.jpg", "image/jpeg", "first bytes"))
+	if first != same {
+		t.Errorf("equal multipart requests got fingerprints %q and %q", first, same)
 	}
 
-	reordered, err := fingerprintRequest(multipartRequest(t, id, [][2]string{{"caption", "olha"}, {"to", "5547988359190"}, {"type", "image"}}, "foto.jpg", "first bytes"))
-	if err != nil {
-		t.Fatalf("fingerprintRequest: %v", err)
+	otherFile := fingerprint(multipartRequest(t, id, fields, "foto.jpg", "image/jpeg", "utterly different bytes"))
+	if first == otherFile {
+		t.Error("different file content shares a fingerprint")
 	}
+
+	otherMime := fingerprint(multipartRequest(t, id, fields, "foto.jpg", "image/png", "first bytes"))
+	if first == otherMime {
+		t.Error("a different file content type shares a fingerprint")
+	}
+
+	otherName := fingerprint(multipartRequest(t, id, fields, "outra.jpg", "image/jpeg", "first bytes"))
+	if first == otherName {
+		t.Error("a different file name shares a fingerprint")
+	}
+
+	reordered := fingerprint(multipartRequest(t, id,
+		[][2]string{{"caption", "olha"}, {"to", "5547988359190"}, {"type", "image"}}, "foto.jpg", "image/jpeg", "first bytes"))
 	if first != reordered {
 		t.Error("multipart field order changed the fingerprint, want field order to be ignored")
 	}
 
-	otherRecipient, err := fingerprintRequest(multipartRequest(t, id, [][2]string{{"to", "5547999999999"}, {"type", "image"}, {"caption", "olha"}}, "foto.jpg", "first bytes"))
+	otherRecipient := fingerprint(multipartRequest(t, id,
+		[][2]string{{"to", "5547999999999"}, {"type", "image"}, {"caption", "olha"}}, "foto.jpg", "image/jpeg", "first bytes"))
+	if first == otherRecipient {
+		t.Error("different text fields share a fingerprint")
+	}
+}
+
+func TestFingerprintLargeMultipartCoversFieldsAndKeepsBody(t *testing.T) {
+	id := uuid.New()
+	fields := [][2]string{{"to", "5547988359190"}, {"type", "image"}, {"caption", "olha"}}
+	large := bytes.Repeat([]byte("x"), fingerprintBodyLimit+1)
+	otherLarge := bytes.Repeat([]byte("y"), fingerprintBodyLimit+1)
+
+	req := multipartRequest(t, id, fields, "foto.jpg", "image/jpeg", string(large))
+	original, err := io.ReadAll(req.Body)
+	if err != nil {
+		t.Fatalf("read request body: %v", err)
+	}
+	req.Body = io.NopCloser(bytes.NewReader(original))
+
+	fingerprint, cleanup, err := fingerprintRequest(req, testMultipartLimit)
 	if err != nil {
 		t.Fatalf("fingerprintRequest: %v", err)
 	}
-	if first == otherRecipient {
-		t.Error("different text fields share a fingerprint")
+	if cleanup == nil {
+		t.Fatal("fingerprintRequest returned no cleanup for a spooled multipart body")
+	}
+	defer cleanup()
+
+	restored, err := io.ReadAll(req.Body)
+	if err != nil {
+		t.Fatalf("read restored body: %v", err)
+	}
+	if !bytes.Equal(restored, original) {
+		t.Errorf("restored body length = %d, want the original %d", len(restored), len(original))
+	}
+
+	other := multipartRequest(t, id, fields, "foto.jpg", "image/jpeg", string(otherLarge))
+	otherFingerprint, otherCleanup, err := fingerprintRequest(other, testMultipartLimit)
+	if err != nil {
+		t.Fatalf("fingerprintRequest: %v", err)
+	}
+	if otherCleanup != nil {
+		defer otherCleanup()
+	}
+	if fingerprint == otherFingerprint {
+		t.Error("a large multipart body with a different file shares a fingerprint")
+	}
+
+	otherFields := multipartRequest(t, id,
+		[][2]string{{"to", "5547999999999"}, {"type", "image"}, {"caption", "olha"}}, "foto.jpg", "image/jpeg", string(large))
+	fieldsFingerprint, fieldsCleanup, err := fingerprintRequest(otherFields, testMultipartLimit)
+	if err != nil {
+		t.Fatalf("fingerprintRequest: %v", err)
+	}
+	if fieldsCleanup != nil {
+		defer fieldsCleanup()
+	}
+	if fingerprint == fieldsFingerprint {
+		t.Error("a large multipart body with different fields shares a fingerprint")
 	}
 }
 
@@ -646,7 +755,8 @@ func TestFingerprintMultipartRestoresBodyForHandler(t *testing.T) {
 		JSON(w, http.StatusAccepted, map[string]string{"message_id": "m1"})
 	})
 
-	rec := serveIdempotency(repo, handler, multipartRequest(t, id, [][2]string{{"to", "5547"}, {"caption", "olha"}}, "foto.jpg", "file bytes"))
+	rec := serveIdempotency(repo, handler, withIdempotencyKey(
+		multipartRequest(t, id, [][2]string{{"to", "5547"}, {"caption", "olha"}}, "foto.jpg", "image/jpeg", "file bytes"), "key-1"))
 
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusAccepted)
@@ -659,16 +769,92 @@ func TestFingerprintMultipartRestoresBodyForHandler(t *testing.T) {
 	}
 }
 
+func TestIdempotencyMultipartReplaysSameContent(t *testing.T) {
+	repo := newFakeIdempotency()
+	id := uuid.New()
+	calls := 0
+	handler := countingHandler(&calls, http.StatusAccepted, "m1")
+	fields := [][2]string{{"to", "5547"}, {"type", "image"}}
+
+	first := serveIdempotency(repo, handler, withIdempotencyKey(
+		multipartRequest(t, id, fields, "foto.jpg", "image/jpeg", "bytes"), "key-1"))
+	originalBody := first.Body.String()
+	second := serveIdempotency(repo, countingHandler(new(int), http.StatusAccepted, "m2"),
+		withIdempotencyKey(multipartRequest(t, id, fields, "foto.jpg", "image/jpeg", "bytes"), "key-1"))
+
+	if first.Code != http.StatusAccepted {
+		t.Fatalf("first status = %d, want %d", first.Code, http.StatusAccepted)
+	}
+	if second.Code != http.StatusAccepted || second.Body.String() != originalBody {
+		t.Errorf("replay = %d %q, want the original %d %q", second.Code, second.Body.String(), first.Code, originalBody)
+	}
+	if got := second.Header().Get(idempotentReplayHeader); got != "true" {
+		t.Errorf("%s = %q, want %q", idempotentReplayHeader, got, "true")
+	}
+	if calls != 1 {
+		t.Errorf("handler calls = %d, want 1", calls)
+	}
+}
+
+func TestIdempotencyMultipartDifferentFileReturns422(t *testing.T) {
+	repo := newFakeIdempotency()
+	id := uuid.New()
+	calls := 0
+	handler := countingHandler(&calls, http.StatusAccepted, "m1")
+	fields := [][2]string{{"to", "5547"}, {"type", "image"}}
+
+	serveIdempotency(repo, handler, withIdempotencyKey(
+		multipartRequest(t, id, fields, "foto.jpg", "image/jpeg", "first file"), "key-1"))
+
+	rec := serveIdempotency(repo, countingHandler(new(int), http.StatusAccepted, "m2"),
+		withIdempotencyKey(multipartRequest(t, id, fields, "foto.jpg", "image/jpeg", "second file"), "key-1"))
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnprocessableEntity)
+	}
+	if code := errorCode(t, rec.Body.Bytes()); code != "unprocessable_entity" {
+		t.Errorf("error code = %q, want unprocessable_entity", code)
+	}
+	if calls != 1 {
+		t.Errorf("handler calls = %d, want 1", calls)
+	}
+}
+
+func TestIdempotencyLargeMultipartFieldsReturn422(t *testing.T) {
+	repo := newFakeIdempotency()
+	id := uuid.New()
+	calls := 0
+	handler := countingHandler(&calls, http.StatusAccepted, "m1")
+	large := string(bytes.Repeat([]byte("x"), fingerprintBodyLimit+1))
+
+	serveIdempotency(repo, handler, withIdempotencyKey(multipartRequest(t, id,
+		[][2]string{{"to", "5547"}, {"type", "image"}}, "foto.jpg", "image/jpeg", large), "key-1"))
+
+	rec := serveIdempotency(repo, countingHandler(new(int), http.StatusAccepted, "m2"),
+		withIdempotencyKey(multipartRequest(t, id,
+			[][2]string{{"to", "5547999999999"}, {"type", "image"}}, "foto.jpg", "image/jpeg", large), "key-1"))
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want %d for a reused key with different large fields", rec.Code, http.StatusUnprocessableEntity)
+	}
+	if calls != 1 {
+		t.Errorf("handler calls = %d, want 1", calls)
+	}
+}
+
 func TestFingerprintLargeBodyFallsBackToRouteAndKeepsBody(t *testing.T) {
 	id := uuid.New()
 	large := strings.Repeat("x", fingerprintBodyLimit+1)
 	otherLarge := strings.Repeat("y", fingerprintBodyLimit+1)
 
-	fingerprint, err := fingerprintRequest(idempotencyRequest(id, "key-1", large))
+	fingerprint, cleanup, err := fingerprintRequest(idempotencyRequest(id, "key-1", large), testMultipartBytes)
 	if err != nil {
 		t.Fatalf("fingerprintRequest: %v", err)
 	}
-	otherFingerprint, err := fingerprintRequest(idempotencyRequest(id, "key-1", otherLarge))
+	if cleanup != nil {
+		t.Error("a JSON body needs no cleanup")
+	}
+	otherFingerprint, _, err := fingerprintRequest(idempotencyRequest(id, "key-1", otherLarge), testMultipartBytes)
 	if err != nil {
 		t.Fatalf("fingerprintRequest: %v", err)
 	}
@@ -677,8 +863,10 @@ func TestFingerprintLargeBodyFallsBackToRouteAndKeepsBody(t *testing.T) {
 	}
 
 	req := idempotencyRequest(id, "key-1", large)
-	if _, err := fingerprintRequest(req); err != nil {
+	if _, cleanup, err := fingerprintRequest(req, testMultipartBytes); err != nil {
 		t.Fatalf("fingerprintRequest: %v", err)
+	} else if cleanup != nil {
+		t.Error("a JSON body needs no cleanup")
 	}
 	restored, err := io.ReadAll(req.Body)
 	if err != nil {

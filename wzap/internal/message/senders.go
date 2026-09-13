@@ -7,13 +7,15 @@ import (
 	"fmt"
 	"strings"
 
+	"onefisc/wzap/internal/model"
 	"onefisc/wzap/internal/session"
 )
 
-// Sender delivers one normalized outbound message through a session. The
-// outbox dispatches each claimed message to the sender of its type.
+// Sender delivers one stored outbound message through a session. The outbox
+// dispatches each claimed message to the sender of its type; the sender
+// validates the stored payload and translates it into the session message.
 type Sender interface {
-	Send(ctx context.Context, sess session.Session, msg session.OutboundMessage) (string, error)
+	Send(ctx context.Context, sess session.Session, msg model.OutboundMessage) (string, error)
 }
 
 // The per-type senders satisfy the contract; the assertions catch signature
@@ -22,15 +24,17 @@ var (
 	_ Sender = textSender{}
 	_ Sender = locationSender{}
 	_ Sender = contactSender{}
+	_ Sender = mediaSender{}
 )
 
 // defaultSenders maps every message type accepted by Enqueue to its sender.
-// Media is added by the media upload task.
-func defaultSenders() map[string]Sender {
+// A nil media resolver leaves media messages unsupported.
+func defaultSenders(media MediaPathResolver) map[string]Sender {
 	return map[string]Sender{
 		TypeText:     textSender{},
 		TypeLocation: locationSender{},
 		TypeContact:  contactSender{},
+		TypeMedia:    mediaSender{media: media},
 	}
 }
 
@@ -38,7 +42,7 @@ func defaultSenders() map[string]Sender {
 type textSender struct{}
 
 // Send rejects a malformed or empty text payload and forwards the message.
-func (textSender) Send(ctx context.Context, sess session.Session, msg session.OutboundMessage) (string, error) {
+func (textSender) Send(ctx context.Context, sess session.Session, msg model.OutboundMessage) (string, error) {
 	var payload textPayload
 	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 		return "", fmt.Errorf("text payload: %w", err)
@@ -46,7 +50,11 @@ func (textSender) Send(ctx context.Context, sess session.Session, msg session.Ou
 	if strings.TrimSpace(payload.Text) == "" {
 		return "", errors.New("text payload: text is required")
 	}
-	return sess.Send(ctx, msg)
+	return sess.Send(ctx, session.OutboundMessage{
+		Type:         msg.Type,
+		RecipientJID: msg.RecipientJID,
+		Payload:      msg.Payload,
+	})
 }
 
 // locationSender validates the stored coordinates before handing the message to
@@ -55,7 +63,7 @@ type locationSender struct{}
 
 // Send rejects a location payload without valid coordinates and forwards the
 // message.
-func (locationSender) Send(ctx context.Context, sess session.Session, msg session.OutboundMessage) (string, error) {
+func (locationSender) Send(ctx context.Context, sess session.Session, msg model.OutboundMessage) (string, error) {
 	var payload struct {
 		Latitude  *float64 `json:"latitude"`
 		Longitude *float64 `json:"longitude"`
@@ -72,7 +80,11 @@ func (locationSender) Send(ctx context.Context, sess session.Session, msg sessio
 	if *payload.Longitude < -180 || *payload.Longitude > 180 {
 		return "", errors.New("location payload: longitude out of range")
 	}
-	return sess.Send(ctx, msg)
+	return sess.Send(ctx, session.OutboundMessage{
+		Type:         msg.Type,
+		RecipientJID: msg.RecipientJID,
+		Payload:      msg.Payload,
+	})
 }
 
 // contactSender validates the stored vCard before handing the message to the
@@ -81,7 +93,7 @@ type contactSender struct{}
 
 // Send rejects a contact payload without a display name or vCard and forwards
 // the message.
-func (contactSender) Send(ctx context.Context, sess session.Session, msg session.OutboundMessage) (string, error) {
+func (contactSender) Send(ctx context.Context, sess session.Session, msg model.OutboundMessage) (string, error) {
 	var payload contactPayload
 	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 		return "", fmt.Errorf("contact payload: %w", err)
@@ -92,5 +104,9 @@ func (contactSender) Send(ctx context.Context, sess session.Session, msg session
 	if strings.TrimSpace(payload.VCard) == "" {
 		return "", errors.New("contact payload: vcard is required")
 	}
-	return sess.Send(ctx, msg)
+	return sess.Send(ctx, session.OutboundMessage{
+		Type:         msg.Type,
+		RecipientJID: msg.RecipientJID,
+		Payload:      msg.Payload,
+	})
 }

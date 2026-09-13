@@ -35,6 +35,14 @@ var (
 	ErrTooLarge = errors.New("media exceeds the size limit")
 )
 
+// Outbound media kinds, used by the upload handler and the outbound sender.
+const (
+	KindImage    = "image"
+	KindVideo    = "video"
+	KindAudio    = "audio"
+	KindDocument = "document"
+)
+
 // allowedMimes are the media types accepted on upload, mirroring the formats
 // supported by WhatsApp for images, video, audio and documents.
 var allowedMimes = map[string]struct{}{
@@ -63,6 +71,27 @@ var allowedMimes = map[string]struct{}{
 func AllowedMime(mimetype string) bool {
 	_, ok := allowedMimes[strings.ToLower(strings.TrimSpace(mimetype))]
 	return ok
+}
+
+// Kind returns the outbound kind of an allowed mimetype: every image goes as
+// an image, every video as a video, every audio as an audio and the remaining
+// allowed formats (documents) go as documents. An unaccepted mimetype has no
+// kind, matching AllowedMime.
+func Kind(mimetype string) (string, bool) {
+	normalized := strings.ToLower(strings.TrimSpace(mimetype))
+	if _, ok := allowedMimes[normalized]; !ok {
+		return "", false
+	}
+	switch {
+	case strings.HasPrefix(normalized, "image/"):
+		return KindImage, true
+	case strings.HasPrefix(normalized, "video/"):
+		return KindVideo, true
+	case strings.HasPrefix(normalized, "audio/"):
+		return KindAudio, true
+	default:
+		return KindDocument, true
+	}
 }
 
 // Storage stores media files under a data dir and records their metadata
@@ -129,18 +158,11 @@ func (s *Storage) Save(
 // metadata. An unknown id reports ErrNotFound; a media whose TTL ended reports
 // ErrExpired; a row whose file is gone reports ErrNotFound.
 func (s *Storage) Open(ctx context.Context, id uuid.UUID) (io.ReadCloser, *model.Media, error) {
-	record, err := s.repo.Get(ctx, id)
+	path, record, err := s.Path(ctx, id)
 	if err != nil {
-		return nil, nil, fmt.Errorf("open media %s: %w", id, mapRepoError(err))
-	}
-	if !s.now().Before(record.ExpiresAt) {
-		return nil, nil, fmt.Errorf("open media %s: %w", id, ErrExpired)
+		return nil, nil, err
 	}
 
-	path, err := s.path(record.StoragePath)
-	if err != nil {
-		return nil, nil, fmt.Errorf("open media %s: %w", id, err)
-	}
 	file, err := os.Open(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -149,6 +171,32 @@ func (s *Storage) Open(ctx context.Context, id uuid.UUID) (io.ReadCloser, *model
 		return nil, nil, fmt.Errorf("open media %s: %w", id, err)
 	}
 	return file, record, nil
+}
+
+// Path returns the absolute filesystem path of the media with the given id
+// along with its metadata, with the same presence, expiry and path-safety
+// checks as Open. It lets a consumer hand the file to something that reads it
+// directly instead of streaming it through this storage.
+func (s *Storage) Path(ctx context.Context, id uuid.UUID) (string, *model.Media, error) {
+	record, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return "", nil, fmt.Errorf("open media %s: %w", id, mapRepoError(err))
+	}
+	if !s.now().Before(record.ExpiresAt) {
+		return "", nil, fmt.Errorf("open media %s: %w", id, ErrExpired)
+	}
+
+	path, err := s.path(record.StoragePath)
+	if err != nil {
+		return "", nil, fmt.Errorf("open media %s: %w", id, err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return "", nil, fmt.Errorf("open media %s: %w", id, ErrNotFound)
+		}
+		return "", nil, fmt.Errorf("open media %s: %w", id, err)
+	}
+	return path, record, nil
 }
 
 // DeleteByInstance removes every media of an instance, files first: when a

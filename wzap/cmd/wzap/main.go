@@ -154,7 +154,7 @@ func serve() error {
 		log.Warn("restore sessions not completed", "error", restoreErr)
 	}
 
-	outboxWorker := message.NewOutbox(messageRepo, sessions, eventWriter, log, cfg.OutboxWorkers, instancelock.New(), cfg.Humanize)
+	outboxWorker := message.NewOutbox(messageRepo, sessions, eventWriter, mediaStorage, log, cfg.OutboxWorkers, instancelock.New(), cfg.Humanize)
 
 	srv := httpapi.New(cfg, log, httpapi.Deps{
 		ReadyChecker: checker,

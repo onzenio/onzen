@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"onefisc/wzap/internal/model"
 	"onefisc/wzap/internal/session"
 	"onefisc/wzap/internal/session/sessiontest"
 )
@@ -43,7 +44,7 @@ func TestSendersForwardOutboundMessagePerType(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			sess := sessiontest.NewSession(uuid.New(), nil)
-			msg := session.OutboundMessage{
+			msg := model.OutboundMessage{
 				Type:         tt.msgType,
 				RecipientJID: "5547988359190@s.whatsapp.net",
 				Payload:      []byte(tt.payload),
@@ -61,8 +62,13 @@ func TestSendersForwardOutboundMessagePerType(t *testing.T) {
 			if len(calls) != 1 {
 				t.Fatalf("session sends = %d, want 1", len(calls))
 			}
-			if !reflect.DeepEqual(calls[0], msg) {
-				t.Errorf("session message = %+v, want %+v", calls[0], msg)
+			want := session.OutboundMessage{
+				Type:         tt.msgType,
+				RecipientJID: "5547988359190@s.whatsapp.net",
+				Payload:      []byte(tt.payload),
+			}
+			if !reflect.DeepEqual(calls[0], want) {
+				t.Errorf("session message = %+v, want %+v", calls[0], want)
 			}
 		})
 	}
@@ -89,7 +95,7 @@ func TestSendersRejectInvalidPayloads(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			sess := sessiontest.NewSession(uuid.New(), nil)
 
-			_, err := tt.sender.Send(context.Background(), sess, session.OutboundMessage{
+			_, err := tt.sender.Send(context.Background(), sess, model.OutboundMessage{
 				Type:         TypeText,
 				RecipientJID: "5547988359190@s.whatsapp.net",
 				Payload:      []byte(tt.payload),
@@ -108,12 +114,12 @@ func TestSendersPropagateSessionErrors(t *testing.T) {
 	tests := []struct {
 		name   string
 		sender Sender
-		msg    session.OutboundMessage
+		msg    model.OutboundMessage
 	}{
 		{
 			name:   "text",
 			sender: textSender{},
-			msg: session.OutboundMessage{
+			msg: model.OutboundMessage{
 				Type:    TypeText,
 				Payload: []byte(`{"text":"olá"}`),
 			},
@@ -121,7 +127,7 @@ func TestSendersPropagateSessionErrors(t *testing.T) {
 		{
 			name:   "location",
 			sender: locationSender{},
-			msg: session.OutboundMessage{
+			msg: model.OutboundMessage{
 				Type:    TypeLocation,
 				Payload: []byte(`{"latitude":1,"longitude":2}`),
 			},
@@ -129,7 +135,7 @@ func TestSendersPropagateSessionErrors(t *testing.T) {
 		{
 			name:   "contact",
 			sender: contactSender{},
-			msg: session.OutboundMessage{
+			msg: model.OutboundMessage{
 				Type:    TypeContact,
 				Payload: []byte(`{"display_name":"Fulano","vcard":"BEGIN:VCARD\nEND:VCARD"}`),
 			},

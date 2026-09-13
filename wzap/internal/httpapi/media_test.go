@@ -19,6 +19,21 @@ import (
 // fakeMediaStore is an in-memory MediaStore configured per test.
 type fakeMediaStore struct {
 	openFn func(ctx context.Context, id uuid.UUID) (io.ReadCloser, *model.Media, error)
+	saveFn func(
+		ctx context.Context, instanceID uuid.UUID, direction, messageID, mimetype, filename string, data []byte,
+	) (*model.Media, error)
+
+	saveCalls []mediaSaveCall
+}
+
+// mediaSaveCall records one Save invocation.
+type mediaSaveCall struct {
+	instanceID uuid.UUID
+	direction  string
+	messageID  string
+	mimetype   string
+	filename   string
+	data       []byte
 }
 
 func (f *fakeMediaStore) Open(ctx context.Context, id uuid.UUID) (io.ReadCloser, *model.Media, error) {
@@ -26,6 +41,32 @@ func (f *fakeMediaStore) Open(ctx context.Context, id uuid.UUID) (io.ReadCloser,
 		return f.openFn(ctx, id)
 	}
 	return nil, nil, media.ErrNotFound
+}
+
+// Save records the call and stores a fresh record, defaulting to deriving it
+// from the arguments.
+func (f *fakeMediaStore) Save(
+	ctx context.Context, instanceID uuid.UUID, direction, messageID, mimetype, filename string, data []byte,
+) (*model.Media, error) {
+	f.saveCalls = append(f.saveCalls, mediaSaveCall{
+		instanceID: instanceID,
+		direction:  direction,
+		messageID:  messageID,
+		mimetype:   mimetype,
+		filename:   filename,
+		data:       append([]byte(nil), data...),
+	})
+	if f.saveFn != nil {
+		return f.saveFn(ctx, instanceID, direction, messageID, mimetype, filename, data)
+	}
+	return &model.Media{
+		ID:         uuid.New(),
+		InstanceID: instanceID,
+		Direction:  direction,
+		Mimetype:   mimetype,
+		Filename:   filename,
+		SizeBytes:  int64(len(data)),
+	}, nil
 }
 
 // mediaServer builds the server under test with the given media store.

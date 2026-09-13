@@ -497,6 +497,113 @@ func TestStorageDeleteByInstanceRemovesFilesAndRows(t *testing.T) {
 	}
 }
 
+func TestStoragePathReturnsStoredFile(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	store := NewStorage(dir, newFakeMediaRepo(), 1<<20, time.Hour)
+	instanceID := uuid.New()
+	payload := []byte("conteúdo da mídia")
+
+	saved, err := store.Save(ctx, instanceID, "outbound", "", "image/jpeg", "foto.jpg", payload)
+	if err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	path, record, err := store.Path(ctx, saved.ID)
+	if err != nil {
+		t.Fatalf("Path: %v", err)
+	}
+	if want := filepath.Join(dir, saved.StoragePath); path != want {
+		t.Errorf("Path = %q, want %q", path, want)
+	}
+	if !filepath.IsAbs(path) {
+		t.Errorf("Path = %q, want an absolute path", path)
+	}
+	if record.ID != saved.ID || record.Mimetype != saved.Mimetype || record.SizeBytes != saved.SizeBytes {
+		t.Errorf("Path metadata = %+v, want the saved record %+v", record, saved)
+	}
+	onDisk, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read path: %v", err)
+	}
+	if !bytes.Equal(onDisk, payload) {
+		t.Errorf("file bytes = %q, want %q", onDisk, payload)
+	}
+}
+
+func TestStoragePathErrors(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	repo := newFakeMediaRepo()
+	store := NewStorage(dir, repo, 1024, time.Hour)
+	instanceID := uuid.New()
+
+	saved, err := store.Save(ctx, instanceID, "outbound", "", "image/jpeg", "foto.jpg", []byte("conteúdo"))
+	if err != nil {
+		t.Fatalf("seed Save: %v", err)
+	}
+
+	t.Run("unknown id", func(t *testing.T) {
+		if _, _, err := store.Path(ctx, uuid.New()); !errors.Is(err, ErrNotFound) {
+			t.Errorf("Path error = %v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run("expired", func(t *testing.T) {
+		expired := model.Media{
+			ID:          uuid.New(),
+			InstanceID:  instanceID,
+			ExpiresAt:   time.Now().Add(-time.Minute),
+			StoragePath: filepath.Join("media", instanceID.String(), "expired"),
+		}
+		seedFile(t, dir, expired.StoragePath, []byte("old"))
+		if _, err := repo.Create(ctx, expired); err != nil {
+			t.Fatalf("seed expired record: %v", err)
+		}
+		if _, _, err := store.Path(ctx, expired.ID); !errors.Is(err, ErrExpired) {
+			t.Errorf("Path error = %v, want ErrExpired", err)
+		}
+	})
+
+	t.Run("missing file", func(t *testing.T) {
+		if err := os.Remove(filepath.Join(dir, saved.StoragePath)); err != nil {
+			t.Fatalf("remove stored file: %v", err)
+		}
+		if _, _, err := store.Path(ctx, saved.ID); !errors.Is(err, ErrNotFound) {
+			t.Errorf("Path error = %v, want ErrNotFound", err)
+		}
+	})
+}
+
+func TestKind(t *testing.T) {
+	tests := []struct {
+		mimetype string
+		want     string
+		ok       bool
+	}{
+		{mimetype: "image/jpeg", want: KindImage, ok: true},
+		{mimetype: "IMAGE/PNG", want: KindImage, ok: true},
+		{mimetype: "video/mp4", want: KindVideo, ok: true},
+		{mimetype: "video/3gpp", want: KindVideo, ok: true},
+		{mimetype: "audio/ogg", want: KindAudio, ok: true},
+		{mimetype: "audio/mpeg", want: KindAudio, ok: true},
+		{mimetype: "application/pdf", want: KindDocument, ok: true},
+		{mimetype: "text/plain", want: KindDocument, ok: true},
+		{mimetype: "application/octet-stream", ok: false},
+		{mimetype: "image/svg+xml", ok: false},
+		{mimetype: "", ok: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.mimetype, func(t *testing.T) {
+			got, ok := Kind(tt.mimetype)
+			if ok != tt.ok || got != tt.want {
+				t.Errorf("Kind(%q) = (%q, %v), want (%q, %v)", tt.mimetype, got, ok, tt.want, tt.ok)
+			}
+		})
+	}
+}
+
 func TestAllowedMime(t *testing.T) {
 	allowed := []string{"image/jpeg", "image/png", "image/webp", "video/mp4", "audio/ogg", "application/pdf", " IMAGE/JPEG "}
 	for _, mimetype := range allowed {

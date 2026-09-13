@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	"onefisc/wzap/internal/config"
+	"onefisc/wzap/internal/media"
 	"onefisc/wzap/internal/message"
 	"onefisc/wzap/internal/model"
 	"onefisc/wzap/internal/storage"
@@ -79,22 +81,57 @@ func (f *fakeMessageService) List(ctx context.Context, instanceID uuid.UUID, lim
 	return nil, "", nil
 }
 
+// testMaxMediaBytes is the upload cap the handler tests configure.
+const testMaxMediaBytes = 1 << 10
+
 // messagesServer builds the server under test with the given message service
 // and idempotency repository.
 func messagesServer(t *testing.T, svc MessageService, repo storage.IdempotencyRepository) *http.Server {
 	t.Helper()
+	return mediaUploadServer(t, svc, &fakeMediaStore{}, repo)
+}
+
+// mediaUploadServer builds the server under test with the given message
+// service, media store and idempotency repository.
+func mediaUploadServer(t *testing.T, svc MessageService, store MediaStore, repo storage.IdempotencyRepository) *http.Server {
+	t.Helper()
 	if svc == nil {
 		svc = &fakeMessageService{}
+	}
+	if store == nil {
+		store = &fakeMediaStore{}
 	}
 	if repo == nil {
 		repo = newFakeIdempotency()
 	}
-	return New(config.Config{HTTPAddr: "127.0.0.1:0", ServiceToken: testToken}, discardLogger(),
+	return New(config.Config{HTTPAddr: "127.0.0.1:0", ServiceToken: testToken, MaxMediaBytes: testMaxMediaBytes},
+		discardLogger(),
 		Deps{
 			ReadyChecker: checkFunc(func(context.Context) error { return nil }),
 			Messages:     svc,
+			Media:        store,
 			Idempotency:  repo,
 		})
+}
+
+// serveMediaUpload sends an authenticated multipart upload through the server
+// handler. An empty filename sends the fields without a file part.
+func serveMediaUpload(
+	t *testing.T, srv *http.Server, id uuid.UUID,
+	fields [][2]string, filename, contentType string, content []byte, headers map[string]string,
+) *httptest.ResponseRecorder {
+	t.Helper()
+
+	body, formType := multipartBody(t, fields, filename, contentType, content)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/instances/"+id.String()+"/messages/media", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	req.Header.Set("Content-Type", formType)
+	for name, value := range headers {
+		req.Header.Set(name, value)
+	}
+	rec := httptest.NewRecorder()
+	srv.Handler.ServeHTTP(rec, req)
+	return rec
 }
 
 // serveMessages sends an authenticated request with an optional body and extra
@@ -467,5 +504,331 @@ func TestListMessagesEmptyPageIsArray(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"items":[]`) {
 		t.Errorf("body = %q, want an empty items array instead of null", rec.Body.String())
+	}
+}
+
+func TestSendMediaAccepted(t *testing.T) {
+	id := uuid.New()
+	storedID := uuid.New()
+	messageID := uuid.New()
+	store := &fakeMediaStore{saveFn: func(
+		_ context.Context, instanceID uuid.UUID, direction, messageID, mimetype, filename string, data []byte,
+	) (*model.Media, error) {
+		if instanceID != id {
+			t.Errorf("Save instance = %s, want %s", instanceID, id)
+		}
+		if direction != "outbound" {
+			t.Errorf("Save direction = %q, want outbound", direction)
+		}
+		if messageID != "" {
+			t.Errorf("Save message id = %q, want empty before the message exists", messageID)
+		}
+		if mimetype != "image/jpeg" {
+			t.Errorf("Save mimetype = %q, want the parsed image/jpeg", mimetype)
+		}
+		if filename != "foto.jpg" {
+			t.Errorf("Save filename = %q, want foto.jpg", filename)
+		}
+		if string(data) != "bytes da foto" {
+			t.Errorf("Save data = %q, want the uploaded bytes", data)
+		}
+		return &model.Media{ID: storedID, Filename: "foto.jpg", Mimetype: "image/jpeg", SizeBytes: int64(len(data))}, nil
+	}}
+	svc := &fakeMessageService{enqueueFn: func(_ context.Context, instanceID uuid.UUID, input message.EnqueueInput) (uuid.UUID, error) {
+		if instanceID != id {
+			t.Errorf("Enqueue instance = %s, want %s", instanceID, id)
+		}
+		if input.Type != message.TypeMedia || input.To != "5547988359190" || input.Caption != "olha" {
+			t.Errorf("Enqueue input = %+v, want media, recipient and caption", input)
+		}
+		if input.Filename != "foto.jpg" {
+			t.Errorf("Enqueue filename = %q, want the stored foto.jpg", input.Filename)
+		}
+		if input.MediaID == nil || *input.MediaID != storedID {
+			t.Errorf("Enqueue media id = %v, want %s", input.MediaID, storedID)
+		}
+		if input.PTT {
+			t.Error("Enqueue PTT = true, want false for an image")
+		}
+		return messageID, nil
+	}}
+
+	rec := serveMediaUpload(t, mediaUploadServer(t, svc, store, nil), id,
+		[][2]string{{"to", "5547988359190"}, {"type", "image"}, {"caption", "olha"}},
+		"foto.jpg", "image/jpeg; charset=binary", []byte("bytes da foto"), nil)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusAccepted)
+	}
+	var payload messageAcceptedPayload
+	decodeJSON(t, rec.Body.Bytes(), &payload)
+	if payload.Data.MessageID != messageID.String() {
+		t.Errorf("data.message_id = %q, want %q", payload.Data.MessageID, messageID)
+	}
+	if payload.Data.Status != message.StatusQueued {
+		t.Errorf("data.status = %q, want %q", payload.Data.Status, message.StatusQueued)
+	}
+	if len(store.saveCalls) != 1 {
+		t.Errorf("Save calls = %d, want 1", len(store.saveCalls))
+	}
+	if len(svc.enqueueCalls) != 1 {
+		t.Errorf("Enqueue calls = %d, want 1", len(svc.enqueueCalls))
+	}
+}
+
+func TestSendMediaVoiceNote(t *testing.T) {
+	id := uuid.New()
+	store := &fakeMediaStore{}
+	svc := &fakeMessageService{enqueueFn: func(_ context.Context, _ uuid.UUID, input message.EnqueueInput) (uuid.UUID, error) {
+		if !input.PTT {
+			t.Error("Enqueue PTT = false, want true for a voice note")
+		}
+		return uuid.New(), nil
+	}}
+
+	rec := serveMediaUpload(t, mediaUploadServer(t, svc, store, nil), id,
+		[][2]string{{"to", "5547988359190"}, {"type", "audio"}, {"ptt", "true"}},
+		"voice.ogg", "audio/ogg", []byte("ogg bytes"), nil)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusAccepted)
+	}
+}
+
+func TestSendMediaDefaultsFilenameFromUpload(t *testing.T) {
+	id := uuid.New()
+	store := &fakeMediaStore{}
+	svc := &fakeMessageService{}
+
+	rec := serveMediaUpload(t, mediaUploadServer(t, svc, store, nil), id,
+		[][2]string{{"to", "5547988359190"}, {"type", "document"}},
+		"nota.pdf", "application/pdf", []byte("%PDF"), nil)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusAccepted)
+	}
+	if len(store.saveCalls) != 1 || store.saveCalls[0].filename != "nota.pdf" {
+		t.Fatalf("Save calls = %+v, want the uploaded file name", store.saveCalls)
+	}
+	if len(svc.enqueueCalls) != 1 || svc.enqueueCalls[0].input.Filename != "nota.pdf" {
+		t.Fatalf("Enqueue calls = %+v, want the uploaded file name", svc.enqueueCalls)
+	}
+}
+
+func TestSendMediaRejections(t *testing.T) {
+	tests := []struct {
+		name        string
+		fields      [][2]string
+		filename    string
+		contentType string
+		content     []byte
+	}{
+		{
+			name:        "invalid mime",
+			fields:      [][2]string{{"to", "5547988359190"}, {"type", "document"}},
+			filename:    "malicioso.html",
+			contentType: "text/html",
+			content:     []byte("<html>"),
+		},
+		{
+			name:        "empty file part content type",
+			fields:      [][2]string{{"to", "5547988359190"}, {"type", "document"}},
+			filename:    "arquivo",
+			contentType: "",
+			content:     []byte("data"),
+		},
+		{
+			name:        "type does not match the mime",
+			fields:      [][2]string{{"to", "5547988359190"}, {"type", "image"}},
+			filename:    "nota.pdf",
+			contentType: "application/pdf",
+			content:     []byte("%PDF"),
+		},
+		{
+			name:        "unsupported type",
+			fields:      [][2]string{{"to", "5547988359190"}, {"type", "sticker"}},
+			filename:    "figurinha.webp",
+			contentType: "image/webp",
+			content:     []byte("webp"),
+		},
+		{
+			name:        "missing type",
+			fields:      [][2]string{{"to", "5547988359190"}},
+			filename:    "foto.jpg",
+			contentType: "image/jpeg",
+			content:     []byte("jpeg"),
+		},
+		{
+			name:        "missing recipient",
+			fields:      [][2]string{{"type", "image"}},
+			filename:    "foto.jpg",
+			contentType: "image/jpeg",
+			content:     []byte("jpeg"),
+		},
+		{
+			name:        "invalid ptt",
+			fields:      [][2]string{{"to", "5547988359190"}, {"type", "audio"}, {"ptt", "maybe"}},
+			filename:    "voice.ogg",
+			contentType: "audio/ogg",
+			content:     []byte("ogg"),
+		},
+		{
+			name:        "empty file",
+			fields:      [][2]string{{"to", "5547988359190"}, {"type", "image"}},
+			filename:    "vazia.jpg",
+			contentType: "image/jpeg",
+			content:     nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &fakeMediaStore{}
+			svc := &fakeMessageService{}
+
+			rec := serveMediaUpload(t, mediaUploadServer(t, svc, store, nil), uuid.New(),
+				tt.fields, tt.filename, tt.contentType, tt.content, nil)
+
+			if rec.Code != http.StatusUnprocessableEntity {
+				t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnprocessableEntity)
+			}
+			if code := errorCode(t, rec.Body.Bytes()); code != "unprocessable_entity" {
+				t.Errorf("error code = %q, want unprocessable_entity", code)
+			}
+			if len(store.saveCalls) != 0 {
+				t.Errorf("Save calls = %d, want none", len(store.saveCalls))
+			}
+			if len(svc.enqueueCalls) != 0 {
+				t.Errorf("Enqueue calls = %d, want none", len(svc.enqueueCalls))
+			}
+		})
+	}
+}
+
+func TestSendMediaWithoutFileRejected(t *testing.T) {
+	store := &fakeMediaStore{}
+	svc := &fakeMessageService{}
+
+	rec := serveMediaUpload(t, mediaUploadServer(t, svc, store, nil), uuid.New(),
+		[][2]string{{"to", "5547988359190"}, {"type", "image"}}, "", "", nil, nil)
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnprocessableEntity)
+	}
+	if len(store.saveCalls) != 0 || len(svc.enqueueCalls) != 0 {
+		t.Errorf("Save calls = %d, Enqueue calls = %d, want none of either",
+			len(store.saveCalls), len(svc.enqueueCalls))
+	}
+}
+
+func TestSendMediaRejectsOversize(t *testing.T) {
+	store := &fakeMediaStore{}
+	svc := &fakeMessageService{}
+
+	rec := serveMediaUpload(t, mediaUploadServer(t, svc, store, nil), uuid.New(),
+		[][2]string{{"to", "5547988359190"}, {"type", "document"}},
+		"grande.pdf", "application/pdf", bytes.Repeat([]byte("a"), testMaxMediaBytes+1), nil)
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnprocessableEntity)
+	}
+	if code := errorCode(t, rec.Body.Bytes()); code != "unprocessable_entity" {
+		t.Errorf("error code = %q, want unprocessable_entity", code)
+	}
+	if len(store.saveCalls) != 0 || len(svc.enqueueCalls) != 0 {
+		t.Errorf("Save calls = %d, Enqueue calls = %d, want none of either",
+			len(store.saveCalls), len(svc.enqueueCalls))
+	}
+}
+
+func TestSendMediaInstanceNotFound(t *testing.T) {
+	store := &fakeMediaStore{saveFn: func(
+		context.Context, uuid.UUID, string, string, string, string, []byte,
+	) (*model.Media, error) {
+		return nil, media.ErrNotFound
+	}}
+	svc := &fakeMessageService{}
+
+	rec := serveMediaUpload(t, mediaUploadServer(t, svc, store, nil), uuid.New(),
+		[][2]string{{"to", "5547988359190"}, {"type", "image"}},
+		"foto.jpg", "image/jpeg", []byte("jpeg"), nil)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+	if len(svc.enqueueCalls) != 0 {
+		t.Errorf("Enqueue calls = %d, want none", len(svc.enqueueCalls))
+	}
+}
+
+func TestSendMediaEnqueueErrorMaps(t *testing.T) {
+	store := &fakeMediaStore{}
+	svc := &fakeMessageService{enqueueFn: func(context.Context, uuid.UUID, message.EnqueueInput) (uuid.UUID, error) {
+		return uuid.Nil, message.ErrInstanceNotConnected
+	}}
+
+	rec := serveMediaUpload(t, mediaUploadServer(t, svc, store, nil), uuid.New(),
+		[][2]string{{"to", "5547988359190"}, {"type", "image"}},
+		"foto.jpg", "image/jpeg", []byte("jpeg"), nil)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusConflict)
+	}
+	if code := errorCode(t, rec.Body.Bytes()); code != "conflict" {
+		t.Errorf("error code = %q, want conflict", code)
+	}
+}
+
+func TestSendMediaReplayThroughServer(t *testing.T) {
+	id := uuid.New()
+	messageID := uuid.New()
+	store := &fakeMediaStore{}
+	svc := &fakeMessageService{enqueueFn: func(context.Context, uuid.UUID, message.EnqueueInput) (uuid.UUID, error) {
+		return messageID, nil
+	}}
+	srv := mediaUploadServer(t, svc, store, newFakeIdempotency())
+	fields := [][2]string{{"to", "5547988359190"}, {"type", "image"}, {"caption", "olha"}}
+	headers := map[string]string{idempotencyKeyHeader: "key-1"}
+
+	first := serveMediaUpload(t, srv, id, fields, "foto.jpg", "image/jpeg", []byte("bytes"), headers)
+	second := serveMediaUpload(t, srv, id, fields, "foto.jpg", "image/jpeg", []byte("bytes"), headers)
+
+	if first.Code != http.StatusAccepted || second.Code != http.StatusAccepted {
+		t.Fatalf("statuses = %d and %d, want %d for both", first.Code, second.Code, http.StatusAccepted)
+	}
+	if second.Body.String() != first.Body.String() {
+		t.Errorf("replay body = %q, want the original %q", second.Body.String(), first.Body.String())
+	}
+	if got := second.Header().Get(idempotentReplayHeader); got != "true" {
+		t.Errorf("%s = %q, want true", idempotentReplayHeader, got)
+	}
+	if len(store.saveCalls) != 1 {
+		t.Errorf("Save calls = %d, want 1 for a replayed send", len(store.saveCalls))
+	}
+	if len(svc.enqueueCalls) != 1 {
+		t.Errorf("Enqueue calls = %d, want 1 for a replayed send", len(svc.enqueueCalls))
+	}
+}
+
+func TestSendMediaSameKeyDifferentFileRejected(t *testing.T) {
+	id := uuid.New()
+	store := &fakeMediaStore{}
+	svc := &fakeMessageService{}
+	srv := mediaUploadServer(t, svc, store, newFakeIdempotency())
+	fields := [][2]string{{"to", "5547988359190"}, {"type", "image"}, {"caption", "olha"}}
+	headers := map[string]string{idempotencyKeyHeader: "key-1"}
+
+	first := serveMediaUpload(t, srv, id, fields, "foto.jpg", "image/jpeg", []byte("primeira"), headers)
+	second := serveMediaUpload(t, srv, id, fields, "foto.jpg", "image/jpeg", []byte("segunda"), headers)
+
+	if first.Code != http.StatusAccepted {
+		t.Fatalf("first status = %d, want %d", first.Code, http.StatusAccepted)
+	}
+	if second.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want %d for a reused key with a different file", second.Code, http.StatusUnprocessableEntity)
+	}
+	if len(store.saveCalls) != 1 || len(svc.enqueueCalls) != 1 {
+		t.Errorf("Save calls = %d, Enqueue calls = %d, want only the first send",
+			len(store.saveCalls), len(svc.enqueueCalls))
 	}
 }

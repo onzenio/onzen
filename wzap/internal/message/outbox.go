@@ -75,11 +75,13 @@ type Outbox struct {
 
 // NewOutbox builds the outbox over its dependencies. A nil logger falls back
 // to the default one, a nil locker to a fresh one and a non-positive worker
-// count to a single worker. Humanization stays off unless humanize is true.
+// count to a single worker. Humanization stays off unless humanize is true; a
+// nil media resolver leaves media messages unsupported.
 func NewOutbox(
 	repo OutboxStore,
 	manager session.Manager,
 	writer events.Writer,
+	media MediaPathResolver,
 	log *slog.Logger,
 	workers int,
 	lock *instancelock.Locker,
@@ -101,7 +103,7 @@ func NewOutbox(
 		log:              log,
 		workers:          workers,
 		lock:             lock,
-		senders:          defaultSenders(),
+		senders:          defaultSenders(media),
 		humanizer:        Humanizer{Enabled: humanize},
 		batchSize:        defaultOutboxBatchSize,
 		pollInterval:     defaultOutboxPollInterval,
@@ -228,11 +230,7 @@ func (o *Outbox) process(ctx context.Context, msg model.OutboundMessage) {
 		return
 	}
 
-	whatsappID, err := sender.Send(ctx, sess, session.OutboundMessage{
-		Type:         msg.Type,
-		RecipientJID: msg.RecipientJID,
-		Payload:      msg.Payload,
-	})
+	whatsappID, err := sender.Send(ctx, sess, msg)
 	if err != nil {
 		o.handleSendError(ctx, msg, err)
 		return
