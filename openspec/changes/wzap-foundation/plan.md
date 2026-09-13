@@ -20,7 +20,7 @@
 - Autenticação: `Authorization: Bearer <WZAP_SERVICE_TOKEN>` com comparação constant-time; `401` sem detalhes. Exceto `/healthz` e `/readyz`.
 - Idempotência de envio: `Idempotency-Key` opcional; TTL 24h; replay devolve a resposta original com `X-Idempotent-Replay: true`; `409` em andamento; `422` mesmo key/conteúdo diferente.
 - Eventos: stream `WZAP`, subjects `wzap.instances.{id}.{connection|message|receipt|message.status}`, envelope `{event_id,event_version,type,instance_id,occurred_at,payload}`, `Nats-Msg-Id = event_id`, publicação via `event_outbox` (at-least-once).
-- Banco `onefisc_wzap`; migrations goose em `wzap/internal/storage/migrations/`; tabelas `instances`, `outbound_messages`, `idempotency_keys`, `jid_cache`, `media`, `event_outbox`.
+- Banco `onefisc_wzap`; migrations goose em `wzap/internal/storage/migrations/`; tabelas `instances`, `message_queue`, `idempotency_keys`, `contacts`, `media`, `event_outbox` (núcleo com nomes/shape do apime).
 - Uma réplica por desenho; lock por instância em memória; recuperação de mensagens presas no boot.
 - Commits convencionais com escopo `wzap` (`feat(wzap): ...`, `fix(wzap): ...`, `chore(wzap): ...`). **Nunca** commite `AGENTS.md`, `CONTEXT.md` ou qualquer arquivo fora de `wzap/` e do change folder.
 - TDD: teste que falha primeiro; sem código antes do teste. `gofmt` obrigatório; `golangci-lint run` limpo.
@@ -82,45 +82,45 @@ CREATE TABLE instances (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
-CREATE TABLE outbound_messages (
+CREATE TABLE message_queue (
   id uuid PRIMARY KEY,
   instance_id uuid NOT NULL REFERENCES instances(id) ON DELETE CASCADE,
+  recipient text NOT NULL,
   type text NOT NULL,
-  recipient_jid text NOT NULL,
   payload jsonb NOT NULL DEFAULT '{}',
-  media_id uuid,
   status text NOT NULL DEFAULT 'queued',
-  whatsapp_message_id text,
-  attempts int NOT NULL DEFAULT 0,
+  retries int NOT NULL DEFAULT 0,
   last_error text,
-  next_attempt_at timestamptz,
+  whatsapp_id text,
   delivered_at timestamptz,
-  read_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now()
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  media_id uuid,
+  next_attempt_at timestamptz,
+  read_at timestamptz
 );
-CREATE INDEX outbound_messages_instance_status_idx ON outbound_messages (instance_id, status);
-CREATE INDEX outbound_messages_created_idx ON outbound_messages (created_at);
-CREATE INDEX outbound_messages_wa_id_idx ON outbound_messages (whatsapp_message_id);
+CREATE INDEX message_queue_instance_status_idx ON message_queue (instance_id, status);
+CREATE INDEX message_queue_created_idx ON message_queue (created_at);
+CREATE INDEX message_queue_wa_id_idx ON message_queue (whatsapp_id);
 CREATE TABLE idempotency_keys (
   instance_id uuid NOT NULL REFERENCES instances(id) ON DELETE CASCADE,
-  key text NOT NULL,
-  request_fingerprint text NOT NULL,
+  idempotency_key text NOT NULL,
+  request_hash text NOT NULL,
   status text NOT NULL,
   response_status int,
   response_body jsonb,
   created_at timestamptz NOT NULL DEFAULT now(),
   expires_at timestamptz NOT NULL,
-  PRIMARY KEY (instance_id, key)
+  PRIMARY KEY (instance_id, idempotency_key)
 );
 CREATE INDEX idempotency_keys_expires_idx ON idempotency_keys (expires_at);
-CREATE TABLE jid_cache (
+CREATE TABLE contacts (
   phone text PRIMARY KEY,
   jid text NOT NULL,
   expires_at timestamptz NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX jid_cache_expires_idx ON jid_cache (expires_at);
+CREATE INDEX contacts_expires_idx ON contacts (expires_at);
 CREATE TABLE media (
   id uuid PRIMARY KEY,
   instance_id uuid NOT NULL REFERENCES instances(id) ON DELETE CASCADE,
@@ -161,7 +161,7 @@ CREATE INDEX event_outbox_pending_idx ON event_outbox (created_at) WHERE publish
 - Create: `wzap/internal/model/model.go`, `wzap/internal/storage/repository.go`, `wzap/internal/storage/postgres/instances.go`, `wzap/internal/storage/postgres/messages.go`, `wzap/internal/storage/postgres/instances_test.go`, `wzap/internal/storage/postgres/messages_test.go`
 
 **Interfaces:**
-- Produces (tipos em `model`): `Instance{ID uuid.UUID, Name, ExternalRef, Status, WhatsAppJID, LastError string; LastConnectedAt *time.Time; CreatedAt, UpdatedAt time.Time}`; `OutboundMessage{ID, InstanceID uuid.UUID; Type, RecipientJID string; Payload []byte; MediaID *uuid.UUID; Status, WhatsAppMessageID, LastError string; Attempts int; DeliveredAt, ReadAt *time.Time; CreatedAt, UpdatedAt time.Time}`.
+- Produces (tipos em `model`): `Instance{ID uuid.UUID, Name, ExternalRef, Status, WhatsAppJID, LastError string; LastConnectedAt *time.Time; CreatedAt, UpdatedAt time.Time}`; `OutboundMessage{ID, InstanceID uuid.UUID; Type, RecipientJID string; Payload []byte; MediaID *uuid.UUID; Status, WhatsAppMessageID, LastError string; Attempts int; DeliveredAt, ReadAt *time.Time; CreatedAt, UpdatedAt time.Time}`. Os campos Go mapeiam as colunas com shape do apime: `RecipientJID`→`recipient`, `Attempts`→`retries`, `WhatsAppMessageID`→`whatsapp_id`.
 - Produces (interfaces em `storage`): `InstanceRepository{Create,Get,GetByExternalRef,List(limit,cursor),Update,Delete}`; `MessageRepository{Create,Get,ListByInstance,ClaimQueued(limit),MarkSent,MarkFailed,MarkRetrying,UpdateReceipt,RequeueStuck}`.
 - `ClaimQueued` usa `SELECT ... WHERE status='queued' AND (next_attempt_at IS NULL OR next_attempt_at <= now()) ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT $1` dentro de transação e marca `sending` antes do commit.
 
@@ -182,7 +182,7 @@ CREATE INDEX event_outbox_pending_idx ON event_outbox (created_at) WHERE publish
 
 **Interfaces:**
 - `IdempotencyRepository{Acquire(ctx, instanceID, key, fingerprint, expiresAt) (record *model.IdempotencyRecord, acquired bool, err error); Complete(ctx, instanceID, key, status int, body []byte) error; Release(ctx, instanceID, key) error; DeleteExpired(ctx) (int64, error)}` — `Acquire` com `INSERT ... ON CONFLICT DO NOTHING` + `SELECT`; conflito com mesmo fingerprint e `completed` retorna o registro; fingerprint diferente retorna erro sentinel `storage.ErrFingerprintMismatch`; em andamento retorna `storage.ErrInProgress`.
-- `JIDCacheRepository{Get(ctx, phone) (jid string, ok bool, err error); Put(ctx, phone, jid, expiresAt) error; DeleteExpired(ctx) (int64, error)}`.
+- `JIDCacheRepository{Get(ctx, phone) (jid string, ok bool, err error); Put(ctx, phone, jid, expiresAt) error; DeleteExpired(ctx) (int64, error)}` (tabela `contacts`, colunas `phone`/`jid`/`expires_at`).
 - `EventOutboxRepository{Enqueue(ctx, id, subject, envelope []byte) error; ClaimPending(ctx, limit) ([]model.OutboxEvent, error); MarkPublished(ctx, id) error; MarkAttempt(ctx, id, errMsg) error; DeletePublishedBefore(ctx, t) (int64, error)}`.
 
 - [ ] **Step 1: Testes de integração** cobrindo corrida de `Acquire` (duas goroutines, só uma adquire), replay, mismatch, expiração; `ClaimPending` concorrente; `MarkPublished`.
@@ -319,7 +319,7 @@ CREATE INDEX event_outbox_pending_idx ON event_outbox (created_at) WHERE publish
 
 **Interfaces:**
 - Produces: middleware `Idempotency(repo, log)` envolvendo apenas os POSTs de envio: primeiro request adquire (`in_progress`), captura status+body, completa (TTL 24h); replay repete a resposta com `X-Idempotent-Replay: true`; em andamento → `409`; fingerprint diferente → `422`; 4xx libera a key; 5xx mantém; multipart usa fingerprint de método+rota+campos de texto (arquivo não entra no hash — limitação documentada).
-- Produces: `message.Service{Enqueue(ctx, instanceID uuid.UUID, input EnqueueInput) (uuid.UUID, error)}` com `EnqueueInput{Type, To, Text, Caption, Filename, PTT bool, Latitude, Longitude float64, DisplayName, VCard string, MediaID *uuid.UUID}`; valida instância conectada (`ErrInstanceNotConnected` → 409), resolve JID, insere `outbound_messages(queued)`, retorna id.
+- Produces: `message.Service{Enqueue(ctx, instanceID uuid.UUID, input EnqueueInput) (uuid.UUID, error)}` com `EnqueueInput{Type, To, Text, Caption, Filename, PTT bool, Latitude, Longitude float64, DisplayName, VCard string, MediaID *uuid.UUID}`; valida instância conectada (`ErrInstanceNotConnected` → 409), resolve JID, insere `message_queue(queued)`, retorna id.
 - REST: `POST /api/v1/instances/{id}/messages/{text,location,contact,media}` → 202 `{message_id,status:"queued"}`; `GET /api/v1/instances/{id}/messages/{message_id}` → 200; `GET /api/v1/instances/{id}/messages` → 200 paginado.
 
 - [ ] **Step 1: Testes unitários do middleware** com repo fake: sem key passa direto; primeiro request completa e grava; replay devolve body e header; in-flight 409; mismatch 422; 4xx libera key.
@@ -337,7 +337,7 @@ CREATE INDEX event_outbox_pending_idx ON event_outbox (created_at) WHERE publish
 - Produces: `message.Outbox{repo, manager, writer, log, workers int, lock *instance.Locker}` com `Run(ctx)`; `StartRecovery` chamando `RequeueStuck` no boot (threshold 5min).
 - `message.Sender` interface `{Send(ctx, sess session.Session, msg session.OutboundMessage) (string, error)}`; implementações `textSender`, `locationSender`, `contactSender` (dispatched por `Type`).
 - Erros de sessão: `session.ErrTransient` (retry), `session.ErrNotConnected` (falha definitiva, status `error`), `session.ErrInvalidRecipient` (falha definitiva).
-- `ClaimQueued` respeita `next_attempt_at`; falha transitória atualiza `next_attempt_at = now + 2^attempts segundos` (teto 2min) e volta `queued`; `attempts >= 5` → `failed`.
+- `ClaimQueued` respeita `next_attempt_at`; falha transitória atualiza `next_attempt_at = now + 2^retries segundos` (teto 2min) e volta `queued`; `retries >= 5` → `failed`.
 - Evento `message.status` gravado no outbox em `sent` e `failed`.
 
 - [ ] **Step 1: Testes do worker** com repo/manager fakes: processa lote, marca `sending→sent`; erro transitório reagenda com `next_attempt_at` crescente; após 5 tentativas vira `failed`; instância desconectada falha definitivo; recuperação devolve `sending` antigo para `queued`.
@@ -352,7 +352,7 @@ CREATE INDEX event_outbox_pending_idx ON event_outbox (created_at) WHERE publish
 - Create: `wzap/internal/message/receipts.go`, `receipts_test.go`, `humanize.go`, `humanize_test.go`; Modify: `internal/app/runtime.go`, `internal/session/session.go` (adicionar `SendPresence`)
 
 **Interfaces:**
-- Produces: `message.Receipts{repo, writer}.Apply(ctx, r session.Receipt) error` — `delivered`/`read`/`played` atualizam `delivered_at`/`read_at` e gravam evento `receipt` correlacionando `whatsapp_message_id`.
+- Produces: `message.Receipts{repo, writer}.Apply(ctx, r session.Receipt) error` — `delivered`/`read`/`played` atualizam `delivered_at`/`read_at` e gravam evento `receipt` correlacionando `whatsapp_id`.
 - Produces: `message.Humanizer{Sleep func(ctx, d); Rand}` com `PresenceFor(msgType, textLen, mediaBytes int, firstContact bool) time.Duration` (texto ~40ms/char com teto 8s; áudio teto 15s; mídia por tamanho; primeiro contato +1.5–2.5s) e `BeforeSend(ctx, sess, chatJID, d)` enviando presença `composing`/`paused`; `Enabled=false` não dorme.
 - `session.Session` ganha `SendPresence(ctx, chatJID, state string) error`.
 

@@ -48,6 +48,10 @@ via sqlstore. Migrations SQL embutidas, aplicadas no boot quando habilitado.
 
 - **Por quê**: um só banco reduz partes móveis, permite transações do outbox e
   o `FOR UPDATE SKIP LOCKED`; sqlstore evita arquivos de sessão por instância.
+- **Alinhamento com a base**: decisão do humano (2026-09-13) de manter o núcleo
+  de dados com os nomes/shape das migrations finais do apime (`message_queue`,
+  `contacts`, `idempotency_keys` com `idempotency_key`/`request_hash`), já que
+  ele é a base do serviço; a similaridade facilita portar consultas e funções.
 - **Alternativas**: SQLite (duplicaria implementações, sem lock entre processos,
   e CGO); runner de migrations caseiro (frágil, como observado no apime).
 

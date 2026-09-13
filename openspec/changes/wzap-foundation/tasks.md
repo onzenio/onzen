@@ -7,7 +7,7 @@
 
 ## 2. Persistência
 
-- [ ] 2.1 Criar as migrations iniciais (`instances`, `outbound_messages`, `idempotency_keys`, `jid_cache`, `media`, `event_outbox`), verificando aplicação em banco limpo
+- [ ] 2.1 Criar as migrations iniciais (`instances`, `message_queue`, `idempotency_keys`, `contacts`, `media`, `event_outbox`), verificando aplicação em banco limpo
 - [ ] 2.2 Implementar repositórios de instância e de mensagem, verificando testes de integração contra Postgres
 - [ ] 2.3 Implementar repositório de idempotência com aquisição atômica e expiração, verificando testes de corrida, replay e expiração
 - [ ] 2.4 Implementar cache de JID e repositório do outbox de eventos, verificando testes de expiração e de pendências
