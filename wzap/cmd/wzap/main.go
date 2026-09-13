@@ -22,6 +22,7 @@ import (
 	"onefisc/wzap/internal/httpapi"
 	"onefisc/wzap/internal/instance"
 	"onefisc/wzap/internal/instancelock"
+	"onefisc/wzap/internal/media"
 	"onefisc/wzap/internal/message"
 	"onefisc/wzap/internal/session/whatsmeow"
 	"onefisc/wzap/internal/storage/postgres"
@@ -122,6 +123,8 @@ func serve() error {
 	messageRepo := postgres.NewMessageRepository(pool)
 	idempotencyRepo := postgres.NewIdempotencyRepository(pool)
 	outbox := postgres.NewEventOutboxRepository(pool)
+	mediaStorage := media.NewStorage(cfg.DataDir, postgres.NewMediaRepository(pool),
+		cfg.MaxMediaBytes, time.Duration(cfg.MediaTTLSeconds)*time.Second)
 	relay := events.NewRelay(outbox, publisher, log, cfg.EventRetentionDays)
 	checker := httpapi.NewChecker(pool, httpapi.NamedProbe{Name: "nats", Run: publisher.Ready})
 
@@ -133,7 +136,7 @@ func serve() error {
 	}
 	defer func() { _ = sessions.Close() }()
 
-	service := instance.NewService(instances, sessions, nil)
+	service := instance.NewService(instances, sessions, mediaStorage)
 	numbers := message.NewJIDResolver(sessions, postgres.NewJIDCacheRepository(pool), log)
 	messages := message.NewService(instances, numbers, messageRepo)
 
@@ -156,6 +159,7 @@ func serve() error {
 		Numbers:      numbers,
 		Messages:     messages,
 		Idempotency:  idempotencyRepo,
+		Media:        mediaStorage,
 	})
 
 	outboxCtx, stopOutbox := context.WithCancel(ctx)
@@ -174,6 +178,15 @@ func serve() error {
 		relay.Run(relayCtx)
 	}()
 
+	cleaner := media.NewCleaner(mediaStorage, log)
+	cleanerCtx, stopCleaner := context.WithCancel(ctx)
+	defer stopCleaner()
+	cleanerDone := make(chan struct{})
+	go func() {
+		defer close(cleanerDone)
+		cleaner.Run(cleanerCtx)
+	}()
+
 	log.Info("wzap listening", "version", version.Version, "addr", cfg.HTTPAddr)
 
 	serveErr := make(chan error, 1)
@@ -187,6 +200,8 @@ func serve() error {
 	case err := <-serveErr:
 		stopOutbox()
 		<-outboxDone
+		stopCleaner()
+		<-cleanerDone
 		stopRelay()
 		<-relayDone
 		return fmt.Errorf("serve http: %w", err)
@@ -200,6 +215,8 @@ func serve() error {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		stopOutbox()
 		<-outboxDone
+		stopCleaner()
+		<-cleanerDone
 		stopRelay()
 		<-relayDone
 		return fmt.Errorf("shutdown http server: %w", err)
@@ -210,6 +227,8 @@ func serve() error {
 	// events those requests and the outbox enqueued.
 	stopOutbox()
 	<-outboxDone
+	stopCleaner()
+	<-cleanerDone
 	stopRelay()
 	<-relayDone
 

@@ -39,6 +39,23 @@ type OutboundMessage struct {
 	UpdatedAt         time.Time
 }
 
+// Media is a stored media object. Its bytes live on the filesystem at
+// StoragePath, relative to the configured data dir; the row keeps the metadata
+// and the checksum of the content.
+type Media struct {
+	ID          uuid.UUID
+	InstanceID  uuid.UUID
+	Direction   string
+	MessageID   string
+	Mimetype    string
+	Filename    string
+	SizeBytes   int64
+	StoragePath string
+	SHA256      string
+	CreatedAt   time.Time
+	ExpiresAt   time.Time
+}
+
 // IdempotencyRecord is the stored outcome of a request accepted under an
 // idempotency key. Status is "in_progress" while the original request runs and
 // "completed" once its response was captured. ResponseStatus and ResponseBody

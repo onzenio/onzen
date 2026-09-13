@@ -65,6 +65,27 @@ type MessageRepository interface {
 	RequeueStuck(ctx context.Context, olderThan time.Time) (int64, error)
 }
 
+// MediaRepository persists media metadata. The content itself lives on the
+// filesystem: StoragePath locates it relative to the configured data dir.
+// ListByInstance and ListExpired return the rows so the caller can delete the
+// files before removing the records.
+type MediaRepository interface {
+	// Create persists media with the provided ExpiresAt and returns the stored
+	// row with the database created_at. It returns ErrNotFound when the
+	// instance does not exist.
+	Create(ctx context.Context, media model.Media) (*model.Media, error)
+	// Get returns the media with the given id or ErrNotFound.
+	Get(ctx context.Context, id uuid.UUID) (*model.Media, error)
+	// ListByInstance returns every media of instanceID ordered by created_at.
+	ListByInstance(ctx context.Context, instanceID uuid.UUID) ([]model.Media, error)
+	// ListExpired returns the media whose expires_at is due, oldest first.
+	ListExpired(ctx context.Context, now time.Time) ([]model.Media, error)
+	// Delete removes one media row. It returns ErrNotFound when it is absent.
+	Delete(ctx context.Context, id uuid.UUID) error
+	// DeleteByInstance removes every media row of instanceID.
+	DeleteByInstance(ctx context.Context, instanceID uuid.UUID) (int64, error)
+}
+
 // IdempotencyRepository persists request outcomes keyed by
 // (instance, Idempotency-Key).
 type IdempotencyRepository interface {

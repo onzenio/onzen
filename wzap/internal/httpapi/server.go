@@ -26,6 +26,7 @@ type Deps struct {
 	Numbers      NumberResolver
 	Messages     MessageService
 	Idempotency  storage.IdempotencyRepository
+	Media        MediaStore
 }
 
 // New builds the HTTP server with the middleware chain, the health endpoints
@@ -51,6 +52,7 @@ func New(cfg config.Config, log *slog.Logger, deps Deps) *http.Server {
 	api.Handle("POST /api/v1/instances/{id}/messages/contact", Idempotency(deps.Idempotency, log)(handleSendContact(deps.Messages)))
 	api.HandleFunc("GET /api/v1/instances/{id}/messages", handleListMessages(deps.Messages))
 	api.HandleFunc("GET /api/v1/instances/{id}/messages/{message_id}", handleGetMessage(deps.Messages))
+	api.HandleFunc("GET /api/v1/media/{id}", handleGetMedia(deps.Media))
 	mux.Handle("/api/v1/", Auth(cfg.ServiceToken)(api))
 
 	return &http.Server{
