@@ -8,7 +8,11 @@ O wzap contém lógica adaptada de projetos de terceiros sob as licenças abaixo
 - Licença: MIT
 - Trechos: a semântica de idempotência de envio, a normalização de JID
   (incluindo a regra do 9º dígito brasileiro) e a matemática de humanização
-  podem ser adaptadas deste projeto, reescritas para a arquitetura do wzap.
+  foram adaptadas deste projeto, reescritas em Go próprio para a arquitetura
+  do wzap. A humanização mantém os tetos do estudo (texto ~40 ms por caractere
+  com teto de 8 s, áudio com teto de 15 s, mídia por tamanho com teto de 8 s e
+  acréscimo de 1,5–2,5 s no primeiro contato), mas não reproduz as micropausas
+  de digitação nem o jitter gaussiano.
 
 ### Licença
 

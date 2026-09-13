@@ -1,9 +1,12 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -114,7 +117,7 @@ func TestRuntimeOnConnectionUpdatesInstanceAndEnqueuesEvent(t *testing.T) {
 		WhatsAppJID: "5511@wa", LastError: "old failure",
 	})
 	writer := &fakeWriter{}
-	runtime := NewRuntime(repo, writer, nil)
+	runtime := NewRuntime(repo, writer, nil, nil)
 
 	runtime.OnConnection(context.Background(), id, session.StatusConnected, "5511999999999@s.whatsapp.net", "")
 
@@ -165,7 +168,7 @@ func TestRuntimeOnConnectionFailureRecordsReason(t *testing.T) {
 		WhatsAppJID: "5511@wa", LastConnectedAt: &connectedAt,
 	})
 	writer := &fakeWriter{}
-	runtime := NewRuntime(repo, writer, nil)
+	runtime := NewRuntime(repo, writer, nil, nil)
 
 	runtime.OnConnection(context.Background(), id, session.StatusError, "", "temporary ban")
 
@@ -191,7 +194,7 @@ func TestRuntimeOnConnectionFailureRecordsReason(t *testing.T) {
 
 func TestRuntimeOnConnectionUnknownInstanceSkipsEvent(t *testing.T) {
 	writer := &fakeWriter{}
-	runtime := NewRuntime(newRuntimeRepo(), writer, nil)
+	runtime := NewRuntime(newRuntimeRepo(), writer, nil, nil)
 
 	runtime.OnConnection(context.Background(), uuid.New(), session.StatusConnected, "5511@wa", "")
 
@@ -205,7 +208,7 @@ func TestRuntimeOnConnectionUpdateFailureSkipsEvent(t *testing.T) {
 	repo := newRuntimeRepo(model.Instance{ID: id, Status: string(session.StatusDisconnected)})
 	repo.updateErr = errors.New("database down")
 	writer := &fakeWriter{}
-	runtime := NewRuntime(repo, writer, nil)
+	runtime := NewRuntime(repo, writer, nil, nil)
 
 	runtime.OnConnection(context.Background(), id, session.StatusConnected, "5511@wa", "")
 
@@ -215,4 +218,53 @@ func TestRuntimeOnConnectionUpdateFailureSkipsEvent(t *testing.T) {
 	if stored := repo.instances[id]; stored.Status != string(session.StatusDisconnected) {
 		t.Errorf("stored status = %q, want the unchanged %q", stored.Status, session.StatusDisconnected)
 	}
+}
+
+// fakeReceiptApplier records the receipts handed to the runtime.
+type fakeReceiptApplier struct {
+	applied []session.Receipt
+	err     error
+}
+
+func (f *fakeReceiptApplier) Apply(_ context.Context, receipt session.Receipt) error {
+	f.applied = append(f.applied, receipt)
+	return f.err
+}
+
+func TestRuntimeOnReceiptAppliesReceipt(t *testing.T) {
+	id := uuid.New()
+	applier := &fakeReceiptApplier{}
+	runtime := NewRuntime(newRuntimeRepo(), &fakeWriter{}, applier, nil)
+	receipt := session.Receipt{
+		InstanceID: id,
+		MessageIDs: []string{"wamid.1"},
+		Status:     "read",
+	}
+
+	runtime.OnReceipt(context.Background(), receipt)
+
+	if len(applier.applied) != 1 {
+		t.Fatalf("applied receipts = %d, want 1", len(applier.applied))
+	}
+	if applier.applied[0].InstanceID != id || applier.applied[0].MessageIDs[0] != "wamid.1" {
+		t.Errorf("applied receipt = %+v, want the session receipt", applier.applied[0])
+	}
+}
+
+func TestRuntimeOnReceiptFailureIsLogged(t *testing.T) {
+	var logs bytes.Buffer
+	applier := &fakeReceiptApplier{err: errors.New("database down")}
+	runtime := NewRuntime(newRuntimeRepo(), &fakeWriter{}, applier, slog.New(slog.NewTextHandler(&logs, nil)))
+
+	runtime.OnReceipt(context.Background(), session.Receipt{InstanceID: uuid.New(), MessageIDs: []string{"wamid.1"}})
+
+	if !strings.Contains(logs.String(), "apply receipt") || !strings.Contains(logs.String(), "database down") {
+		t.Errorf("logs = %q, want the receipt failure", logs.String())
+	}
+}
+
+func TestRuntimeOnReceiptWithoutApplierIsNoOp(t *testing.T) {
+	runtime := NewRuntime(newRuntimeRepo(), &fakeWriter{}, nil, nil)
+
+	runtime.OnReceipt(context.Background(), session.Receipt{InstanceID: uuid.New(), MessageIDs: []string{"wamid.1"}})
 }

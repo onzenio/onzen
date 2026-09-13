@@ -2,6 +2,7 @@ package message
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -56,13 +57,14 @@ var _ OutboxStore = (storage.MessageRepository)(nil)
 // workers. Messages of the same instance are serialized by the per-instance
 // lock; different instances are delivered in parallel.
 type Outbox struct {
-	repo    OutboxStore
-	manager session.Manager
-	writer  events.Writer
-	log     *slog.Logger
-	workers int
-	lock    *instancelock.Locker
-	senders map[string]Sender
+	repo      OutboxStore
+	manager   session.Manager
+	writer    events.Writer
+	log       *slog.Logger
+	workers   int
+	lock      *instancelock.Locker
+	senders   map[string]Sender
+	humanizer Humanizer
 
 	batchSize        int
 	pollInterval     time.Duration
@@ -73,7 +75,7 @@ type Outbox struct {
 
 // NewOutbox builds the outbox over its dependencies. A nil logger falls back
 // to the default one, a nil locker to a fresh one and a non-positive worker
-// count to a single worker.
+// count to a single worker. Humanization stays off unless humanize is true.
 func NewOutbox(
 	repo OutboxStore,
 	manager session.Manager,
@@ -81,6 +83,7 @@ func NewOutbox(
 	log *slog.Logger,
 	workers int,
 	lock *instancelock.Locker,
+	humanize bool,
 ) *Outbox {
 	if log == nil {
 		log = slog.Default()
@@ -99,6 +102,7 @@ func NewOutbox(
 		workers:          workers,
 		lock:             lock,
 		senders:          defaultSenders(),
+		humanizer:        Humanizer{Enabled: humanize},
 		batchSize:        defaultOutboxBatchSize,
 		pollInterval:     defaultOutboxPollInterval,
 		recoveryInterval: defaultOutboxRecoveryInterval,
@@ -219,6 +223,11 @@ func (o *Outbox) process(ctx context.Context, msg model.OutboundMessage) {
 		return
 	}
 
+	if err := o.simulatePresence(ctx, sess, msg); err != nil {
+		o.handleSendError(ctx, msg, err)
+		return
+	}
+
 	whatsappID, err := sender.Send(ctx, sess, session.OutboundMessage{
 		Type:         msg.Type,
 		RecipientJID: msg.RecipientJID,
@@ -230,6 +239,29 @@ func (o *Outbox) process(ctx context.Context, msg model.OutboundMessage) {
 	}
 
 	o.complete(ctx, msg, whatsappID)
+}
+
+// simulatePresence types before the send when humanization is enabled. v1 keeps
+// no inbound history, so a send cannot be told apart from an open conversation;
+// the delay always uses the open-conversation profile, and first contact stays
+// available for when that signal exists. The media size arrives with the media
+// pipeline, so media messages currently use the base delay only.
+func (o *Outbox) simulatePresence(ctx context.Context, sess session.Session, msg model.OutboundMessage) error {
+	delay := o.humanizer.PresenceFor(msg.Type, contentTextLen(msg.Type, msg.Payload), 0, false)
+	return o.humanizer.BeforeSend(ctx, sess, msg.RecipientJID, delay)
+}
+
+// contentTextLen returns the typing budget of a stored payload: the length of a
+// text message, zero for the other types.
+func contentTextLen(msgType string, payload []byte) int {
+	if msgType != TypeText {
+		return 0
+	}
+	var body textPayload
+	if err := json.Unmarshal(payload, &body); err != nil {
+		return 0
+	}
+	return len(body.Text)
 }
 
 // handleSendError retries a transient failure with exponential backoff while

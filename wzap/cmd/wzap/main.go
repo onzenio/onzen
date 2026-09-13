@@ -125,7 +125,8 @@ func serve() error {
 	relay := events.NewRelay(outbox, publisher, log, cfg.EventRetentionDays)
 	checker := httpapi.NewChecker(pool, httpapi.NamedProbe{Name: "nats", Run: publisher.Ready})
 
-	runtime := app.NewRuntime(instances, events.NewWriter(outbox), log)
+	eventWriter := events.NewWriter(outbox)
+	runtime := app.NewRuntime(instances, eventWriter, message.NewReceipts(messageRepo, eventWriter), log)
 	sessions, err := whatsmeow.NewManager(ctx, cfg.DatabaseURL, instances, log, runtime)
 	if err != nil {
 		return fmt.Errorf("session manager: %w", err)
@@ -147,7 +148,7 @@ func serve() error {
 		log.Warn("restore sessions not completed", "error", restoreErr)
 	}
 
-	outboxWorker := message.NewOutbox(messageRepo, sessions, events.NewWriter(outbox), log, cfg.OutboxWorkers, instancelock.New())
+	outboxWorker := message.NewOutbox(messageRepo, sessions, eventWriter, log, cfg.OutboxWorkers, instancelock.New(), cfg.Humanize)
 
 	srv := httpapi.New(cfg, log, httpapi.Deps{
 		ReadyChecker: checker,

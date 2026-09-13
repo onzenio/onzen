@@ -220,8 +220,9 @@ func newOutboxFixture(messages ...model.OutboundMessage) *outboxFixture {
 		now:      time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC),
 	}
 	// One worker keeps the claim/process order deterministic; the worker pool
-	// concurrency itself is covered by the locker tests.
-	fixture.outbox = NewOutbox(fixture.repo, manager, fixture.writer, discardLogger(), 1, instancelock.New())
+	// concurrency itself is covered by the locker tests. Humanization stays
+	// off unless a test enables it explicitly.
+	fixture.outbox = NewOutbox(fixture.repo, manager, fixture.writer, discardLogger(), 1, instancelock.New(), false)
 	fixture.outbox.now = func() time.Time { return fixture.now }
 	return fixture
 }
@@ -501,6 +502,80 @@ func TestOutboxInvalidPayloadFailsDefinitively(t *testing.T) {
 	}
 	if len(fixture.session.SendCalls()) != 0 {
 		t.Error("session was called with an empty text payload")
+	}
+}
+
+func TestOutboxHumanizeSimulatesPresenceBeforeSend(t *testing.T) {
+	fixture := newOutboxFixture(textMessage(uuid.Nil, 0))
+	fixture.repo.queue[0].Payload = []byte(`{"text":"` + strings.Repeat("a", 100) + `"}`)
+
+	var sleeps []time.Duration
+	fixture.outbox.humanizer = Humanizer{
+		Enabled: true,
+		Sleep: func(_ context.Context, d time.Duration) error {
+			if len(fixture.session.SendCalls()) != 0 {
+				t.Error("the message was sent before the presence simulation finished")
+			}
+			sleeps = append(sleeps, d)
+			return nil
+		},
+	}
+
+	runOutbox(t, fixture)
+
+	if len(sleeps) != 1 || sleeps[0] != 4*time.Second {
+		t.Errorf("humanizer sleeps = %v, want a single 4s wait for the 100-character text", sleeps)
+	}
+	presence := fixture.session.PresenceCalls()
+	if len(presence) != 2 {
+		t.Fatalf("presence calls = %d, want composing and paused", len(presence))
+	}
+	for i, want := range []string{"composing", "paused"} {
+		if presence[i].State != want || presence[i].ChatJID != "5547988359190@s.whatsapp.net" {
+			t.Errorf("presence[%d] = %+v, want %q on the target chat", i, presence[i], want)
+		}
+	}
+	if len(fixture.repo.sentIDs()) != 1 {
+		t.Errorf("sent = %d messages, want the humanized message delivered", len(fixture.repo.sentIDs()))
+	}
+}
+
+func TestOutboxHumanizeDisabledSkipsPresence(t *testing.T) {
+	fixture := newOutboxFixture(textMessage(uuid.Nil, 0))
+	slept := false
+	fixture.outbox.humanizer = Humanizer{Sleep: func(context.Context, time.Duration) error {
+		slept = true
+		return nil
+	}}
+
+	runOutbox(t, fixture)
+
+	if len(fixture.session.PresenceCalls()) != 0 {
+		t.Errorf("presence calls = %v, want none when humanization is disabled", fixture.session.PresenceCalls())
+	}
+	if slept {
+		t.Error("the humanizer slept while disabled")
+	}
+	if len(fixture.repo.sentIDs()) != 1 {
+		t.Errorf("sent = %d messages, want the message delivered", len(fixture.repo.sentIDs()))
+	}
+}
+
+func TestOutboxHumanizePresenceFailureRetries(t *testing.T) {
+	fixture := newOutboxFixture(textMessage(uuid.Nil, 0))
+	fixture.outbox.humanizer = Humanizer{Enabled: true, Sleep: func(context.Context, time.Duration) error { return nil }}
+	fixture.session.SendPresenceErr = fmt.Errorf("%w: presence failed", session.ErrTransient)
+
+	runOutbox(t, fixture)
+
+	if len(fixture.repo.retryCalls()) != 1 {
+		t.Fatalf("MarkRetrying calls = %d, want the transient presence failure retried", len(fixture.repo.retryCalls()))
+	}
+	if len(fixture.session.SendCalls()) != 0 {
+		t.Error("the message was sent despite the presence failure")
+	}
+	if len(fixture.repo.failedMessages()) != 0 {
+		t.Error("the message was failed on a retryable presence error")
 	}
 }
 
