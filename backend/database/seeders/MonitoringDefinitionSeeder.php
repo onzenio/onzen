@@ -28,6 +28,7 @@ class MonitoringDefinitionSeeder extends Seeder
                 'is_active' => true,
                 'requires_procuracao' => true,
                 'procuration_codes' => ['00146'],
+                'strategy' => MonitoringDefinition::STRATEGY_AUTOMATIC,
             ],
             [
                 'id' => 'regime-apuracao',
@@ -60,6 +61,7 @@ class MonitoringDefinitionSeeder extends Seeder
                 'default_enabled' => true,
                 'is_active' => true,
                 'requires_procuracao' => true,
+                'strategy' => MonitoringDefinition::STRATEGY_AUTOMATIC,
             ],
             [
                 'id' => 'situacao-fiscal',
@@ -70,6 +72,7 @@ class MonitoringDefinitionSeeder extends Seeder
                 'default_enabled' => false,
                 'is_active' => true,
                 'requires_procuracao' => true,
+                'strategy' => MonitoringDefinition::STRATEGY_AUTOMATIC,
             ],
         ];
 

@@ -129,6 +129,27 @@ final class QueryQuotaService
         ];
     }
 
+    /**
+     * Read-only ceiling check for replay paths.
+     *
+     * The scheduler uses it when a duplicate request meets an already
+     * `blocked/quota_exceeded` run: the same 422 upgrade message is repeated
+     * without writing a consumption. A caller that has room is left alone —
+     * the blocked run stays factual and a later minute mints a new key.
+     *
+     * @throws ValidationException
+     */
+    public function assertWithinLimit(Account $account): void
+    {
+        $period = $this->period();
+        $consumed = $this->consumedFor((int) $account->getKey(), $period);
+        $limit = $this->limitFor($account);
+
+        if ($consumed >= $limit) {
+            throw $this->exceeded($consumed, $limit, $period);
+        }
+    }
+
     private function consumedFor(int $accountId, string $period): int
     {
         return QueryQuotaConsumption::query()

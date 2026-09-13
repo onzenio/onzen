@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\MeController;
 use App\Http\Controllers\Api\MonitoringArtifactDownloadController;
 use App\Http\Controllers\Api\MonitoringEnrollmentController;
 use App\Http\Controllers\Api\MonitoringHealthController;
+use App\Http\Controllers\Api\MonitoringRunController;
 use App\Http\Controllers\Api\SerproAdminController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -33,6 +34,12 @@ Route::middleware('auth:sanctum')->group(function (): void {
 
     Route::delete('/monitoring/enrollments/{enrollment}', [MonitoringEnrollmentController::class, 'destroy'])
         ->name('monitoring.enrollments.destroy');
+
+    Route::post('/monitoring/enrollments/{enrollment}/run', [MonitoringRunController::class, 'run'])
+        ->name('monitoring.enrollments.run');
+
+    Route::post('/monitoring/sync', [MonitoringRunController::class, 'sync'])
+        ->name('monitoring.sync');
 
     Route::get('/admin/serpro', [SerproAdminController::class, 'show'])
         ->name('admin.serpro.show');

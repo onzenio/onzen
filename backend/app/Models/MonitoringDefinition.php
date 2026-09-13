@@ -50,6 +50,13 @@ class MonitoringDefinition extends Model
 
     public const STRATEGY_POLLING = 'polling';
 
+    /**
+     * Definitions eligible for the automatic monthly cycle. Only consult
+     * operations ever run with this strategy; every other definition stays
+     * manual-only.
+     */
+    public const STRATEGY_AUTOMATIC = 'automatic';
+
     public $incrementing = false;
 
     protected $keyType = 'string';

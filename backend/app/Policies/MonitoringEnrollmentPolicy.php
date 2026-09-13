@@ -38,4 +38,13 @@ class MonitoringEnrollmentPolicy
     {
         return $this->update($user, $enrollment);
     }
+
+    /**
+     * Triggering a manual execution follows the write rule: `admin`/`operator`
+     * (and super_admin) may run, `user` may not.
+     */
+    public function run(User $user, MonitoringEnrollment $enrollment): bool
+    {
+        return $this->update($user, $enrollment);
+    }
 }
