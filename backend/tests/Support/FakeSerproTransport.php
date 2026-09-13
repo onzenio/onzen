@@ -20,12 +20,17 @@ final class FakeSerproTransport implements SerproTransport
     /** @var list<array{path: string, envelope: array<string, mixed>, access_token: string, options: array<string, mixed>}> */
     public array $callCalls = [];
 
+    /** @var list<array{status: int, body: array<string, mixed>, headers?: array<string, mixed>}> */
+    public array $callResponses;
+
     /**
      * @param  list<array<string, mixed>>  $tokenResponses
+     * @param  list<array{status: int, body: array<string, mixed>, headers?: array<string, mixed>}>  $callResponses
      */
-    public function __construct(array $tokenResponses = [])
+    public function __construct(array $tokenResponses = [], array $callResponses = [])
     {
         $this->tokenResponses = $tokenResponses;
+        $this->callResponses = $callResponses;
     }
 
     public function token(array $credentials, string $environment): array
@@ -45,6 +50,6 @@ final class FakeSerproTransport implements SerproTransport
             'options' => $options,
         ];
 
-        return ['status' => 200, 'body' => []];
+        return array_shift($this->callResponses) ?? ['status' => 200, 'body' => []];
     }
 }
