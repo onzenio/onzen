@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\ClientCndController;
 use App\Http\Controllers\Api\MeController;
+use App\Http\Controllers\Api\MonitoringActionController;
 use App\Http\Controllers\Api\MonitoringAlertController;
 use App\Http\Controllers\Api\MonitoringArtifactDownloadController;
 use App\Http\Controllers\Api\MonitoringAuthorController;
@@ -90,6 +91,15 @@ Route::middleware('auth:sanctum')->group(function (): void {
 
     Route::get('/monitoring/parcelas/{installment}/pagamentos', [ParcelmentController::class, 'payments'])
         ->name('monitoring.parcelments.payments');
+
+    Route::post('/monitoring/enrollments/{enrollment}/gerar-das', [MonitoringActionController::class, 'generateDasForEnrollment'])
+        ->name('monitoring.enrollments.gerar-das');
+
+    Route::post('/monitoring/parcelas/{installment}/gerar-das', [MonitoringActionController::class, 'generateDasForInstallment'])
+        ->name('monitoring.parcelments.gerar-das');
+
+    Route::get('/monitoring/actions/{action}', [MonitoringActionController::class, 'show'])
+        ->name('monitoring.actions.show');
 
     Route::get('/monitoring/parcelas/{installment}/guia/download', [ParcelmentController::class, 'downloadGuide'])
         ->name('monitoring.parcelments.guide');

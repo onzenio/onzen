@@ -3,12 +3,15 @@
 namespace App\Support;
 
 use App\Models\MonitoringAlert;
+use App\Models\MonitoringArtifact;
 use App\Models\MonitoringChange;
 use App\Models\MonitoringRun;
 use App\Models\MonitoringSnapshot;
 use App\Models\ParcelmentInstallment;
 use App\Models\ParcelmentOrder;
 use App\Models\ParcelmentPayment;
+use App\Models\SerproServiceRequest;
+use Illuminate\Support\Facades\URL;
 
 /**
  * Payloads das leituras de monitoramento (Task 25).
@@ -246,6 +249,67 @@ final class MonitoringReadPayload
             'created_at' => $payment->created_at?->toIso8601String(),
             'updated_at' => $payment->updated_at?->toIso8601String(),
         ];
+    }
+
+    /**
+     * Ação fiscal explícita (Task 27): metadados factuais, protocolo e a
+     * disponibilidade do documento. O `metadata` bruto nunca é exposto; os
+     * artefatos aparecem apenas por referência opaca, hash, nome e uma URL
+     * assinada temporária — nunca o caminho físico nem conteúdo.
+     *
+     * @return array<string, mixed>
+     */
+    public static function serviceRequest(SerproServiceRequest $action): array
+    {
+        return [
+            'id' => $action->id,
+            'client_id' => $action->client_id,
+            'enrollment_id' => $action->enrollment_id,
+            'installment_id' => $action->installment_id,
+            'operation_code' => $action->operation_code,
+            'modality' => $action->modality,
+            'status' => $action->status->value,
+            'protocol' => $action->protocol,
+            'idempotency_key' => $action->idempotency_key,
+            'document_available' => $action->document_ref !== null,
+            'error_code' => is_array($action->metadata) ? ($action->metadata['error_code'] ?? null) : null,
+            'artifacts' => self::actionArtifacts($action),
+            'created_at' => $action->created_at?->toIso8601String(),
+            'updated_at' => $action->updated_at?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private static function actionArtifacts(SerproServiceRequest $action): array
+    {
+        $ref = trim((string) $action->document_ref);
+
+        if ($ref === '') {
+            return [];
+        }
+
+        $artifact = MonitoringArtifact::query()
+            ->where('ref', $ref)
+            ->where('account_id', $action->account_id)
+            ->first();
+
+        if ($artifact === null) {
+            return [];
+        }
+
+        return [[
+            'ref' => $artifact->ref,
+            'hash_sha256' => $artifact->hash_sha256,
+            'filename' => $artifact->original_name,
+            'kind' => $artifact->kind,
+            'download_url' => URL::temporarySignedRoute(
+                'monitoring.artifacts.download',
+                now()->addMinutes(15),
+                ['ref' => $artifact->ref],
+            ),
+        ]];
     }
 
     /**

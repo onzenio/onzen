@@ -38,17 +38,78 @@ final class ProtocolPoller
         string $accessToken,
         array $options = [],
     ): array {
+        if (ConsultCatalog::isForbiddenPolling((string) $run->operation_code)) {
+            throw new SerproBlockedException('protocol_polling_forbidden');
+        }
+
+        return $this->pollOperation(
+            (string) $run->operation_code,
+            (int) $run->account_id,
+            (string) $run->environment,
+            $protocol,
+            $envelope,
+            $accessToken,
+            $options,
+        );
+    }
+
+    /**
+     * Polling for an explicitly confirmed fiscal Action (Task 27).
+     *
+     * DAS emission operations (`GERARDAS12`/`GERARDAS*`) are forbidden to the
+     * automatic polling path but must still complete a protocol they were
+     * given. The action executor has already validated the operation against
+     * the DAS allowlist and persisted the protocol, so only the explicit path
+     * bypasses the forbidden-polling guard; the request/response handling is
+     * shared.
+     *
+     * @param  array<string, mixed>  $envelope
+     * @param  array<string, mixed>  $options
+     * @return array{status: int, body: array<string, mixed>, headers?: array<string, mixed>}
+     *
+     * @throws InvalidArgumentException quando não há protocolo persistido.
+     */
+    public function pollExplicit(
+        string $operationCode,
+        int $accountId,
+        string $environment,
+        string $protocol,
+        array $envelope,
+        string $accessToken,
+        array $options = [],
+    ): array {
+        return $this->pollOperation(
+            $operationCode,
+            $accountId,
+            $environment,
+            $protocol,
+            $envelope,
+            $accessToken,
+            $options,
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $envelope
+     * @param  array<string, mixed>  $options
+     * @return array{status: int, body: array<string, mixed>, headers?: array<string, mixed>}
+     */
+    private function pollOperation(
+        string $operationCode,
+        int $accountId,
+        string $environment,
+        string $protocol,
+        array $envelope,
+        string $accessToken,
+        array $options,
+    ): array {
         $protocol = trim($protocol);
 
         if ($protocol === '') {
             throw new InvalidArgumentException('protocol_required');
         }
 
-        if (ConsultCatalog::isForbiddenPolling((string) $run->operation_code)) {
-            throw new SerproBlockedException('protocol_polling_forbidden');
-        }
-
-        $cacheKey = $this->cacheKey($run, $protocol);
+        $cacheKey = $this->cacheKey($accountId, $environment, $protocol);
         $cached = Cache::get($cacheKey);
 
         if (is_array($cached) && isset($cached['status'], $cached['body'])) {
@@ -56,7 +117,7 @@ final class ProtocolPoller
         }
 
         $response = $this->transport->call(
-            ProcurationCatalog::pathFor((string) $run->operation_code),
+            ProcurationCatalog::pathFor($operationCode),
             $envelope,
             $accessToken,
             $options,
@@ -98,11 +159,11 @@ final class ProtocolPoller
             || array_key_exists('dados', $body);
     }
 
-    private function cacheKey(MonitoringRun $run, string $protocol): string
+    private function cacheKey(int $accountId, string $environment, string $protocol): string
     {
         return 'serpro:protocol:'.hash('sha256', implode('|', [
-            (string) $run->account_id,
-            (string) $run->environment,
+            (string) $accountId,
+            $environment,
             $protocol,
         ]));
     }

@@ -92,6 +92,13 @@ final class SerproEnvelope
      */
     public static function dadosFor(string $operationCode, array $parameters = []): array
     {
+        // A polling payload is already the protocol envelope and must pass
+        // through untouched even for operations with a shaped `dados` (the
+        // explicit DAS emission polls GERARDAS12 with {protocol, poll}).
+        if (array_key_exists('protocol', $parameters) || ($parameters['poll'] ?? null) === true) {
+            return $parameters;
+        }
+
         $keys = match (strtoupper(trim($operationCode))) {
             'OBTERPROCURACAO41' => ['outorgante', 'tipoOutorgante', 'outorgado', 'tipoOutorgado'],
             'ENVIOXMLASSINADO81' => ['xml'],
