@@ -3,7 +3,7 @@ import type { NavigationMenuItem } from '@nuxt/ui'
 
 const route = useRoute()
 const toast = useToast()
-const { isSuperAdmin } = useSession()
+const { canManageSensitive, isSuperAdmin } = useSession()
 
 const open = ref(false)
 
@@ -87,7 +87,16 @@ const monitoringLinks = computed<NavigationMenuItem[]>(() => [{
   onSelect: () => {
     open.value = false
   }
-}, ...(isSuperAdmin.value
+}, ...(canManageSensitive.value
+  ? [{
+      label: 'Certificado Digital',
+      icon: 'i-lucide-file-badge',
+      to: '/monitoring/certificado',
+      onSelect: () => {
+        open.value = false
+      }
+    }]
+  : []), ...(isSuperAdmin.value
   ? [{
       label: 'Administração SERPRO',
       icon: 'i-lucide-shield-check',
@@ -111,7 +120,14 @@ const monitoringSearchItems = computed(() => [{
   label: 'Parcelamentos',
   icon: 'i-lucide-file-text',
   to: '/monitoring/parcelamentos'
-}, ...(isSuperAdmin.value
+}, ...(canManageSensitive.value
+  ? [{
+      id: 'monitoring-certificado',
+      label: 'Certificado Digital',
+      icon: 'i-lucide-file-badge',
+      to: '/monitoring/certificado'
+    }]
+  : []), ...(isSuperAdmin.value
   ? [{
       id: 'monitoring-admin',
       label: 'Administração SERPRO',

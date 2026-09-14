@@ -10,21 +10,29 @@ const toast = useToast()
 const { canWrite } = useSession()
 const enrollmentId = computed(() => route.params.id as string)
 
-const { data: enrollment, status: enrollmentStatus } = await useFetch<{ data: Enrollment }>(
+const { data: enrollment, status: enrollmentStatus, error: enrollmentError } = await useFetch<{ data: Enrollment }>(
   () => `/api/monitoring/enrollments/${enrollmentId.value}`,
   { lazy: true }
 )
 
 const clientId = computed(() => enrollment.value?.data.client?.id)
 const cnd = ref<{ data: CndData } | null>(null)
+const cndStatus = ref<'idle' | 'pending' | 'available' | 'absent' | 'error'>('idle')
 
 watch(clientId, async (id) => {
-  if (id) {
-    try {
-      cnd.value = await $fetch<{ data: CndData }>(`/api/monitoring/clients/${id}/cnd`)
-    } catch {
-      cnd.value = null
-    }
+  if (!id) {
+    cnd.value = null
+    cndStatus.value = 'idle'
+    return
+  }
+  cndStatus.value = 'pending'
+  try {
+    const response = await $fetch<{ data: CndData }>(`/api/monitoring/clients/${id}/cnd`)
+    cnd.value = response
+    cndStatus.value = response.data.state === 'available' ? 'available' : 'absent'
+  } catch {
+    cnd.value = null
+    cndStatus.value = 'error'
   }
 }, { immediate: true })
 
@@ -223,6 +231,20 @@ const alertColumns: TableColumn<AlertItem>[] = [
             </p>
           </div>
           <UAlert
+            v-else-if="cndStatus === 'error'"
+            color="warning"
+            variant="subtle"
+            title="CND indisponível"
+            description="Não foi possível carregar a CND do acervo. Tente novamente."
+          />
+          <UAlert
+            v-else-if="cndStatus === 'pending' || cndStatus === 'idle'"
+            color="neutral"
+            variant="subtle"
+            title="Carregando CND…"
+            description="Lendo o snapshot de Situação Fiscal."
+          />
+          <UAlert
             v-else
             color="neutral"
             variant="subtle"
@@ -272,11 +294,19 @@ const alertColumns: TableColumn<AlertItem>[] = [
       </div>
 
       <UAlert
-        v-else-if="enrollmentStatus !== 'pending'"
+        v-else-if="enrollmentStatus !== 'pending' && enrollmentError?.statusCode === 404"
         color="error"
         variant="subtle"
         title="Associação não encontrada"
         description="Verifique se a associação pertence à sua Account."
+      />
+
+      <UAlert
+        v-else-if="enrollmentStatus !== 'pending'"
+        color="warning"
+        variant="subtle"
+        title="Associação indisponível"
+        description="Não foi possível carregar o painel do Client agora. Tente novamente."
       />
     </template>
   </UDashboardPanel>

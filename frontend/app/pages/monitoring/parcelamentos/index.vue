@@ -11,7 +11,7 @@ const page = ref(1)
 const modality = ref('all')
 const modalityQuery = computed(() => modality.value === 'all' ? undefined : modality.value)
 
-const { data: orders, status } = await useFetch<Paginated<ParcelmentOrder>>('/api/monitoring/parcelamentos', {
+const { data: orders, status, error } = await useFetch<Paginated<ParcelmentOrder>>('/api/monitoring/parcelamentos', {
   lazy: true,
   query: { page, modalidade: modalityQuery, per_page: 25 }
 })
@@ -83,6 +83,14 @@ const columns: TableColumn<ParcelmentOrder>[] = [
     <template #body>
       <UCard>
         <div class="flex flex-col gap-4">
+          <UAlert
+            v-if="error"
+            color="error"
+            variant="subtle"
+            title="Parcelamentos indisponíveis"
+            :description="monitoringErrorMessage(backendErrorBody(error))"
+          />
+
           <div class="flex flex-col gap-2 sm:flex-row">
             <USelect
               v-model="modality"

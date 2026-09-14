@@ -18,10 +18,10 @@ const statusFilter = ref('all')
 
 const statusQuery = computed(() => statusFilter.value === 'all' ? undefined : statusFilter.value)
 
-const { data: health } = await useFetch<{ data: Health }>('/api/monitoring/health', { lazy: true })
-const { data: dashboard, status: dashboardStatus, refresh: refreshDashboard } = await useFetch<{ data: DashboardData }>('/api/monitoring/dashboard', { lazy: true })
+const { data: health, error: healthError } = await useFetch<{ data: Health }>('/api/monitoring/health', { lazy: true })
+const { data: dashboard, status: dashboardStatus, error: dashboardError, refresh: refreshDashboard } = await useFetch<{ data: DashboardData }>('/api/monitoring/dashboard', { lazy: true })
 
-const { data: enrollments, status: tableStatus, refresh: refreshEnrollments } = await useFetch<Paginated<Enrollment>>('/api/monitoring/enrollments', {
+const { data: enrollments, status: tableStatus, error: enrollmentsError, refresh: refreshEnrollments } = await useFetch<Paginated<Enrollment>>('/api/monitoring/enrollments', {
   lazy: true,
   query: { page, search: searchDebounced, status: statusQuery, per_page: 25 }
 })
@@ -182,6 +182,22 @@ async function syncNow() {
           description="As consultas estão bloqueadas até o próximo ciclo. Troque de plano para continuar consultando."
         />
 
+        <UAlert
+          v-if="healthError"
+          color="error"
+          variant="subtle"
+          title="Estado do transporte indisponível"
+          :description="monitoringErrorMessage(backendErrorBody(healthError))"
+        />
+
+        <UAlert
+          v-if="dashboardError"
+          color="error"
+          variant="subtle"
+          title="Resumo do monitoramento indisponível"
+          :description="monitoringErrorMessage(backendErrorBody(dashboardError))"
+        />
+
         <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <UCard>
             <p class="text-sm text-muted">
@@ -244,6 +260,14 @@ async function syncNow() {
 
         <UCard>
           <div class="flex flex-col gap-4">
+            <UAlert
+              v-if="enrollmentsError"
+              color="error"
+              variant="subtle"
+              title="Associações indisponíveis"
+              :description="monitoringErrorMessage(backendErrorBody(enrollmentsError))"
+            />
+
             <div class="flex flex-col gap-2 sm:flex-row">
               <UInput
                 v-model="search"

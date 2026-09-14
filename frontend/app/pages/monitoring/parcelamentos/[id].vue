@@ -8,7 +8,7 @@ const UButton = resolveComponent('UButton')
 const route = useRoute()
 const orderId = computed(() => route.params.id as string)
 
-const { data: order, status: orderStatus } = await useFetch<{ data: ParcelmentOrderDetail }>(
+const { data: order, status: orderStatus, error: orderError } = await useFetch<{ data: ParcelmentOrderDetail }>(
   () => `/api/monitoring/parcelamentos/${orderId.value}`,
   { lazy: true }
 )
@@ -198,11 +198,19 @@ const paymentColumns: TableColumn<Payment>[] = [
       </div>
 
       <UAlert
-        v-else-if="orderStatus !== 'pending'"
+        v-else-if="orderStatus !== 'pending' && orderError?.statusCode === 404"
         color="error"
         variant="subtle"
         title="Parcelamento não encontrado"
         description="Verifique se o pedido pertence à sua Account."
+      />
+
+      <UAlert
+        v-else-if="orderStatus !== 'pending'"
+        color="warning"
+        variant="subtle"
+        title="Parcelamento indisponível"
+        description="Não foi possível carregar o parcelamento agora. Tente novamente."
       />
     </template>
   </UDashboardPanel>
