@@ -120,4 +120,39 @@ class MonitoringEnrollmentController extends Controller
             'data' => $this->outorga->divergences($this->effectiveAccountId($request)),
         ]);
     }
+
+    /**
+     * Disparo manual de consulta: responde 202 sem tráfego na requisição.
+     */
+    public function trigger(Request $request, int $id): JsonResponse
+    {
+        $enrollment = $this->findForAccount($request, $id);
+        $this->authorize('update', $enrollment);
+
+        if ($enrollment->status !== MonitoringEnrollment::ACTIVE) {
+            return response()->json(['message' => 'Associação inativa: disparo não permitido.'], 422);
+        }
+
+        $data = $request->validate([
+            'idempotency_key' => ['sometimes', 'string', 'max:120'],
+        ]);
+
+        $account = \App\Models\Account::query()->findOrFail($enrollment->account_id);
+
+        try {
+            $run = app(\App\Services\MonitoringScheduler::class)->triggerManual(
+                $account,
+                $request->user(),
+                $enrollment->definition_code,
+                $enrollment->client_id,
+                $data['idempotency_key'] ?? (string) \Illuminate\Support\Str::uuid(),
+            );
+        } catch (\Illuminate\Auth\Access\AuthorizationException $e) {
+            return response()->json(['message' => $e->getMessage()], 403);
+        } catch (\App\Services\QuotaExhaustedException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json(['run_id' => $run->id, 'status' => $run->status], 202);
+    }
 }

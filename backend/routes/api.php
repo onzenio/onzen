@@ -5,7 +5,10 @@ use App\Http\Controllers\Api\AuditController;
 use App\Http\Controllers\Api\ClientController;
 use App\Http\Controllers\Api\InvitationController;
 use App\Http\Controllers\Api\MeController;
+use App\Http\Controllers\Api\AccountCertificateController;
 use App\Http\Controllers\Api\MonitoringActionController;
+use App\Http\Controllers\Api\MonitoringAuthorController;
+use App\Http\Controllers\Api\MonitoringCatalogController;
 use App\Http\Controllers\Api\ArtifactDownloadController;
 use App\Http\Controllers\Api\MonitoringEnrollmentController;
 use App\Http\Controllers\Api\MonitoringReadController;
@@ -62,10 +65,17 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::get('/monitoring/enrollments', [MonitoringEnrollmentController::class, 'index']);
     Route::post('/monitoring/enrollments', [MonitoringEnrollmentController::class, 'store']);
     Route::get('/monitoring/divergences', [MonitoringEnrollmentController::class, 'divergences']);
+    Route::get('/monitoring/catalog', [MonitoringCatalogController::class, 'index']);
     Route::get('/monitoring/enrollments/{id}', [MonitoringEnrollmentController::class, 'show'])->whereNumber('id');
     Route::post('/monitoring/enrollments/{id}/pause', [MonitoringEnrollmentController::class, 'pause'])->whereNumber('id');
     Route::post('/monitoring/enrollments/{id}/resume', [MonitoringEnrollmentController::class, 'resume'])->whereNumber('id');
+    Route::post('/monitoring/enrollments/{id}/trigger', [MonitoringEnrollmentController::class, 'trigger'])->whereNumber('id');
     Route::delete('/monitoring/enrollments/{id}', [MonitoringEnrollmentController::class, 'destroy'])->whereNumber('id');
+
+    Route::get('/account/certificate', [AccountCertificateController::class, 'show']);
+    Route::put('/account/certificate', [AccountCertificateController::class, 'store']);
+    Route::get('/monitoring/authors', [MonitoringAuthorController::class, 'index']);
+    Route::post('/monitoring/authors', [MonitoringAuthorController::class, 'store']);
 
     Route::get('/monitoring/dashboard', [MonitoringReadController::class, 'dashboard']);
     Route::get('/monitoring/clients/{client}/snapshots', [MonitoringReadController::class, 'snapshots'])->whereNumber('client');
