@@ -37,7 +37,7 @@
 - [x] 5.1 Implementar criação, lifecycle e busca de Associação de Monitoramento com elegibilidade, Monitoring Status e limite por Plan e verificar com teste de criação, recusas, unicidade, pausa e busca por nome/CNPJ.
 - [x] 5.2 Portar os normalizadores por família com fallback neutro e verificar com teste por família usando as fixtures oficiais, incluindo família sem normalizador sinalizada.
 - [x] 5.3 Implementar snapshots com fingerprint, detecção de mudanças e alertas com acknowledge idempotente e verificar com teste de repetição sem versionar, mudança com alerta e reconhecimento repetido.
-- [ ] 5.4 Implementar a cadeia consultiva PGDAS-D (índice→declaração/recibo→extrato) com idempotência e verificar com teste de encadeamento quando o índice muda e de não encadeamento sem novidade.
+- [x] 5.4 Implementar a cadeia consultiva PGDAS-D (índice→declaração/recibo→extrato) com idempotência e verificar com teste de encadeamento quando o índice muda e de não encadeamento sem novidade.
 - [ ] 5.5 Implementar as leituras da carteira (dashboard, snapshots, changes, alerts) isoladas por Account e a CND lida do snapshot sem consulta ao abrir e verificar com teste de listagem, 404 cross-account e ausência de chamada externa.
 
 ## 6. Parcelamentos e ações
