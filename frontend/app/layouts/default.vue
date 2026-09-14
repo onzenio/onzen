@@ -28,28 +28,35 @@ const links = computed<NavigationMenuItem[][]>(() => {
       onSelect: closeSidebar
     })
   }
+  const adminChildren: NavigationMenuItem[] = []
   if (can('accounts.view')) {
-    main.push({
-      label: 'Accounts',
-      icon: 'i-lucide-building-2',
+    adminChildren.push({
+      label: 'Escritórios',
       to: '/accounts',
       onSelect: closeSidebar
     })
   }
   if (can('plans.view')) {
-    main.push({
-      label: 'Plans',
-      icon: 'i-lucide-layers',
+    adminChildren.push({
+      label: 'Planos',
       to: '/plans',
       onSelect: closeSidebar
     })
   }
   if (can('audit.view')) {
-    main.push({
-      label: 'Audit',
-      icon: 'i-lucide-scroll-text',
+    adminChildren.push({
+      label: 'Auditoria',
       to: '/audit',
       onSelect: closeSidebar
+    })
+  }
+  if (adminChildren.length > 0) {
+    main.push({
+      label: 'Administração',
+      icon: 'i-lucide-shield-check',
+      defaultOpen: true,
+      type: 'trigger',
+      children: adminChildren
     })
   }
   main.push({
