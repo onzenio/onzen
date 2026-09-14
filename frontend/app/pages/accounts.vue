@@ -24,7 +24,7 @@ const UBadge = resolveComponent('UBadge')
 const toast = useToast()
 const page = ref(1)
 
-const { data, status, refresh } = await useFetch<AccountsResponse>('/api/accounts', {
+const { data, error, status, refresh } = await useFetch<AccountsResponse>('/api/accounts', {
   key: 'accounts-list',
   query: { page }
 })
@@ -33,14 +33,13 @@ const accounts = computed(() => data.value?.data ?? [])
 const total = computed(() => data.value?.total ?? 0)
 
 const columns: TableColumn<AccountRow>[] = [
-  { accessorKey: 'id', header: 'ID' },
   { accessorKey: 'name', header: 'Nome' },
   {
     accessorKey: 'profile',
-    header: 'Perfil',
+    header: 'Tipo',
     cell: ({ row }) => {
-      const profile = row.original.profile
-      return h(UBadge, { variant: 'subtle', color: profile === 'A' ? 'primary' : 'neutral' }, () => `Conta ${profile}`)
+      const central = row.original.profile === 'A'
+      return h(UBadge, { variant: 'subtle', color: central ? 'primary' : 'neutral' }, () => central ? 'Central OneFisc' : 'Escritório')
     }
   },
   {
@@ -49,6 +48,13 @@ const columns: TableColumn<AccountRow>[] = [
     cell: ({ row }) => row.original.plan?.name ?? '—'
   }
 ]
+
+const retryActions = [{
+  label: 'Tentar novamente',
+  color: 'error' as const,
+  variant: 'outline' as const,
+  onClick: () => refresh()
+}]
 
 const schema = z.object({
   name: z.string().min(2, 'Informe o nome da conta'),
@@ -74,13 +80,22 @@ function resetState() {
   state.admin_email = ''
 }
 
+watch(open, (value) => {
+  if (!value) {
+    resetState()
+    form.value?.clear()
+  }
+})
+
 async function onSubmit(event: FormSubmitEvent<Schema>) {
+  if (creating.value) {
+    return
+  }
   creating.value = true
   try {
     await $fetch('/api/accounts', { method: 'POST', body: event.data })
     toast.add({ title: 'Conta criada', description: `Convite enviado para ${event.data.admin_email}.`, color: 'success' })
     open.value = false
-    resetState()
     await refresh()
   } catch (error) {
     form.value?.setErrors(backendFormErrors(error))
@@ -94,14 +109,14 @@ async function onSubmit(event: FormSubmitEvent<Schema>) {
 <template>
   <UDashboardPanel id="accounts">
     <template #header>
-      <UDashboardNavbar title="Accounts">
+      <UDashboardNavbar title="Escritórios">
         <template #leading>
           <UDashboardSidebarCollapse />
         </template>
 
         <template #right>
-          <UModal v-model:open="open" title="Nova conta" description="Criar uma conta B e convidar o administrador">
-            <UButton label="Nova conta" icon="i-lucide-plus" />
+          <UModal v-model:open="open" title="Novo escritório" description="Cria um escritório (Account B) e envia o convite ao administrador">
+            <UButton label="Novo escritório" icon="i-lucide-plus" />
 
             <template #body>
               <UForm
@@ -143,10 +158,28 @@ async function onSubmit(event: FormSubmitEvent<Schema>) {
     </template>
 
     <template #body>
+      <UAlert
+        v-if="error"
+        color="error"
+        title="Não foi possível carregar as contas"
+        :description="backendMessage(error)"
+        :actions="retryActions"
+      />
+
       <UTable
+        v-else
         :data="accounts"
         :columns="columns"
         :loading="status === 'pending'"
+        empty="Nenhuma conta encontrada."
+        :ui="{
+          base: 'table-fixed border-separate border-spacing-0',
+          thead: '[&>tr]:bg-elevated/50 [&>tr]:after:content-none',
+          tbody: '[&>tr]:last:[&>td]:border-b-0',
+          th: 'py-2 first:rounded-l-lg last:rounded-r-lg border-y border-default first:border-l last:border-r',
+          td: 'border-b border-default',
+          separator: 'h-0'
+        }"
       />
 
       <div class="flex items-center justify-between gap-3 border-t border-default pt-4 mt-auto">
