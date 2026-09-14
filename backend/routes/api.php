@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\ClientController;
 use App\Http\Controllers\Api\InvitationController;
 use App\Http\Controllers\Api\MeController;
 use App\Http\Controllers\Api\MonitoringActionController;
+use App\Http\Controllers\Api\ArtifactDownloadController;
 use App\Http\Controllers\Api\MonitoringEnrollmentController;
 use App\Http\Controllers\Api\MonitoringReadController;
 use App\Http\Controllers\Api\ParcelmentController;
@@ -79,4 +80,8 @@ Route::middleware('auth:sanctum')->group(function (): void {
 
     Route::post('/monitoring/actions/emissoes', [MonitoringActionController::class, 'store']);
     Route::post('/monitoring/actions/requests/{id}/poll', [MonitoringActionController::class, 'poll'])->whereNumber('id');
+
+    Route::get('/monitoring/artifacts/{ref}/url', [ArtifactDownloadController::class, 'url']);
+    Route::get('/monitoring/artifacts/{ref}/download', [ArtifactDownloadController::class, 'download'])
+        ->name('monitoring.artifacts.download')->middleware('signed');
 });
