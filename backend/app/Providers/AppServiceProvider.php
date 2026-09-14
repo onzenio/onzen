@@ -5,6 +5,8 @@ namespace App\Providers;
 use App\Integrations\Serpro\HttpProcuradorTermSender;
 use App\Integrations\Serpro\ProcuradorTermSender;
 use App\Listeners\AuditAuthListener;
+use App\Services\DryRunProcurationChecker;
+use App\Services\ProcurationChecker;
 use App\Models\Account;
 use App\Models\Client;
 use App\Models\Invitation;
@@ -24,6 +26,7 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->bind(ProcuradorTermSender::class, HttpProcuradorTermSender::class);
+        $this->app->bind(ProcurationChecker::class, DryRunProcurationChecker::class);
     }
 
     /**
