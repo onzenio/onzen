@@ -9,6 +9,17 @@
 
 ## About Laravel
 
+OneFisc backend (Laravel). Operação do monitoramento SERPRO:
+
+- Fila dedicada `serpro` (driver database): `php artisan queue:work serpro --queue=serpro`.
+  No compose, o serviço `serpro-worker` já sobe esse worker.
+- Gate fail-closed: `MONITORING_SERPRO_DRY_RUN=true` e transporte desligado por
+  padrão; o painel da Account A (`/api/admin/serpro`) dita ambiente e transporte.
+- Agendamentos: `monitoring:cycle` (dia 1, 03:00, somente consultas) e
+  `monitoring:renew-terms` (diário, 04:00, termos + procurações).
+- Catálogo: `php artisan migrate --seed` inclui `MonitoringDefinitionSeeder`
+  (versão em `CATALOG_VERSION`) e fixtures em `resources/fixtures/serpro/consultar/`.
+
 Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
 
 - [Simple, fast routing engine](https://laravel.com/docs/routing).

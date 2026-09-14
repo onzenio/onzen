@@ -79,3 +79,21 @@ _Evitar_: impersonation, trocar de User, login como
 **Audit**:
 O log único e imutável das ações de plataforma e operação.
 _Evitar_: activity log, histórico editável
+
+### Monitoramento
+
+**Contratante SERPRO**:
+O cadastro do contratante do Integra Contador na Account A: ambiente, documento e referências de cofre. O gate efetivo (painel sobre ambiente) dita se há tráfego real.
+_Evitar_: credencial global, chave da API
+
+**Certificado Digital**:
+O A1 de cada Account, guardado no cofre com titular, thumbprint e validade. Assina termos e autentica o mTLS; expirado, bloqueia execuções de forma fail-closed.
+_Evitar_: certificado do escritório em disco, PFX em ENV
+
+**Autor do Pedido de Dados**:
+A pessoa vinculada ao Certificado Digital que assina o termo de autorização e figura nas consultas em nome dos Clients. Sem autor elegível, não há execução.
+_Evitar_: procurador solto, signatário genérico
+
+**Associação de Monitoramento**:
+A escolha confirmada de monitorar uma definição do catálogo para um Client: elegibilidade, ciclo de vida (ativa, pausada, encerrada) e versionamento para fencing.
+_Evitar_: assinatura de monitoramento, vínculo fiscal

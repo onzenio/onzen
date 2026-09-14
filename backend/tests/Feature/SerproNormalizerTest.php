@@ -56,4 +56,11 @@ class SerproNormalizerTest extends TestCase
         $this->assertSame('sicalc', $normalized['family']);
         $this->assertArrayNotHasKey('qualquer', $normalized);
     }
+
+    public function test_chave_canonica_da_familia_do_catalogo(): void
+    {
+        $this->assertSame('sitfis', SerproNormalizer::keyForFamily('Situação Fiscal'));
+        $this->assertSame('pgdasd', SerproNormalizer::keyForFamily('PGDAS-D'));
+        $this->assertSame('caixa-postal', SerproNormalizer::keyForFamily('Caixa Postal'));
+    }
 }

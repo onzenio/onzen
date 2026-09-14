@@ -92,4 +92,27 @@ class SerproNormalizer
             default => 'desconhecida',
         };
     }
+
+    /**
+     * Canonicaliza o nome de família do catálogo para a chave do normalizador.
+     */
+    public static function keyForFamily(string $family): string
+    {
+        $key = mb_strtolower(trim($family));
+
+        return match ($key) {
+            'pgdas-d' => 'pgdasd',
+            'regime de apuração' => 'regime',
+            'defis' => 'defis',
+            'mei' => 'mei',
+            'dctfweb' => 'dctfweb',
+            'mit' => 'mit',
+            'situação fiscal' => 'sitfis',
+            'caixa postal' => 'caixa-postal',
+            'dte' => 'dte',
+            'pagamentos' => 'pagamentos',
+            'parcelamentos' => 'parcelamentos',
+            default => $key,
+        };
+    }
 }

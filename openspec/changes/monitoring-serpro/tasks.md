@@ -64,7 +64,7 @@
 
 ## 9. Verificação final
 
-- [ ] 9.1 Rodar `composer test` no backend e anexar a saída como evidência, corrigindo falhas de PHPUnit e Pint.
-- [ ] 9.2 Rodar `pnpm lint` e `pnpm typecheck` no frontend e anexar a saída como evidência.
-- [ ] 9.3 Executar o smoke E2E em dry-run (Client associado, consulta disparada, snapshot e alerta visíveis, quota bloqueando, transporte desligado sem chamada real) e registrar o passo a passo no change.
-- [ ] 9.4 Atualizar `CONTEXT.md` com os termos novos e o `README`/`.env.example` com a operação da fila e do gate e verificar por revisão do diff.
+- [x] 9.1 Rodar `composer test` no backend e anexar a saída como evidência, corrigindo falhas de PHPUnit e Pint.
+- [x] 9.2 Rodar `pnpm lint` e `pnpm typecheck` no frontend e anexar a saída como evidência.
+- [x] 9.3 Executar o smoke E2E em dry-run (Client associado, consulta disparada, snapshot e alerta visíveis, quota bloqueando, transporte desligado sem chamada real) e registrar o passo a passo no change.
+- [x] 9.4 Atualizar `CONTEXT.md` com os termos novos e o `README`/`.env.example` com a operação da fila e do gate e verificar por revisão do diff.

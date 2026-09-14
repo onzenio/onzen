@@ -24,8 +24,10 @@ class ExecutionProcessor
      */
     public function processCompletedRun(MonitoringRun $run, array $payload): MonitoringRun
     {
-        $family = MonitoringDefinition::query()->where('code', $run->definition_code)->value('family')
-            ?? SerproNormalizer::familyForOperation($run->definition_code);
+        $family = SerproNormalizer::keyForFamily(
+            (string) (MonitoringDefinition::query()->where('code', $run->definition_code)->value('family')
+                ?? SerproNormalizer::familyForOperation($run->definition_code))
+        );
 
         $normalized = SerproNormalizer::normalize((string) $family, $payload);
         $normalized['normalized'] = true;
