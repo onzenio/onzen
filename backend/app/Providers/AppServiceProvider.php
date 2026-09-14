@@ -5,6 +5,8 @@ namespace App\Providers;
 use App\Integrations\Serpro\HttpProcuradorTermSender;
 use App\Integrations\Serpro\ProcuradorTermSender;
 use App\Listeners\AuditAuthListener;
+use App\Services\ArtifactStore;
+use App\Services\DiskArtifactStore;
 use App\Services\DryRunProcurationChecker;
 use App\Services\ProcurationChecker;
 use App\Models\Account;
@@ -27,6 +29,7 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->app->bind(ProcuradorTermSender::class, HttpProcuradorTermSender::class);
         $this->app->bind(ProcurationChecker::class, DryRunProcurationChecker::class);
+        $this->app->bind(ArtifactStore::class, DiskArtifactStore::class);
     }
 
     /**
