@@ -2,6 +2,8 @@
 import * as z from 'zod'
 import type { FormSubmitEvent, TableColumn } from '@nuxt/ui'
 
+definePageMeta({ middleware: 'super-admin' })
+
 interface PlanRow {
   id: number
   name: string
