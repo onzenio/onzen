@@ -14,6 +14,7 @@ use InvalidArgumentException;
 #[Fillable([
     'account_id', 'client_id', 'definition_code', 'status', 'idempotency_key',
     'fencing_token', 'origin', 'triggered_by', 'protocol', 'result_summary', 'failure_reason',
+    'artifact_ref', 'artifact_error',
 ])]
 class MonitoringRun extends Model
 {

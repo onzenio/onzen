@@ -50,7 +50,7 @@
 ## 7. Artefatos
 
 - [x] 7.1 Implementar o armazenamento privado de artefatos com referência opaca e hash SHA-256 e verificar com teste de gravação, leitura e ausência de caminho físico na API.
-- [ ] 7.2 Implementar a decodificação de conteúdo no processamento e o estado de falha de artefato e verificar com teste de artefato gerado e de falha que não quebra a execução.
+- [x] 7.2 Implementar a decodificação de conteúdo no processamento e o estado de falha de artefato e verificar com teste de artefato gerado e de falha que não quebra a execução.
 - [ ] 7.3 Implementar o download autorizado e auditado com URL temporária e verificar com teste de sucesso, 403 expirado, 404 cross-account e 503 com storage indisponível.
 
 ## 8. UI com o template
