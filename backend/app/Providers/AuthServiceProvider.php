@@ -6,6 +6,7 @@ use App\Models\Account;
 use App\Models\AuditLog;
 use App\Models\Client;
 use App\Models\Invitation;
+use App\Models\MonitoringAlert;
 use App\Models\MonitoringEnrollment;
 use App\Models\Plan;
 use App\Models\SerproRequestAuthor;
@@ -13,6 +14,7 @@ use App\Policies\AccountPolicy;
 use App\Policies\AuditLogPolicy;
 use App\Policies\ClientPolicy;
 use App\Policies\InvitationPolicy;
+use App\Policies\MonitoringAlertPolicy;
 use App\Policies\MonitoringEnrollmentPolicy;
 use App\Policies\PlanPolicy;
 use App\Policies\SerproRequestAuthorPolicy;
@@ -30,6 +32,7 @@ class AuthServiceProvider extends ServiceProvider
         Plan::class => PlanPolicy::class,
         AuditLog::class => AuditLogPolicy::class,
         MonitoringEnrollment::class => MonitoringEnrollmentPolicy::class,
+        MonitoringAlert::class => MonitoringAlertPolicy::class,
         SerproRequestAuthor::class => SerproRequestAuthorPolicy::class,
     ];
 
