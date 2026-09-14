@@ -57,8 +57,9 @@ Route::middleware('auth:sanctum')->group(function (): void {
 
     Route::get('/monitoring/enrollments', [MonitoringEnrollmentController::class, 'index']);
     Route::post('/monitoring/enrollments', [MonitoringEnrollmentController::class, 'store']);
-    Route::get('/monitoring/enrollments/{id}', [MonitoringEnrollmentController::class, 'show']);
-    Route::post('/monitoring/enrollments/{id}/pause', [MonitoringEnrollmentController::class, 'pause']);
-    Route::post('/monitoring/enrollments/{id}/resume', [MonitoringEnrollmentController::class, 'resume']);
-    Route::delete('/monitoring/enrollments/{id}', [MonitoringEnrollmentController::class, 'destroy']);
+    Route::get('/monitoring/divergences', [MonitoringEnrollmentController::class, 'divergences']);
+    Route::get('/monitoring/enrollments/{id}', [MonitoringEnrollmentController::class, 'show'])->whereNumber('id');
+    Route::post('/monitoring/enrollments/{id}/pause', [MonitoringEnrollmentController::class, 'pause'])->whereNumber('id');
+    Route::post('/monitoring/enrollments/{id}/resume', [MonitoringEnrollmentController::class, 'resume'])->whereNumber('id');
+    Route::delete('/monitoring/enrollments/{id}', [MonitoringEnrollmentController::class, 'destroy'])->whereNumber('id');
 });

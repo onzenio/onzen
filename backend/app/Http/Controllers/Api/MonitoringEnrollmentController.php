@@ -15,7 +15,24 @@ class MonitoringEnrollmentController extends Controller
 {
     use AuthorizesRequests;
 
-    public function __construct(private readonly EnrollmentService $enrollments) {}
+    public function __construct(
+        private readonly EnrollmentService $enrollments,
+        private readonly \App\Services\OutorgaSyncService $outorga,
+    ) {}
+
+    private function effectiveAccountId(Request $request): int
+    {
+        return CurrentAccount::get() ?? $request->user()->account_id;
+    }
+
+    private function findForAccount(Request $request, int $id): MonitoringEnrollment
+    {
+        // 404 indistinguível fora da Account efetiva.
+        return MonitoringEnrollment::query()->withoutGlobalScopes()
+            ->where('account_id', $this->effectiveAccountId($request))
+            ->whereKey($id)
+            ->firstOrFail();
+    }
 
     public function index(Request $request): JsonResponse
     {
@@ -60,12 +77,7 @@ class MonitoringEnrollmentController extends Controller
 
     public function show(Request $request, int $id): JsonResponse
     {
-        $enrollment = MonitoringEnrollment::query()->firstWhere('id', $id);
-
-        if ($enrollment === null) {
-            abort(404);
-        }
-
+        $enrollment = $this->findForAccount($request, $id);
         $this->authorize('view', $enrollment);
 
         return response()->json($enrollment->load('client'));
@@ -73,12 +85,7 @@ class MonitoringEnrollmentController extends Controller
 
     public function pause(Request $request, int $id): JsonResponse
     {
-        $enrollment = MonitoringEnrollment::query()->firstWhere('id', $id);
-
-        if ($enrollment === null) {
-            abort(404);
-        }
-
+        $enrollment = $this->findForAccount($request, $id);
         $this->authorize('update', $enrollment);
 
         $data = $request->validate(['reason' => ['required', 'string', 'max:255']]);
@@ -89,12 +96,7 @@ class MonitoringEnrollmentController extends Controller
 
     public function resume(Request $request, int $id): JsonResponse
     {
-        $enrollment = MonitoringEnrollment::query()->firstWhere('id', $id);
-
-        if ($enrollment === null) {
-            abort(404);
-        }
-
+        $enrollment = $this->findForAccount($request, $id);
         $this->authorize('update', $enrollment);
         $enrollment->resume();
 
@@ -103,15 +105,19 @@ class MonitoringEnrollmentController extends Controller
 
     public function destroy(Request $request, int $id): JsonResponse
     {
-        $enrollment = MonitoringEnrollment::query()->firstWhere('id', $id);
-
-        if ($enrollment === null) {
-            abort(404);
-        }
-
+        $enrollment = $this->findForAccount($request, $id);
         $this->authorize('delete', $enrollment);
         $enrollment->end();
 
         return response()->json($enrollment->refresh());
+    }
+
+    public function divergences(Request $request): JsonResponse
+    {
+        $this->authorize('viewAny', MonitoringEnrollment::class);
+
+        return response()->json([
+            'data' => $this->outorga->divergences($this->effectiveAccountId($request)),
+        ]);
     }
 }
