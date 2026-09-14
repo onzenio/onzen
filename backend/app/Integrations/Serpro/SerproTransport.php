@@ -28,7 +28,9 @@ class SerproTransport
     public function request(string $operation, array $envelope, array $options = []): array
     {
         $environment = $options['environment'] ?? (string) config('monitoring.environment', 'homologacao');
-        $approved = (bool) config('monitoring.transport.approved', false);
+        // Gate efetivo: painel da Account A prevalece; config vale como fallback.
+        $panel = \App\Models\SerproContract::query()->first();
+        $approved = $panel?->transport_approved ?? (bool) config('monitoring.transport.approved', false);
         $dryRun = (bool) config('monitoring.dry_run', true);
 
         if ($dryRun || ! $approved) {

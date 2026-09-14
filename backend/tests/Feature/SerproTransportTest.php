@@ -26,6 +26,7 @@ class SerproTransportTest extends TestCase
 
         SerproContract::factory()->create([
             'environment' => 'homologacao',
+            'transport_approved' => true,
             'consumer_key_ref' => $vault->put($platform, 'consumer-key', 'KEY'),
             'consumer_secret_ref' => $vault->put($platform, 'consumer-secret', 'SEC'),
         ]);

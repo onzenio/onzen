@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\AuditController;
 use App\Http\Controllers\Api\ClientController;
 use App\Http\Controllers\Api\InvitationController;
 use App\Http\Controllers\Api\MeController;
+use App\Http\Controllers\Api\MonitoringActionController;
 use App\Http\Controllers\Api\MonitoringEnrollmentController;
 use App\Http\Controllers\Api\MonitoringReadController;
 use App\Http\Controllers\Api\ParcelmentController;
@@ -75,4 +76,7 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::get('/monitoring/clients/{client}/parcelamentos/{modality}', [ParcelmentController::class, 'index'])->whereNumber('client');
     Route::get('/monitoring/clients/{client}/parcelamentos/orders/{order}', [ParcelmentController::class, 'show'])->whereNumber(['client', 'order']);
     Route::get('/monitoring/clients/{client}/parcelamentos/orders/{order}/guia', [ParcelmentController::class, 'guia'])->whereNumber(['client', 'order']);
+
+    Route::post('/monitoring/actions/emissoes', [MonitoringActionController::class, 'store']);
+    Route::post('/monitoring/actions/requests/{id}/poll', [MonitoringActionController::class, 'poll'])->whereNumber('id');
 });

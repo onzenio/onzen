@@ -61,6 +61,7 @@ class SerproAdminController extends Controller
         $data = $request->validate([
             'consumer_key' => ['required', 'string', 'min:1', 'max:255'],
             'consumer_secret' => ['required', 'string', 'min:1', 'max:1000'],
+            'contractor_document' => ['nullable', 'string', 'regex:/^\d{11}$|^\d{14}$/'],
         ]);
 
         $platform = $this->platformAccount($request);
@@ -68,6 +69,10 @@ class SerproAdminController extends Controller
 
         $keyRef = $this->vault->put($platform, 'consumer-key', $data['consumer_key']);
         $secretRef = $this->vault->put($platform, 'consumer-secret', $data['consumer_secret']);
+
+        if (! empty($data['contractor_document'])) {
+            $contract->forceFill(['contractor_document' => $data['contractor_document']])->save();
+        }
 
         $this->contracts->rotateCredentials($contract, $keyRef, $secretRef, $request->user());
 
