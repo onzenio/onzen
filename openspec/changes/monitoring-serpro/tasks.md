@@ -1,6 +1,6 @@
 ## 1. Fundação: dados, cofre e catálogo
 
-- [ ] 1.1 Criar a estrutura de dados das credenciais do Contratante SERPRO (environment, refs de cofre, auditoria de troca) e verificar com teste de persistência, mascaramento e troca registrada no Audit.
+- [x] 1.1 Criar a estrutura de dados das credenciais do Contratante SERPRO (environment, refs de cofre, auditoria de troca) e verificar com teste de persistência, mascaramento e troca registrada no Audit.
 - [ ] 1.2 Criar a estrutura de dados do Certificado Digital por Account (ref de cofre, titular, thumbprint, validade) e verificar com teste de cadastro, substituição e isolamento entre Accounts.
 - [ ] 1.3 Criar a estrutura de dados do Autor do Pedido de Dados vinculado ao Certificado Digital e verificar com teste de vínculo, inelegibilidade por certificado expirado e permissões por Role.
 - [ ] 1.4 Criar a estrutura de dados das definições do catálogo e o seed versionado com definições, operações e allowlist de procurações e verificar com teste que cobre definições disponíveis, indisponíveis e em prospecção.
