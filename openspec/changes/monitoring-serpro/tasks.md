@@ -30,7 +30,7 @@
 - [x] 4.1 Implementar o termo de autorização assinado e enviado com token guardado no cofre e renovação antes do vencimento e verificar com teste com transporte fake de envio, guarda e renovação.
 - [x] 4.2 Implementar a verificação de procuração por Client com cache curto e allowlist de códigos e verificar com teste de confirmação, ausência de outorga, cache e código fora da allowlist.
 - [x] 4.3 Implementar pausa e retomada de associações por outorga e a listagem de divergências e verificar com teste de pausa com motivo, retomada e 404 cross-account.
-- [ ] 4.4 Implementar a rotina diária de renovação de termos e reverificação de procurações e verificar com teste do comando agendado renovando e retomando associações elegíveis.
+- [x] 4.4 Implementar a rotina diária de renovação de termos e reverificação de procurações e verificar com teste do comando agendado renovando e retomando associações elegíveis.
 
 ## 5. Associações e resultados
 

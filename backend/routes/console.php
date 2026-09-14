@@ -9,3 +9,4 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 Schedule::command('monitoring:cycle')->monthlyOn(1, '03:00');
+Schedule::command('monitoring:renew-terms')->dailyAt('04:00');
