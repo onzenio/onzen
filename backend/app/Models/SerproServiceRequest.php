@@ -3,7 +3,9 @@
 namespace App\Models;
 
 use App\Concerns\BelongsToAccount;
+use Database\Factories\SerproServiceRequestFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -13,7 +15,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 ])]
 class SerproServiceRequest extends Model
 {
-    use BelongsToAccount;
+    /** @use HasFactory<SerproServiceRequestFactory> */
+    use BelongsToAccount, HasFactory;
 
     public const PENDING = 'pending';
 
