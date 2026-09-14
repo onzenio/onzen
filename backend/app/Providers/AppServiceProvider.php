@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use App\Integrations\Serpro\HttpProcuradorTermSender;
+use App\Integrations\Serpro\ProcuradorTermSender;
 use App\Listeners\AuditAuthListener;
 use App\Models\Account;
 use App\Models\Client;
@@ -21,7 +23,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->bind(ProcuradorTermSender::class, HttpProcuradorTermSender::class);
     }
 
     /**

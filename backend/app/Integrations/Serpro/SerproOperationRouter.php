@@ -16,6 +16,10 @@ class SerproOperationRouter
             return "acoes/{$operation}";
         }
 
+        if (str_starts_with($operation, 'autenticar-')) {
+            return "autenticacao/{$operation}";
+        }
+
         throw new InvalidArgumentException("Operação sem rota conhecida: {$operation}.");
     }
 
