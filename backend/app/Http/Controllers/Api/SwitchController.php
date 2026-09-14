@@ -26,6 +26,8 @@ class SwitchController extends Controller
 
         if ($request->hasSession()) {
             $request->session()->put('switch_account_id', $target->id);
+            // Troca de tenant efetivo regenera o ID de sessão (fixação).
+            $request->session()->regenerate();
         }
 
         $audit->record($user, $user->account_id, $target->id, 'account.switch.enter');
@@ -55,6 +57,7 @@ class SwitchController extends Controller
 
         if ($request->hasSession()) {
             $request->session()->forget('switch_account_id');
+            $request->session()->regenerate();
         }
 
         $home = Account::query()->findOrFail($user->account_id);

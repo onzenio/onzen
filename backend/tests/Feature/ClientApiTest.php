@@ -76,6 +76,20 @@ class ClientApiTest extends TestCase
         ]);
     }
 
+    public function test_client_creation_ignores_a_forged_account_id(): void
+    {
+        $account = $this->accountWithPlan();
+        $other = $this->accountWithPlan();
+        $admin = $this->createUser($account, ['role' => UserRole::Admin]);
+
+        $this->actingAs($admin)
+            ->postJson('/api/clients', $this->payload(['account_id' => $other->id]))
+            ->assertCreated()
+            ->assertJsonPath('account_id', $account->id);
+
+        $this->assertDatabaseMissing('clients', ['account_id' => $other->id]);
+    }
+
     public function test_create_rejects_invalid_data_with_per_field_errors(): void
     {
         $account = $this->accountWithPlan();
