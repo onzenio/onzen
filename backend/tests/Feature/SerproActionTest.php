@@ -687,6 +687,56 @@ final class SerproActionTest extends TestCase
         );
     }
 
+    public function test_an_awaiting_protocol_response_without_a_protocol_is_refused_instead_of_reposted(): void
+    {
+        Queue::fake();
+        Event::fake([SerproActionFinished::class]);
+
+        [$account, $client, $enrollment] = $this->context();
+        $this->grantProcuration($client, '00146');
+
+        $transport = $this->openTransport($account, [
+            ['status' => 202, 'body' => []],
+        ]);
+
+        $action = $this->executor()->request(
+            $client,
+            'GERARDAS12',
+            'action-protocol-missing-key',
+            true,
+            ['periodo_apuracao' => '202601'],
+            $enrollment,
+        );
+
+        $refused = $this->executor()->execute($action);
+
+        $this->assertSame(SerproActionStatus::Rejected, $refused->status);
+        $this->assertTrue($refused->status->isTerminal());
+        $this->assertSame('protocol_missing', $refused->metadata['error_code']);
+        $this->assertNull($refused->protocol);
+        $this->assertNull($refused->document_ref);
+        $this->assertCount(1, $transport->callCalls);
+
+        // An unpollable protocol must never fall back to a second emission:
+        // the terminal refusal survives any later execution.
+        $this->travel(16)->seconds();
+
+        $again = $this->executor()->execute($refused);
+
+        $this->assertSame(SerproActionStatus::Rejected, $again->status);
+        $this->assertCount(1, $transport->callCalls);
+
+        Event::assertDispatched(SerproActionFinished::class, fn (SerproActionFinished $event): bool => $event->context['status'] === 'rejected'
+            && $event->context['error_code'] === 'protocol_missing'
+            && $event->context['retryable'] === false
+            && $event->context['terminal'] === true);
+
+        $audit = AuditLog::query()->where('action', 'monitoring.das.finished')->sole();
+        $this->assertSame('rejected', $audit->metadata['status']);
+        $this->assertSame('protocol_missing', $audit->metadata['error_code']);
+        $this->assertFalse($audit->metadata['document_available']);
+    }
+
     public function test_rate_limited_and_timeout_classify_as_retryable_outcomes(): void
     {
         Queue::fake();

@@ -600,6 +600,16 @@ final class SerproActionExecutor
         $retryAfter = $status->isRetryable() ? $this->retryDelay($classification, $result, $attempt) : null;
         $protocol = $this->protocolFor($action, $result);
 
+        if ($status === SerproActionStatus::Pending
+            && $classification->status === SerproClassification::AWAITING_PROTOCOL
+            && $protocol === null) {
+            // A pending protocol without an extractable protocol can never be
+            // polled: retrying would re-POST the emission. Refuse terminally,
+            // like the automatic path's `protocol_missing`, instead of relying
+            // on server-side idempotency.
+            return $this->fail($action, 'protocol_missing');
+        }
+
         $action = $this->persist($action, $status, [
             'protocol' => $protocol,
             'document_ref' => null,
