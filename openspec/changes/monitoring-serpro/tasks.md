@@ -6,7 +6,7 @@
 - [x] 1.4 Criar a estrutura de dados das definições do catálogo e o seed versionado com definições, operações e allowlist de procurações e verificar com teste que cobre definições disponíveis, indisponíveis e em prospecção.
 - [x] 1.5 Implementar o cofre local com referências opacas `secret:` e escopo por Account e verificar com teste de cifra, leitura, substituição e ausência de segredo em serialização e log.
 - [x] 1.6 Adicionar `config/monitoring.php` e as variáveis `MONITORING_SERPRO_*` ao `backend/.env.example` com defaults de homologação e dry-run e verificar com teste de defaults e overrides.
-- [ ] 1.7 Versionar as fixtures oficiais por operação em `backend/resources/fixtures/serpro/consultar/` e o provedor de fixtures e verificar com teste de carga por operação e de fixture ausente falhando de forma explícita.
+- [x] 1.7 Versionar as fixtures oficiais por operação em `backend/resources/fixtures/serpro/consultar/` e o provedor de fixtures e verificar com teste de carga por operação e de fixture ausente falhando de forma explícita.
 
 ## 2. Transporte e gate
 
