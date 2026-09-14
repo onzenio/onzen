@@ -55,16 +55,16 @@
 
 ## 8. UI com o template
 
-- [ ] 8.1 Implementar a tela de monitoramento com módulos, associações e busca usando os componentes do template e verificar com `pnpm typecheck` e smoke manual de lista, indisponibilidade e disparo.
-- [ ] 8.2 Implementar o painel do Client com snapshots, mudanças, alertas e CND sem consulta ao abrir e verificar com smoke manual de leitura e reconhecimento de alerta.
-- [ ] 8.3 Implementar a tela de parcelamentos com detalhe e download de guia e verificar com smoke manual de listagem, detalhe e guia ausente.
-- [ ] 8.4 Implementar a administração SERPRO da Account A e a gestão de Certificado Digital e autores e verificar com smoke manual de mascaramento, confirmações e validade.
-- [ ] 8.5 Implementar a exibição de quota e as mensagens de bloqueio/upgrade e verificar com smoke manual de saldo, esgotamento e erro acionável.
-- [ ] 8.6 Implementar a navegação de monitoramento filtrada por Role e Module e verificar com smoke manual por papel e `pnpm typecheck`.
+- [x] 8.1 Implementar a tela de monitoramento com módulos, associações e busca usando os componentes do template e verificar com `pnpm typecheck` e smoke manual de lista, indisponibilidade e disparo.
+- [x] 8.2 Implementar o painel do Client com snapshots, mudanças, alertas e CND sem consulta ao abrir e verificar com smoke manual de leitura e reconhecimento de alerta.
+- [x] 8.3 Implementar a tela de parcelamentos com detalhe e download de guia e verificar com smoke manual de listagem, detalhe e guia ausente.
+- [x] 8.4 Implementar a administração SERPRO da Account A e a gestão de Certificado Digital e autores e verificar com smoke manual de mascaramento, confirmações e validade.
+- [x] 8.5 Implementar a exibição de quota e as mensagens de bloqueio/upgrade e verificar com smoke manual de saldo, esgotamento e erro acionável.
+- [x] 8.6 Implementar a navegação de monitoramento filtrada por Role e Module e verificar com smoke manual por papel e `pnpm typecheck`.
 
 ## 9. Verificação final
 
-- [ ] 9.1 Rodar `composer test` no backend e anexar a saída como evidência, corrigindo falhas de PHPUnit e Pint.
-- [ ] 9.2 Rodar `pnpm lint` e `pnpm typecheck` no frontend e anexar a saída como evidência.
-- [ ] 9.3 Executar o smoke E2E em dry-run (Client associado, consulta disparada, snapshot e alerta visíveis, quota bloqueando, transporte desligado sem chamada real) e registrar o passo a passo no change.
-- [ ] 9.4 Atualizar `CONTEXT.md` com os termos novos e o `README`/`.env.example` com a operação da fila e do gate e verificar por revisão do diff.
+- [x] 9.1 Rodar `composer test` no backend e anexar a saída como evidência, corrigindo falhas de PHPUnit e Pint.
+- [x] 9.2 Rodar `pnpm lint` e `pnpm typecheck` no frontend e anexar a saída como evidência.
+- [x] 9.3 Executar o smoke E2E em dry-run (Client associado, consulta disparada, snapshot e alerta visíveis, quota bloqueando, transporte desligado sem chamada real) e registrar o passo a passo no change.
+- [x] 9.4 Atualizar `CONTEXT.md` com os termos novos e o `README`/`.env.example` com a operação da fila e do gate e verificar por revisão do diff.
