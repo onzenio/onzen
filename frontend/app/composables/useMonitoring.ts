@@ -31,6 +31,17 @@ export function backendErrorBody(error: unknown): BackendErrorBody | null {
   return null
 }
 
+export function backendValidationMessages(body?: BackendErrorBody | null): string[] {
+  if (!body) {
+    return ['Não foi possível concluir a operação.']
+  }
+  const messages = Object.values(body.errors ?? {}).flat()
+  if (messages.length > 0) {
+    return messages
+  }
+  return [monitoringErrorMessage(body)]
+}
+
 export function enrollmentStatusMeta(status: string): { label: string, color: 'success' | 'warning' | 'neutral' } {
   switch (status) {
     case 'active': return { label: 'Ativa', color: 'success' }
