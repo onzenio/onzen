@@ -43,7 +43,7 @@
 ## 6. Parcelamentos e ações
 
 - [x] 6.1 Criar a estrutura de dados de parcelamentos e a consulta normalizada das oito modalidades e verificar com teste por modalidade suportada, indisponível e isolamento por Account.
-- [ ] 6.2 Implementar o detalhe normalizado de pedidos, parcelas e pagamentos e o download de guia já gerada sem reemissão e verificar com teste de detalhe, download e guia ausente sem emissão.
+- [x] 6.2 Implementar o detalhe normalizado de pedidos, parcelas e pagamentos e o download de guia já gerada sem reemissão e verificar com teste de detalhe, download e guia ausente sem emissão.
 - [ ] 6.3 Implementar a emissão de DAS de PGDAS-D e de parcelamentos com confirmação, idempotency key, pré-condições fail-closed e poll de protocolo e verificar com teste de emissão confirmada, repetição idêntica, recusa sem transporte e recusa de Role.
 - [ ] 6.4 Implementar o Audit das ações e o escopo de carteira e verificar com teste de evento registrado, redaction e 404 fora da carteira.
 

@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\InvitationController;
 use App\Http\Controllers\Api\MeController;
 use App\Http\Controllers\Api\MonitoringEnrollmentController;
 use App\Http\Controllers\Api\MonitoringReadController;
+use App\Http\Controllers\Api\ParcelmentController;
 use App\Http\Controllers\Api\OnboardingController;
 use App\Http\Controllers\Api\PlanController;
 use App\Http\Controllers\Api\SerproAdminController;
@@ -70,4 +71,8 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::get('/monitoring/clients/{client}/alerts', [MonitoringReadController::class, 'alerts'])->whereNumber('client');
     Route::post('/monitoring/clients/{client}/alerts/{alert}/acknowledge', [MonitoringReadController::class, 'acknowledge'])->whereNumber(['client', 'alert']);
     Route::get('/monitoring/clients/{client}/cnd', [MonitoringReadController::class, 'cnd'])->whereNumber('client');
+
+    Route::get('/monitoring/clients/{client}/parcelamentos/{modality}', [ParcelmentController::class, 'index'])->whereNumber('client');
+    Route::get('/monitoring/clients/{client}/parcelamentos/orders/{order}', [ParcelmentController::class, 'show'])->whereNumber(['client', 'order']);
+    Route::get('/monitoring/clients/{client}/parcelamentos/orders/{order}/guia', [ParcelmentController::class, 'guia'])->whereNumber(['client', 'order']);
 });
