@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\AuditController;
 use App\Http\Controllers\Api\ClientController;
 use App\Http\Controllers\Api\InvitationController;
 use App\Http\Controllers\Api\MeController;
+use App\Http\Controllers\Api\MonitoringEnrollmentController;
 use App\Http\Controllers\Api\OnboardingController;
 use App\Http\Controllers\Api\PlanController;
 use App\Http\Controllers\Api\SerproAdminController;
@@ -53,4 +54,11 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::put('/admin/serpro/credentials', [SerproAdminController::class, 'updateCredentials']);
     Route::post('/admin/serpro/environment', [SerproAdminController::class, 'switchEnvironment']);
     Route::post('/admin/serpro/transport', [SerproAdminController::class, 'switchTransport']);
+
+    Route::get('/monitoring/enrollments', [MonitoringEnrollmentController::class, 'index']);
+    Route::post('/monitoring/enrollments', [MonitoringEnrollmentController::class, 'store']);
+    Route::get('/monitoring/enrollments/{id}', [MonitoringEnrollmentController::class, 'show']);
+    Route::post('/monitoring/enrollments/{id}/pause', [MonitoringEnrollmentController::class, 'pause']);
+    Route::post('/monitoring/enrollments/{id}/resume', [MonitoringEnrollmentController::class, 'resume']);
+    Route::delete('/monitoring/enrollments/{id}', [MonitoringEnrollmentController::class, 'destroy']);
 });
