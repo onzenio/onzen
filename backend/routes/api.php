@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\ClientController;
 use App\Http\Controllers\Api\InvitationController;
 use App\Http\Controllers\Api\MeController;
 use App\Http\Controllers\Api\MonitoringEnrollmentController;
+use App\Http\Controllers\Api\MonitoringReadController;
 use App\Http\Controllers\Api\OnboardingController;
 use App\Http\Controllers\Api\PlanController;
 use App\Http\Controllers\Api\SerproAdminController;
@@ -62,4 +63,11 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::post('/monitoring/enrollments/{id}/pause', [MonitoringEnrollmentController::class, 'pause'])->whereNumber('id');
     Route::post('/monitoring/enrollments/{id}/resume', [MonitoringEnrollmentController::class, 'resume'])->whereNumber('id');
     Route::delete('/monitoring/enrollments/{id}', [MonitoringEnrollmentController::class, 'destroy'])->whereNumber('id');
+
+    Route::get('/monitoring/dashboard', [MonitoringReadController::class, 'dashboard']);
+    Route::get('/monitoring/clients/{client}/snapshots', [MonitoringReadController::class, 'snapshots'])->whereNumber('client');
+    Route::get('/monitoring/clients/{client}/changes', [MonitoringReadController::class, 'changes'])->whereNumber('client');
+    Route::get('/monitoring/clients/{client}/alerts', [MonitoringReadController::class, 'alerts'])->whereNumber('client');
+    Route::post('/monitoring/clients/{client}/alerts/{alert}/acknowledge', [MonitoringReadController::class, 'acknowledge'])->whereNumber(['client', 'alert']);
+    Route::get('/monitoring/clients/{client}/cnd', [MonitoringReadController::class, 'cnd'])->whereNumber('client');
 });
