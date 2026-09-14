@@ -130,6 +130,15 @@ services:
             backend:
                 condition: service_healthy
 
+    serpro-worker:
+        <<: *backend
+        command: ["php", "artisan", "queue:work", "serpro", "--queue=serpro", "--tries=5", "--backoff=60", "--timeout=120"]
+        environment:
+            <<: *backend-env
+        depends_on:
+            backend:
+                condition: service_healthy
+
     frontend:
         <<: *frontend
         command: ["pnpm", "dev", "--host", "0.0.0.0", "--port", "3000"]

@@ -19,7 +19,7 @@
 ## 3. Execução e quota
 
 - [x] 3.1 Criar a estrutura de dados de execuções e tentativas com estados, idempotência e fencing e verificar com teste de transições, repetição sem duplicar e descarte de execução superada.
-- [ ] 3.2 Implementar os jobs de consulta e ação, a conexão de fila `serpro` e o worker no `docker-compose.yml` e verificar com teste de enfileiramento, tentativas e backoff.
+- [x] 3.2 Implementar os jobs de consulta e ação, a conexão de fila `serpro` e o worker no `docker-compose.yml` e verificar com teste de enfileiramento, tentativas e backoff.
 - [ ] 3.3 Implementar a classificação de resposta com retry, backoff, polling de protocolo e rejeição definitiva e verificar com teste de 429, timeout, protocolo pendente e rejeição.
 - [ ] 3.4 Implementar a quota agregada do Plan com reserva atômica antes do tráfego e mensagem de upgrade e verificar com teste de consumo, esgotamento sem débito e corrida concorrente sem ultrapassar o teto.
 - [ ] 3.5 Implementar o scheduler de disparo manual e do ciclo automático mensal somente de consulta e verificar com teste de trigger, origem automática, definições automáticas e negação de Role.

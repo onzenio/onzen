@@ -44,6 +44,15 @@ return [
             'after_commit' => false,
         ],
 
+        'serpro' => [
+            'driver' => 'database',
+            'connection' => env('DB_QUEUE_CONNECTION'),
+            'table' => env('DB_QUEUE_TABLE', 'jobs'),
+            'queue' => env('SERPRO_QUEUE', 'serpro'),
+            'retry_after' => (int) env('SERPRO_QUEUE_RETRY_AFTER', 300),
+            'after_commit' => false,
+        ],
+
         'beanstalkd' => [
             'driver' => 'beanstalkd',
             'host' => env('BEANSTALKD_QUEUE_HOST', 'localhost'),
