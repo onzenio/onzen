@@ -14,7 +14,7 @@ const { data: order, status: orderStatus } = await useFetch<{ data: ParcelmentOr
 )
 
 const selectedInstallment = ref<Installment | null>(null)
-const payments = ref<{ data: Paginated<Payment> } | null>(null)
+const payments = ref<Paginated<Payment> | null>(null)
 const paymentsStatus = ref<'idle' | 'pending' | 'success' | 'error'>('idle')
 
 watch(() => order.value?.data.installments, (installments) => {
@@ -27,7 +27,7 @@ async function selectInstallment(installment: Installment) {
   selectedInstallment.value = installment
   paymentsStatus.value = 'pending'
   try {
-    payments.value = await $fetch<{ data: Paginated<Payment> }>(`/api/monitoring/parcelas/${installment.id}/pagamentos`, { query: { per_page: 50 } })
+    payments.value = await $fetch<Paginated<Payment>>(`/api/monitoring/parcelas/${installment.id}/pagamentos`, { query: { per_page: 50 } })
     paymentsStatus.value = 'success'
   } catch {
     paymentsStatus.value = 'error'
@@ -182,7 +182,7 @@ const paymentColumns: TableColumn<Payment>[] = [
             </p>
           </template>
           <UTable
-            :data="payments?.data.data ?? []"
+            :data="payments?.data ?? []"
             :columns="paymentColumns"
             :loading="paymentsStatus === 'pending'"
           />
