@@ -21,7 +21,7 @@ use Throwable;
  * 6. `success`: qualquer outro resultado.
  *
  * `Retry-After` é lido dos headers (array ou escalar) ou de `retry_after` no
- * corpo, sempre em segundos e nunca abaixo de 1. `classifyException` cobre
+ * corpo, sempre em segundos e travado em [1, 900]. `classifyException` cobre
  * falhas de transporte lançadas antes de existir resposta HTTP. Nenhum
  * conteúdo fiscal é lido, logado ou propagado.
  */
@@ -109,6 +109,8 @@ final class ResponseClassifier
             $value = $value[0] ?? null;
         }
 
-        return is_numeric($value) ? max(1, (int) $value) : null;
+        // Fail-closed: o SERPRO dita backoff, então o valor é travado em
+        // [1, 900]s — sem teto um Retry-After arbitrário vira DoS de fila.
+        return is_numeric($value) ? min(900, max(1, (int) $value)) : null;
     }
 }

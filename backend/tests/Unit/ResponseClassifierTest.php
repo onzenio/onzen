@@ -113,6 +113,13 @@ final class ResponseClassifierTest extends TestCase
         $this->assertNull($this->classifier->classify(429, [], ['Retry-After' => ['soon']])->retryAfter);
     }
 
+    public function test_retry_after_is_clamped_to_fifteen_minutes(): void
+    {
+        $this->assertSame(900, $this->classifier->classify(429, [], ['Retry-After' => ['3600']])->retryAfter);
+        $this->assertSame(900, $this->classifier->classify(429, ['retry_after' => 99999])->retryAfter);
+        $this->assertSame(900, $this->classifier->classify(503, [], ['Retry-After' => '86400'])->retryAfter);
+    }
+
     public function test_timeouts_are_transient(): void
     {
         foreach ([408, 504] as $status) {
