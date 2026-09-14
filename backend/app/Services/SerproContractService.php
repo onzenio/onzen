@@ -9,11 +9,14 @@ class SerproContractService
 {
     public function __construct(private readonly AuditService $audit) {}
 
+    /**
+     * Gate efetivo é singleton: uma única linha dita ambiente e transporte.
+     */
     public function getOrCreate(string $environment = SerproContract::ENV_HOMOLOGACAO): SerproContract
     {
         return SerproContract::query()->firstOrCreate(
-            ['environment' => $environment],
-            ['transport_approved' => false],
+            [],
+            ['environment' => $environment, 'transport_approved' => false],
         );
     }
 

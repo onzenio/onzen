@@ -20,16 +20,23 @@ class SerproCredentialResolver
 
     /**
      * Resolve o consumer do Contratante no escopo da Account da plataforma.
+     * O ambiente efetivo vem do painel (singleton), não do .env.
      *
      * @return array{key: string, secret: string}|null
      */
     public function resolveConsumer(Account $platformAccount, ?string $environment = null): ?array
     {
-        $environment ??= (string) config('monitoring.environment', 'homologacao');
+        $contract = SerproContract::query()->first();
 
-        $contract = SerproContract::query()->where('environment', $environment)->first();
+        if ($contract === null) {
+            return null;
+        }
 
-        if ($contract === null || $contract->consumer_key_ref === null || $contract->consumer_secret_ref === null) {
+        $environment ??= $contract->environment;
+
+        if ($contract->environment !== $environment
+            || $contract->consumer_key_ref === null
+            || $contract->consumer_secret_ref === null) {
             return null;
         }
 
@@ -46,7 +53,8 @@ class SerproCredentialResolver
 
     public function token(Account $platformAccount, ?string $environment = null): ?string
     {
-        $environment ??= (string) config('monitoring.environment', 'homologacao');
+        $environment ??= SerproContract::query()->first()?->environment
+            ?? (string) config('monitoring.environment', 'homologacao');
 
         $cached = Cache::get(self::cacheKey($environment));
 
@@ -89,7 +97,8 @@ class SerproCredentialResolver
 
     public function clearToken(?string $environment = null): void
     {
-        $environment ??= (string) config('monitoring.environment', 'homologacao');
+        $environment ??= SerproContract::query()->first()?->environment
+            ?? (string) config('monitoring.environment', 'homologacao');
 
         Cache::forget(self::cacheKey($environment));
     }

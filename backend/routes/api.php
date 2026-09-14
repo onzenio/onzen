@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\InvitationController;
 use App\Http\Controllers\Api\MeController;
 use App\Http\Controllers\Api\OnboardingController;
 use App\Http\Controllers\Api\PlanController;
+use App\Http\Controllers\Api\SerproAdminController;
 use App\Http\Controllers\Api\SwitchController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -47,4 +48,9 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::post('/switch', [SwitchController::class, 'store']);
     Route::delete('/switch', [SwitchController::class, 'destroy']);
     Route::get('/audit', [AuditController::class, 'index']);
+
+    Route::get('/admin/serpro', [SerproAdminController::class, 'show']);
+    Route::put('/admin/serpro/credentials', [SerproAdminController::class, 'updateCredentials']);
+    Route::post('/admin/serpro/environment', [SerproAdminController::class, 'switchEnvironment']);
+    Route::post('/admin/serpro/transport', [SerproAdminController::class, 'switchTransport']);
 });
