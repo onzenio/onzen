@@ -10,13 +10,22 @@ use Illuminate\Database\Eloquent\Factories\Factory;
  */
 class SerproContractFactory extends Factory
 {
+    /**
+     * Define the model's default state.
+     *
+     * @return array<string, mixed>
+     */
     public function definition(): array
     {
         return [
-            'environment' => SerproContract::ENV_HOMOLOGACAO,
-            'consumer_key_ref' => 'secret:'.fake()->unique()->lexify('????????'),
-            'consumer_secret_ref' => 'secret:'.fake()->unique()->lexify('????????'),
-            'transport_approved' => false,
+            'environment' => 'homologacao',
+            'credential_ref' => null,
+            'updated_by_user_id' => null,
         ];
+    }
+
+    public function production(): static
+    {
+        return $this->state(fn () => ['environment' => 'producao']);
     }
 }

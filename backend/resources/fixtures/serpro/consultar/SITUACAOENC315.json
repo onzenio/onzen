@@ -1,0 +1,12 @@
+{
+  "source": "exemplos/retorno_consultar_situacao_encerramento_mit",
+  "operation": "SITUACAOENC315",
+  "dry_run": true,
+  "http_status": 200,
+  "body": {
+    "dados": {
+      "periodoApuracao": "2026-01",
+      "situacaoEncerramento": "encerrada"
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "source": "exemplos/retorno_consultar_anos_calendarios",
+  "operation": "CONSULTARANOSCALENDARIOS102",
+  "dry_run": true,
+  "http_status": 200,
+  "body": {
+    "dados": {
+      "anosCalendarios": [
+        { "anoCalendario": "2025", "opcao": "Competência" },
+        { "anoCalendario": "2026", "opcao": "Caixa" }
+      ]
+    }
+  }
+}

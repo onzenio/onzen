@@ -3,162 +3,110 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Account;
-use App\Models\Client;
+use App\Http\Requests\Monitoring\StoreMonitoringEnrollmentRequest;
+use App\Http\Requests\Monitoring\UpdateMonitoringEnrollmentRequest;
 use App\Models\MonitoringEnrollment;
-use App\Services\EnrollmentService;
-use App\Services\MonitoringScheduler;
-use App\Services\OutorgaSyncService;
-use App\Services\QuotaExhaustedException;
-use App\Support\CurrentAccount;
-use Illuminate\Auth\Access\AuthorizationException;
+use App\Models\User;
+use App\Services\Monitoring\MonitoringEnrollmentService;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 
+/**
+ * Associações de Monitoramento da carteira: listagem paginada com busca por
+ * Client, criação com elegibilidade fail-closed, leitura, mudança de
+ * configuração e encerramento (que preserva o histórico).
+ */
 class MonitoringEnrollmentController extends Controller
 {
     use AuthorizesRequests;
 
-    public function __construct(
-        private readonly EnrollmentService $enrollments,
-        private readonly OutorgaSyncService $outorga,
-    ) {}
-
-    private function effectiveAccountId(Request $request): int
-    {
-        return CurrentAccount::get() ?? $request->user()->account_id;
-    }
-
-    private function findForAccount(Request $request, int $id): MonitoringEnrollment
-    {
-        // 404 indistinguível fora da Account efetiva.
-        return MonitoringEnrollment::query()->withoutGlobalScopes()
-            ->where('account_id', $this->effectiveAccountId($request))
-            ->whereKey($id)
-            ->firstOrFail();
-    }
+    public function __construct(private readonly MonitoringEnrollmentService $service) {}
 
     public function index(Request $request): JsonResponse
     {
         $this->authorize('viewAny', MonitoringEnrollment::class);
 
-        $accountId = CurrentAccount::get() ?? $request->user()->account_id;
-        $account = Account::query()->findOrFail($accountId);
-
-        $page = $this->enrollments->search($account, $request->query('q'), 15);
-
-        return response()->json([
-            'data' => $page->items(),
-            'meta' => [
-                'current_page' => $page->currentPage(),
-                'last_page' => $page->lastPage(),
-                'per_page' => $page->perPage(),
-                'total' => $page->total(),
-            ],
-        ]);
-    }
-
-    public function store(Request $request): JsonResponse
-    {
-        $this->authorize('create', MonitoringEnrollment::class);
-
-        $data = $request->validate([
-            'client_id' => ['required', 'integer'],
-            'definition_code' => ['required', 'string', 'max:60'],
+        $filters = $request->validate([
+            'search' => ['nullable', 'string', 'max:120'],
+            'status' => ['nullable', Rule::in([
+                MonitoringEnrollment::STATUS_ACTIVE,
+                MonitoringEnrollment::STATUS_PAUSED,
+                MonitoringEnrollment::STATUS_ENDED,
+            ])],
+            'definition_id' => ['nullable', 'string', 'max:120'],
+            'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
         ]);
 
-        $accountId = CurrentAccount::get() ?? $request->user()->account_id;
-        $account = Account::query()->findOrFail($accountId);
+        /** @var User $actor */
+        $actor = $request->user();
 
-        // 404 cross-account antes de qualquer validação de negócio.
-        $client = Client::query()->whereKey($data['client_id'])->firstOrFail();
-        $this->authorize('view', $client);
+        $page = $this->service->paginate($actor, $filters);
+        $page->through(fn (MonitoringEnrollment $enrollment): array => $this->payload($enrollment));
 
-        $enrollment = $this->enrollments->create($account, $data['client_id'], $data['definition_code'], $request->user());
-
-        return response()->json($enrollment, 201);
+        return response()->json($page);
     }
 
-    public function show(Request $request, int $id): JsonResponse
+    public function store(StoreMonitoringEnrollmentRequest $request): JsonResponse
     {
-        $enrollment = $this->findForAccount($request, $id);
+        /** @var User $actor */
+        $actor = $request->user();
+
+        $enrollment = $this->service->create($actor, $request->validated());
+
+        return response()->json(['data' => $this->payload($enrollment)], 201);
+    }
+
+    public function show(MonitoringEnrollment $enrollment): JsonResponse
+    {
         $this->authorize('view', $enrollment);
 
-        return response()->json($enrollment->load('client'));
+        return response()->json(['data' => $this->payload($enrollment->load(['client', 'definition']))]);
     }
 
-    public function pause(Request $request, int $id): JsonResponse
+    public function update(UpdateMonitoringEnrollmentRequest $request, MonitoringEnrollment $enrollment): JsonResponse
     {
-        $enrollment = $this->findForAccount($request, $id);
-        $this->authorize('update', $enrollment);
+        $enrollment = $this->service->updateConfiguration($enrollment, $request->validated()['configuration']);
 
-        $data = $request->validate(['reason' => ['required', 'string', 'max:255']]);
-        $enrollment->pause($data['reason']);
-
-        return response()->json($enrollment->refresh());
+        return response()->json(['data' => $this->payload($enrollment)]);
     }
 
-    public function resume(Request $request, int $id): JsonResponse
+    public function destroy(MonitoringEnrollment $enrollment): JsonResponse
     {
-        $enrollment = $this->findForAccount($request, $id);
-        $this->authorize('update', $enrollment);
-        $enrollment->resume();
-
-        return response()->json($enrollment->refresh());
-    }
-
-    public function destroy(Request $request, int $id): JsonResponse
-    {
-        $enrollment = $this->findForAccount($request, $id);
         $this->authorize('delete', $enrollment);
-        $enrollment->end();
 
-        return response()->json($enrollment->refresh());
-    }
-
-    public function divergences(Request $request): JsonResponse
-    {
-        $this->authorize('viewAny', MonitoringEnrollment::class);
-
-        return response()->json([
-            'data' => $this->outorga->divergences($this->effectiveAccountId($request)),
-        ]);
+        return response()->json(['data' => $this->payload($this->service->end($enrollment))]);
     }
 
     /**
-     * Disparo manual de consulta: responde 202 sem tráfego na requisição.
+     * @return array<string, mixed>
      */
-    public function trigger(Request $request, int $id): JsonResponse
+    private function payload(MonitoringEnrollment $enrollment): array
     {
-        $enrollment = $this->findForAccount($request, $id);
-        $this->authorize('update', $enrollment);
-
-        if ($enrollment->status !== MonitoringEnrollment::ACTIVE) {
-            return response()->json(['message' => 'Associação inativa: disparo não permitido.'], 422);
-        }
-
-        $data = $request->validate([
-            'idempotency_key' => ['sometimes', 'string', 'max:120'],
-        ]);
-
-        $account = Account::query()->findOrFail($enrollment->account_id);
-
-        try {
-            $run = app(MonitoringScheduler::class)->triggerManual(
-                $account,
-                $request->user(),
-                $enrollment->definition_code,
-                $enrollment->client_id,
-                $data['idempotency_key'] ?? (string) Str::uuid(),
-            );
-        } catch (AuthorizationException $e) {
-            return response()->json(['message' => $e->getMessage()], 403);
-        } catch (QuotaExhaustedException $e) {
-            return response()->json(['message' => $e->getMessage()], 422);
-        }
-
-        return response()->json(['run_id' => $run->id, 'status' => $run->status], 202);
+        return [
+            'id' => $enrollment->id,
+            'status' => $enrollment->status,
+            'pause_reason' => $enrollment->pause_reason,
+            'version' => $enrollment->version,
+            'configuration' => $enrollment->configuration,
+            'last_change_at' => $enrollment->last_change_at?->toIso8601String(),
+            'client' => $enrollment->client === null ? null : [
+                'id' => $enrollment->client->id,
+                'razao_social' => $enrollment->client->razao_social,
+                'cnpj' => $enrollment->client->cnpj,
+                'monitoring_enabled' => $enrollment->client->monitoring_enabled,
+            ],
+            'definition' => $enrollment->definition === null ? null : [
+                'id' => $enrollment->definition->id,
+                'name' => $enrollment->definition->name,
+                'category' => $enrollment->definition->category,
+                'version' => $enrollment->definition->version,
+                'availability' => $enrollment->definition->availability,
+                'is_active' => $enrollment->definition->is_active,
+            ],
+            'created_at' => $enrollment->created_at?->toIso8601String(),
+            'updated_at' => $enrollment->updated_at?->toIso8601String(),
+        ];
     }
 }

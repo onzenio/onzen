@@ -2,8 +2,9 @@
 
 namespace Database\Factories;
 
+use App\Enums\AuthorDocumentType;
+use App\Enums\AuthorStatus;
 use App\Models\Account;
-use App\Models\AccountCertificate;
 use App\Models\SerproRequestAuthor;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
@@ -12,16 +13,35 @@ use Illuminate\Database\Eloquent\Factories\Factory;
  */
 class SerproRequestAuthorFactory extends Factory
 {
+    /**
+     * Define the model's default state.
+     *
+     * @return array<string, mixed>
+     */
     public function definition(): array
     {
         return [
             'account_id' => Account::factory(),
-            'account_certificate_id' => AccountCertificate::factory(),
             'document' => fake()->unique()->numerify('###########'),
+            'document_type' => AuthorDocumentType::Pf,
             'name' => fake()->name(),
-            'status' => SerproRequestAuthor::STATUS_ACTIVE,
-            'token_ref' => null,
-            'token_expires_at' => null,
+            'status' => AuthorStatus::Active,
+            'certificate_thumbprint' => null,
+            'certificate_expires_at' => null,
+            'metadata' => [],
         ];
+    }
+
+    public function ineligible(): static
+    {
+        return $this->state(fn () => ['status' => AuthorStatus::Ineligible]);
+    }
+
+    public function company(): static
+    {
+        return $this->state(fn () => [
+            'document' => fake()->unique()->numerify('##############'),
+            'document_type' => AuthorDocumentType::Pj,
+        ]);
     }
 }

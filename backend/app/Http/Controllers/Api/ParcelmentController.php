@@ -2,127 +2,208 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Contracts\ArtifactStore;
+use App\Exceptions\ArtifactStorageUnavailableException;
 use App\Http\Controllers\Controller;
+use App\Integrations\Serpro\ConsultCatalog;
 use App\Models\Client;
+use App\Models\MonitoringArtifact;
+use App\Models\ParcelmentInstallment;
 use App\Models\ParcelmentOrder;
-use App\Services\ArtifactStore;
+use App\Models\ParcelmentPayment;
 use App\Services\AuditService;
-use App\Services\ParcelmentService;
-use App\Support\CurrentAccount;
+use App\Support\MonitoringReadPayload;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Symfony\Component\HttpFoundation\StreamedResponse;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\Rule;
+use Symfony\Component\HttpFoundation\Response;
 
+/**
+ * Parcelamentos (Task 26): consulta normalizada de pedidos, detalhe com
+ * parcelas/pagamentos e download de guia já existente.
+ *
+ * Todas as rotas são isoladas por Account: o binding de rota usa o escopo
+ * global de `BelongsToAccount` resolvido pelo `ResolveAccount`, então um
+ * recurso de outra Account responde 404 indistinguível. O download da guia
+ * entrega somente artefato já existente — nunca emite —, é auditado e segue
+ * a matriz de Role do artefato (admin/operator).
+ */
 class ParcelmentController extends Controller
 {
     use AuthorizesRequests;
 
-    public function __construct(
-        private readonly ParcelmentService $parcelments,
-        private readonly ArtifactStore $artifacts,
-        private readonly AuditService $audit,
-    ) {}
-
-    private function effectiveAccountId(Request $request): int
+    public function index(Request $request): JsonResponse
     {
-        return CurrentAccount::get() ?? $request->user()->account_id;
-    }
+        $filters = $request->validate([
+            'modalidade' => ['nullable', 'string', Rule::in(ConsultCatalog::PARCELMENT_MODALITIES)],
+            'client_id' => ['nullable', 'integer', 'min:1'],
+            'status' => ['nullable', 'string', 'max:60'],
+            'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
+        ]);
 
-    private function clientForAccount(Request $request, int $clientId): Client
-    {
-        return Client::query()->withoutGlobalScopes()
-            ->where('account_id', $this->effectiveAccountId($request))
-            ->whereKey($clientId)
-            ->firstOrFail();
-    }
+        $clientId = $filters['client_id'] ?? null;
 
-    public function index(Request $request, int $clientId, string $modality): JsonResponse
-    {
-        $client = $this->clientForAccount($request, $clientId);
-        $this->authorize('view', $client);
-
-        $request->validate(['modality' => ['string']]);
-
-        try {
-            $orders = $this->parcelments->list($client, $modality);
-        } catch (\RuntimeException $e) {
-            return response()->json(['message' => $e->getMessage()], 422);
+        if ($clientId !== null) {
+            // Cross-account filters answer an indistinguishable 404 instead
+            // of silently returning an empty page.
+            Client::query()->findOrFail($clientId);
         }
 
+        $page = ParcelmentOrder::query()
+            ->with(['client', 'installments'])
+            ->when(isset($filters['modalidade']), fn ($query) => $query->where('modality', $filters['modalidade']))
+            ->when($clientId !== null, fn ($query) => $query->where('client_id', $clientId))
+            ->when(isset($filters['status']), fn ($query) => $query->where('status', $filters['status']))
+            ->orderByDesc('id')
+            ->paginate((int) ($filters['per_page'] ?? 25))
+            ->through(fn (ParcelmentOrder $order): array => MonitoringReadPayload::parcelmentOrder($order));
+
+        return response()->json($page);
+    }
+
+    public function show(ParcelmentOrder $parcelment): JsonResponse
+    {
         return response()->json([
-            'data' => $orders->map(fn (ParcelmentOrder $o) => [
-                'id' => $o->id,
-                'modality_code' => $o->modality_code,
-                'order_number' => $o->order_number,
-                'status' => $o->status,
-                'total_value' => $o->total_value,
-                'installments_count' => $o->installments->count(),
-                'payments_count' => $o->payments->count(),
-                'has_guia' => $o->guia_ref !== null,
-            ]),
+            'data' => MonitoringReadPayload::parcelmentOrderDetail(
+                $parcelment->load(['client', 'installments.payments']),
+            ),
         ]);
     }
 
-    public function show(Request $request, int $clientId, int $orderId): JsonResponse
+    public function installments(Request $request, ParcelmentOrder $parcelment): JsonResponse
     {
-        $order = $this->orderForAccount($request, $clientId, $orderId);
+        $perPage = $request->validate([
+            'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
+        ])['per_page'] ?? 50;
 
-        return response()->json([
-            'id' => $order->id,
-            'modality_code' => $order->modality_code,
-            'order_number' => $order->order_number,
-            'status' => $order->status,
-            'total_value' => $order->total_value,
-            'has_guia' => $order->guia_ref !== null,
-            'installments' => $order->installments,
-            'payments' => $order->payments,
-        ]);
+        $page = $parcelment->installments()
+            ->orderBy('number')
+            ->paginate((int) $perPage)
+            ->through(fn (ParcelmentInstallment $installment): array => MonitoringReadPayload::parcelmentInstallment($installment));
+
+        return response()->json($page);
+    }
+
+    public function payments(Request $request, ParcelmentInstallment $installment): JsonResponse
+    {
+        $perPage = $request->validate([
+            'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
+        ])['per_page'] ?? 50;
+
+        $page = $installment->payments()
+            ->orderByDesc('id')
+            ->paginate((int) $perPage)
+            ->through(fn (ParcelmentPayment $payment): array => MonitoringReadPayload::parcelmentPayment($payment));
+
+        return response()->json($page);
     }
 
     /**
-     * Download da guia JÁ gerada. Nunca emite: sem guia, 404 explícito.
+     * Download auditado da guia (DAS) já existente de uma parcela.
+     *
+     * Fail-closed: parcela sem guia, referência sem artefato e arquivo físico
+     * ausente respondem o mesmo 404 factual — nenhuma emissão é disparada. O
+     * armazenamento indisponível responde 503 retryable sem vazar caminho.
      */
-    public function guia(Request $request, int $clientId, int $orderId): StreamedResponse|JsonResponse
-    {
-        $order = $this->orderForAccount($request, $clientId, $orderId);
+    public function downloadGuide(
+        Request $request,
+        ParcelmentInstallment $installment,
+        ArtifactStore $store,
+        AuditService $audit,
+    ): Response {
+        $ref = trim((string) $installment->guide_ref);
 
-        if ($order->guia_ref === null) {
-            return response()->json([
-                'message' => 'Guia ainda não gerada para este pedido. Nenhuma emissão foi realizada.',
-            ], 404);
+        if ($ref === '') {
+            return $this->guideNotFound();
         }
 
-        $contents = $this->artifacts->get($order->account_id, $order->guia_ref);
+        $artifact = MonitoringArtifact::query()
+            ->where('ref', $ref)
+            ->where('account_id', $installment->account_id)
+            ->first();
+
+        if ($artifact === null) {
+            return $this->guideNotFound();
+        }
+
+        $this->authorize('download', $artifact);
+
+        try {
+            $contents = $store->get($ref);
+        } catch (ArtifactStorageUnavailableException) {
+            $audit->record($request->user(), (int) $artifact->account_id, null, 'monitoring.parcelment.guide.download_failed', [
+                'ref' => $ref,
+                'installment_id' => $installment->getKey(),
+                'reason' => 'storage_unavailable',
+            ]);
+
+            Log::warning('monitoring.parcelment_guide_storage_unavailable', [
+                'ref' => $ref,
+                'account_id' => $artifact->account_id,
+            ]);
+
+            return response()->json([
+                'message' => 'O armazenamento de artefatos está temporariamente indisponível. Tente novamente.',
+                'code' => 'ARTIFACT_STORAGE_UNAVAILABLE',
+                'retryable' => true,
+            ], 503, ['Retry-After' => '15']);
+        }
 
         if ($contents === null) {
-            return response()->json(['message' => 'Artefato da guia indisponível.'], 503);
+            return $this->guideNotFound();
         }
 
-        $this->audit->record($request->user(), $order->account_id, $order->account_id, 'parcelment_guia.downloaded', [
-            'order_id' => $order->id,
-            'modality' => $order->modality_code,
+        $audit->record($request->user(), (int) $artifact->account_id, null, 'monitoring.parcelment.guide.downloaded', [
+            'ref' => $ref,
+            'installment_id' => $installment->getKey(),
+            'order_id' => $installment->order_id,
+            'hash_sha256' => $artifact->hash_sha256,
         ]);
+
+        $filename = $this->guideFilename($artifact, $installment);
 
         return response()->streamDownload(
             function () use ($contents): void {
                 echo $contents;
             },
-            "guia-{$order->order_number}.pdf",
-            ['Content-Type' => 'application/pdf'],
+            $filename,
+            [
+                'Content-Type' => $this->contentType($artifact->kind, $filename),
+                'Cache-Control' => 'private, no-store',
+                'X-Content-Type-Options' => 'nosniff',
+            ],
         );
     }
 
-    private function orderForAccount(Request $request, int $clientId, int $orderId): ParcelmentOrder
+    private function guideNotFound(): JsonResponse
     {
-        $client = $this->clientForAccount($request, $clientId);
-        $this->authorize('view', $client);
+        return response()->json(['message' => 'Guia ainda não disponível para esta parcela.'], 404);
+    }
 
-        return ParcelmentOrder::query()->withoutGlobalScopes()
-            ->with(['installments', 'payments'])
-            ->where('account_id', $client->account_id)
-            ->where('client_id', $client->id)
-            ->whereKey($orderId)
-            ->firstOrFail();
+    private function guideFilename(MonitoringArtifact $artifact, ParcelmentInstallment $installment): string
+    {
+        $name = $artifact->original_name;
+
+        if (! is_string($name) || trim($name) === '') {
+            $name = 'guia-parcela-'.$installment->getKey().'.pdf';
+        }
+
+        $sanitized = preg_replace('/[^A-Za-z0-9_.-]+/', '-', basename(str_replace('\\', '/', $name))) ?? '';
+        $sanitized = trim($sanitized, '.-');
+
+        return $sanitized !== '' ? $sanitized : 'guia.pdf';
+    }
+
+    private function contentType(string $kind, string $filename): string
+    {
+        $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+
+        return match (true) {
+            $kind === 'pdf' || $extension === 'pdf' => 'application/pdf',
+            $kind === 'xml' || $extension === 'xml' => 'application/xml; charset=UTF-8',
+            default => 'application/octet-stream',
+        };
     }
 }

@@ -6,39 +6,119 @@ use Tests\TestCase;
 
 class MonitoringConfigTest extends TestCase
 {
-    public function test_defaults_sao_homologacao_dry_run_e_transporte_desligado(): void
+    /**
+     * @var list<string>
+     */
+    private const ENV_KEYS = [
+        'MONITORING_SERPRO_BASE_URL',
+        'MONITORING_SERPRO_TOKEN_URL',
+        'MONITORING_SERPRO_ENVIRONMENT',
+        'MONITORING_SERPRO_DRY_RUN',
+        'MONITORING_SERPRO_TRANSPORT_APPROVED',
+        'MONITORING_SERPRO_TIMEOUT',
+        'MONITORING_SERPRO_CONNECT_TIMEOUT',
+        'MONITORING_SERPRO_ROLE_TYPE',
+        'MONITORING_SERPRO_QUEUE',
+        'MONITORING_SERPRO_QUEUE_CONNECTION',
+        'MONITORING_SERPRO_FIXTURES_PATH',
+        'MONITORING_SERPRO_MAX_ATTEMPTS',
+        'MONITORING_SERPRO_CREDENTIAL_VERSION',
+    ];
+
+    protected function tearDown(): void
     {
+        $this->clearMonitoringEnv();
+
+        parent::tearDown();
+    }
+
+    public function test_defaults_are_fail_closed(): void
+    {
+        $this->loadMonitoringConfig();
+
+        $this->assertSame('https://gateway.apiserpro.serpro.gov.br/integra-contador/v1', config('monitoring.base_url'));
+        $this->assertSame('https://autenticacao.sapi.serpro.gov.br/authenticate', config('monitoring.token_url'));
         $this->assertSame('homologacao', config('monitoring.environment'));
-        $this->assertTrue((bool) config('monitoring.dry_run'));
-        $this->assertFalse((bool) config('monitoring.transport.approved'));
+        $this->assertTrue(config('monitoring.dry_run'));
+        $this->assertFalse(config('monitoring.transport.approved'));
+        $this->assertSame(15, config('monitoring.transport.timeout'));
+        $this->assertSame(5, config('monitoring.transport.connect_timeout'));
+        $this->assertSame('TERCEIROS', config('monitoring.transport.role_type'));
         $this->assertSame('serpro', config('monitoring.queue'));
+        $this->assertSame('serpro', config('monitoring.queue_connection'));
+        $this->assertSame(8, config('monitoring.limits.max_attempts'));
+        $this->assertSame(1, config('monitoring.credential_version'));
     }
 
-    public function test_overrides_por_variavel_de_ambiente(): void
+    public function test_fixtures_path_defaults_to_backend_consult_fixtures_directory(): void
     {
-        putenv('MONITORING_SERPRO_ENVIRONMENT=producao');
-        putenv('MONITORING_SERPRO_DRY_RUN=false');
-        putenv('MONITORING_SERPRO_TRANSPORT_APPROVED=true');
+        $this->loadMonitoringConfig();
 
-        try {
-            $config = require base_path('config/monitoring.php');
+        $this->assertSame('resources/fixtures/serpro/consultar', config('monitoring.fixtures_path'));
+        $this->assertSame(
+            base_path('resources/fixtures/serpro/consultar'),
+            base_path((string) config('monitoring.fixtures_path')),
+        );
+        $this->assertStringEndsWith(
+            'backend/resources/fixtures/serpro/consultar',
+            base_path((string) config('monitoring.fixtures_path')),
+        );
+    }
 
-            $this->assertSame('producao', $config['environment']);
-            $this->assertFalse((bool) $config['dry_run']);
-            $this->assertTrue((bool) $config['transport']['approved']);
-        } finally {
-            putenv('MONITORING_SERPRO_ENVIRONMENT');
-            putenv('MONITORING_SERPRO_DRY_RUN');
-            putenv('MONITORING_SERPRO_TRANSPORT_APPROVED');
+    public function test_every_key_can_be_overridden_by_environment(): void
+    {
+        $this->loadMonitoringConfig([
+            'MONITORING_SERPRO_BASE_URL' => 'https://sandbox.example.test/v2',
+            'MONITORING_SERPRO_TOKEN_URL' => 'https://sandbox.example.test/token',
+            'MONITORING_SERPRO_ENVIRONMENT' => 'producao',
+            'MONITORING_SERPRO_DRY_RUN' => 'false',
+            'MONITORING_SERPRO_TRANSPORT_APPROVED' => 'true',
+            'MONITORING_SERPRO_TIMEOUT' => '30',
+            'MONITORING_SERPRO_CONNECT_TIMEOUT' => '10',
+            'MONITORING_SERPRO_ROLE_TYPE' => 'PROPRIO',
+            'MONITORING_SERPRO_QUEUE' => 'serpro-high',
+            'MONITORING_SERPRO_QUEUE_CONNECTION' => 'redis',
+            'MONITORING_SERPRO_FIXTURES_PATH' => 'resources/fixtures/serpro/consultar/custom',
+            'MONITORING_SERPRO_MAX_ATTEMPTS' => '3',
+            'MONITORING_SERPRO_CREDENTIAL_VERSION' => '7',
+        ]);
+
+        $this->assertSame('https://sandbox.example.test/v2', config('monitoring.base_url'));
+        $this->assertSame('https://sandbox.example.test/token', config('monitoring.token_url'));
+        $this->assertSame('producao', config('monitoring.environment'));
+        $this->assertFalse(config('monitoring.dry_run'));
+        $this->assertTrue(config('monitoring.transport.approved'));
+        $this->assertSame(30, config('monitoring.transport.timeout'));
+        $this->assertSame(10, config('monitoring.transport.connect_timeout'));
+        $this->assertSame('PROPRIO', config('monitoring.transport.role_type'));
+        $this->assertSame('serpro-high', config('monitoring.queue'));
+        $this->assertSame('redis', config('monitoring.queue_connection'));
+        $this->assertSame('resources/fixtures/serpro/consultar/custom', config('monitoring.fixtures_path'));
+        $this->assertSame(3, config('monitoring.limits.max_attempts'));
+        $this->assertSame(7, config('monitoring.credential_version'));
+    }
+
+    /**
+     * @param  array<string, string>  $overrides
+     */
+    private function loadMonitoringConfig(array $overrides = []): void
+    {
+        $this->clearMonitoringEnv();
+
+        foreach ($overrides as $key => $value) {
+            putenv("{$key}={$value}");
+            $_ENV[$key] = $value;
+            $_SERVER[$key] = $value;
         }
+
+        config()->set('monitoring', require config_path('monitoring.php'));
     }
 
-    public function test_env_example_documenta_variaveis(): void
+    private function clearMonitoringEnv(): void
     {
-        $example = file_get_contents(base_path('.env.example'));
-
-        foreach (['MONITORING_SERPRO_ENVIRONMENT', 'MONITORING_SERPRO_DRY_RUN', 'MONITORING_SERPRO_TRANSPORT_APPROVED', 'MONITORING_SERPRO_QUEUE'] as $key) {
-            $this->assertStringContainsString($key, $example);
+        foreach (self::ENV_KEYS as $key) {
+            putenv($key);
+            unset($_ENV[$key], $_SERVER[$key]);
         }
     }
 }

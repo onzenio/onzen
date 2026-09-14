@@ -1,0 +1,13 @@
+{
+  "source": "exemplos/retorno_solicitar_protocolo_sitfis",
+  "operation": "SOLICITARPROTOCOLO91",
+  "dry_run": true,
+  "http_status": 202,
+  "body": {
+    "protocolo": "SITFIS-PROTO-91",
+    "protocol": { "protocol_id": "SITFIS-PROTO-91", "obtained": false },
+    "dados": {
+      "protocolo": "SITFIS-PROTO-91"
+    }
+  }
+}

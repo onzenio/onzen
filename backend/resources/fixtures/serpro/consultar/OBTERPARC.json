@@ -1,0 +1,24 @@
+{
+  "source": "exemplos/retorno_obter_parcelamento",
+  "operation": "OBTERPARC",
+  "dry_run": true,
+  "http_status": 200,
+  "body": {
+    "dados": {
+      "numero": "PARC-001",
+      "id": "PARC-001",
+      "status": "ativo",
+      "quantidadeParcelas": 12,
+      "valorTotal": 1200.5,
+      "parcelas": [
+        {
+          "numeroParcela": 1,
+          "id": "PARC-001-1",
+          "status": "available",
+          "valor": 100.04,
+          "vencimento": "2026-02-28"
+        }
+      ]
+    }
+  }
+}

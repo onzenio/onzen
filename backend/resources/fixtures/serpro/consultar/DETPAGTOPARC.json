@@ -1,0 +1,19 @@
+{
+  "source": "exemplos/retorno_detalhe_pagamento_parcela",
+  "operation": "DETPAGTOPARC",
+  "dry_run": true,
+  "http_status": 200,
+  "body": {
+    "dados": {
+      "numero": "PAG-001",
+      "id": "PAG-001",
+      "numeroDas": "85800000000000000165",
+      "numeroParcela": 1,
+      "status": "pago",
+      "valor": 100.04,
+      "vencimento": "2026-02-28",
+      "dataPagamento": "2026-02-20",
+      "dataArrecadacao": "2026-02-21"
+    }
+  }
+}

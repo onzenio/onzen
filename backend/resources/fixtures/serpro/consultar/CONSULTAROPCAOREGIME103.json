@@ -1,0 +1,13 @@
+{
+  "source": "exemplos/retorno_consultar_opcao_regime",
+  "operation": "CONSULTAROPCAOREGIME103",
+  "dry_run": true,
+  "http_status": 200,
+  "body": {
+    "dados": {
+      "anoCalendario": "2026",
+      "opcaoRegime": "Caixa",
+      "dataOpcao": "2026-01-15"
+    }
+  }
+}

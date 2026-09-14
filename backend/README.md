@@ -7,6 +7,26 @@
 <a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
 </p>
 
+# OneFisc API
+
+API Laravel do OneFisc.
+
+## Monitoramento SERPRO — operação
+
+O monitoramento roda na fila dedicada `serpro` (conexão `serpro`, database). O worker do `docker-compose.yml` (`serpro-queue`) executa `queue:work serpro --tries=8 --timeout=270`; localmente, suba um worker equivalente:
+
+```bash
+php artisan queue:work serpro --tries=8 --timeout=270
+```
+
+O gate de transporte é fail-closed e vive em `config/monitoring.php` + painel da Account A:
+
+- `MONITORING_SERPRO_DRY_RUN=true` (default) faz as execuções usarem fixtures em vez de tráfego real.
+- `MONITORING_SERPRO_TRANSPORT_APPROVED=false` (default) mantém o transporte desligado; ligar é decisão do painel (`/api/admin/serpro/transport`), com dupla confirmação e evidência em produção.
+- `GET /api/monitoring/health` expõe o estado efetivo (`gated`, `configured`, `unavailable`, `degraded`).
+
+Comandos agendados: `monitoring:run-monthly-cycle` (dia 1, somente definições de consulta) e `monitoring:warm-procuracoes` (diário, renova termos e revalida outorgas).
+
 ## About Laravel
 
 OneFisc backend (Laravel). Operação do monitoramento SERPRO:

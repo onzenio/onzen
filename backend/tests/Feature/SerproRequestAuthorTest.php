@@ -2,107 +2,138 @@
 
 namespace Tests\Feature;
 
-use App\Enums\UserRole;
+use App\Enums\AuthorDocumentType;
+use App\Enums\AuthorStatus;
 use App\Models\AccountCertificate;
 use App\Models\SerproRequestAuthor;
-use App\Policies\SerproRequestAuthorPolicy;
-use App\Services\AccountCertificateService;
-use App\Services\SerproRequestAuthorService;
+use App\Support\CurrentAccount;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Schema;
-use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 
 class SerproRequestAuthorTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_table_has_expected_columns(): void
+    public function test_serpro_request_authors_table_has_expected_columns(): void
     {
         $this->assertTrue(Schema::hasColumns('serpro_request_authors', [
-            'id', 'account_id', 'account_certificate_id', 'document', 'name', 'status',
+            'id', 'account_id', 'document', 'document_type', 'name', 'status',
+            'certificate_thumbprint', 'certificate_expires_at', 'metadata',
+            'created_at', 'updated_at',
         ]));
     }
 
-    private function registerCertificate($account, bool $expired = false): void
-    {
-        app(AccountCertificateService::class)->register($account, [
-            'pfx_ref' => 'secret:PFX',
-            'password_ref' => 'secret:PWD',
-            'holder_name' => 'Empresa LTDA',
-            'thumbprint' => str_repeat('a', 40),
-            'expires_at' => $expired ? now()->subDay() : now()->addYear(),
-        ]);
-    }
-
-    public function test_cadastro_vincula_thumbprint_do_certificado(): void
+    public function test_author_persists_with_casts(): void
     {
         $account = $this->createAccount();
-        $actor = $this->createUser($account, ['role' => UserRole::Admin]);
-        $this->registerCertificate($account);
 
-        $author = app(SerproRequestAuthorService::class)->register($account, [
+        $author = SerproRequestAuthor::factory()->for($account, 'account')->create([
             'document' => '12345678901',
-            'name' => 'Procurador',
-        ], $actor);
-
-        $this->assertSame(str_repeat('a', 40), $author->toMaskedArray()['certificate_thumbprint']);
-        $this->assertTrue($author->isEligible());
-        $this->assertDatabaseHas('audit_logs', ['action' => 'serpro_author.registered']);
-    }
-
-    public function test_certificado_expirado_torna_autor_inelegivel(): void
-    {
-        $account = $this->createAccount();
-        $this->registerCertificate($account);
-        $service = app(SerproRequestAuthorService::class);
-
-        $author = $service->register($account, ['document' => '12345678901', 'name' => 'P']);
-        $this->assertTrue($author->isEligible());
-
-        $account->certificates ?? null;
-        AccountCertificate::query()->withoutGlobalScopes()
-            ->where('account_id', $account->id)
-            ->update(['expires_at' => now()->subDay()]);
-
-        $this->assertFalse($author->refresh()->isEligible());
-
-        $affected = $service->syncEligibility($account);
-        $this->assertSame(1, $affected);
-        $this->assertSame(SerproRequestAuthor::STATUS_INELIGIBLE, $author->refresh()->status);
-    }
-
-    public function test_sem_certificado_cadastro_e_recusado(): void
-    {
-        $account = $this->createAccount();
-
-        $this->expectException(ValidationException::class);
-
-        app(SerproRequestAuthorService::class)->register($account, [
-            'document' => '12345678901', 'name' => 'P',
-        ]);
-    }
-
-    public function test_permissoes_por_role(): void
-    {
-        $account = $this->createAccount();
-        $this->registerCertificate($account);
-        $author = app(SerproRequestAuthorService::class)->register($account, [
-            'document' => '12345678901', 'name' => 'P',
+            'document_type' => AuthorDocumentType::Pf,
+            'name' => 'Maria Contadora',
+            'metadata' => ['origin' => 'office'],
         ]);
 
-        $policy = app(SerproRequestAuthorPolicy::class);
+        $author->refresh();
 
-        foreach ([UserRole::SuperAdmin, UserRole::Admin] as $role) {
-            $user = $this->createUser($account, ['role' => $role]);
-            $this->assertTrue($policy->create($user), $role->value.' deveria gerenciar autores');
-            $this->assertTrue($policy->update($user, $author));
-        }
+        $this->assertDatabaseHas('serpro_request_authors', [
+            'id' => $author->id,
+            'account_id' => $account->id,
+            'document' => '12345678901',
+            'document_type' => 1,
+            'name' => 'Maria Contadora',
+        ]);
+        $this->assertSame(AuthorDocumentType::Pf, $author->document_type);
+        $this->assertSame(AuthorStatus::Active, $author->status);
+        $this->assertSame(['origin' => 'office'], $author->metadata);
+    }
 
-        foreach ([UserRole::Operator, UserRole::User] as $role) {
-            $user = $this->createUser($account, ['role' => $role]);
-            $this->assertFalse($policy->create($user), $role->value.' não deveria gerenciar autores');
-            $this->assertFalse($policy->update($user, $author));
-        }
+    public function test_author_links_to_active_certificate_and_inherits_thumbprint_and_expiry(): void
+    {
+        $account = $this->createAccount();
+        $expiresAt = now()->addMonths(6)->startOfSecond();
+        $certificate = AccountCertificate::factory()->for($account, 'account')->create([
+            'thumbprint' => 'cert-thumbprint',
+            'expires_at' => $expiresAt,
+        ]);
+
+        $author = SerproRequestAuthor::factory()->for($account, 'account')->create();
+        $author->useCertificate($certificate);
+
+        $this->assertSame('cert-thumbprint', $author->certificate_thumbprint);
+        $this->assertTrue($author->certificate_expires_at->equalTo($expiresAt));
+        $this->assertSame(AuthorStatus::Active, $author->status);
+        $this->assertTrue($author->isEligible());
+    }
+
+    public function test_author_is_ineligible_when_linked_certificate_is_already_expired(): void
+    {
+        $account = $this->createAccount();
+        $certificate = AccountCertificate::factory()->for($account, 'account')->create([
+            'expires_at' => now()->subDay(),
+        ]);
+
+        $author = SerproRequestAuthor::factory()->for($account, 'account')->create();
+        $author->useCertificate($certificate);
+
+        $this->assertSame(AuthorStatus::Ineligible, $author->status);
+        $this->assertFalse($author->isEligible());
+    }
+
+    public function test_author_becomes_ineligible_after_certificate_expires(): void
+    {
+        $account = $this->createAccount();
+        $expiresAt = now()->addDay();
+        $certificate = AccountCertificate::factory()->for($account, 'account')->create([
+            'expires_at' => $expiresAt,
+        ]);
+        $author = SerproRequestAuthor::factory()->for($account, 'account')->create();
+        $author->useCertificate($certificate);
+        $this->assertTrue($author->isEligible());
+
+        $this->travelTo($expiresAt->copy()->addMinute());
+        $author->refreshEligibility();
+
+        $this->assertSame(AuthorStatus::Ineligible, $author->status);
+        $this->assertFalse($author->isEligible());
+    }
+
+    public function test_author_without_certificate_is_ineligible_fail_closed(): void
+    {
+        $author = SerproRequestAuthor::factory()->create([
+            'certificate_thumbprint' => null,
+            'certificate_expires_at' => null,
+            'status' => AuthorStatus::Active,
+        ]);
+
+        $author->refreshEligibility();
+
+        $this->assertSame(AuthorStatus::Ineligible, $author->status);
+        $this->assertFalse($author->isEligible());
+    }
+
+    public function test_authors_are_scoped_to_current_account(): void
+    {
+        $mine = $this->createAccount();
+        $other = $this->createAccount();
+        SerproRequestAuthor::factory()->for($mine, 'account')->create();
+        $otherAuthor = SerproRequestAuthor::factory()->for($other, 'account')->create();
+
+        CurrentAccount::set($mine->id);
+
+        $this->assertCount(1, SerproRequestAuthor::all());
+        $this->assertNull(SerproRequestAuthor::find($otherAuthor->id));
+    }
+
+    public function test_author_creation_fills_account_from_current_context(): void
+    {
+        $account = $this->createAccount();
+        CurrentAccount::set($account->id);
+
+        $author = SerproRequestAuthor::factory()->make(['account_id' => null]);
+        $author->save();
+
+        $this->assertSame($account->id, $author->account_id);
     }
 }

@@ -12,6 +12,11 @@ export default defineNuxtConfig({
 
   css: ['~/assets/css/main.css'],
 
+  runtimeConfig: {
+    // Base do Laravel. Sobrescreva com NUXT_BACKEND_URL (ex.: http://backend:8000 no compose).
+    backendUrl: 'http://localhost:8000'
+  },
+
   routeRules: {
     '/api/**': {
       cors: true

@@ -60,6 +60,28 @@ _Evitar_: empresa agrupadora, contribuinte
 O estado de acompanhamento de um Client: ativo ou inativo.
 _Evitar_: monitoramento executando, cliente sincronizado
 
+### Monitoramento SERPRO
+
+**Contratante SERPRO**:
+A credencial da plataforma junto ao SERPRO, com ambiente próprio (homologação ou produção), guardada no cofre e trocada apenas por `super_admin` na Account A.
+_Evitar_: conta SERPRO, usuário integra contador
+
+**Certificado Digital**:
+O certificado A1 (.pfx/.p12) de uma Account, guardado no cofre com titular, thumbprint e validade, usado para assinar termos e autenticar chamadas em nome dos Clients.
+_Evitar_: certificado do escritório, e-CNPJ
+
+**Autor do Pedido de Dados**:
+A pessoa vinculada ao Certificado Digital de uma Account que assina o termo de autorização perante o SERPRO; sem certificado ativo ou vencido, fica inelegível e bloqueia execuções.
+_Evitar_: signatário, procurador
+
+**Associação de Monitoramento**:
+O vínculo entre um Client e uma definição do catálogo de monitoramento, com estado (ativa, pausada, encerrada) e motivo de pausa factual.
+_Evitar_: inscrição, assinatura de monitoramento
+
+**Transporte**:
+O caminho de tráfego efetivo para o SERPRO: desligado por padrão, ligado pelo painel da Account A com confirmações quando em produção; desligado, nenhuma chamada externa acontece.
+_Evitar_: integração ligada, modo de envio
+
 ### Entrada
 
 **Onboarding**:

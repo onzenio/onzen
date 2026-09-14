@@ -3,11 +3,12 @@ import type { CommandPaletteItem, NavigationMenuItem } from '@nuxt/ui'
 
 const route = useRoute()
 const toast = useToast()
+const { canManageSensitive, isSuperAdmin } = useSession()
 
 const open = ref(false)
 
 const { me, actingAs, refresh } = useMe()
-const { can, isSuperAdmin } = usePermissions()
+const { can } = usePermissions()
 
 function closeSidebar() {
   open.value = false
@@ -55,13 +56,6 @@ const links = computed<NavigationMenuItem[][]>(() => {
     adminChildren.push({
       label: 'Auditoria',
       to: '/audit',
-      onSelect: closeSidebar
-    })
-  }
-  if (can('serpro.view')) {
-    adminChildren.push({
-      label: 'SERPRO',
-      to: '/serpro',
       onSelect: closeSidebar
     })
   }
@@ -123,10 +117,77 @@ const links = computed<NavigationMenuItem[][]>(() => {
   }]]
 })
 
+const monitoringLinks = computed<NavigationMenuItem[]>(() => [{
+  label: 'Monitoramento',
+  icon: 'i-lucide-radar',
+  to: '/monitoring',
+  onSelect: () => {
+    open.value = false
+  }
+}, {
+  label: 'Parcelamentos',
+  icon: 'i-lucide-file-text',
+  to: '/monitoring/parcelamentos',
+  onSelect: () => {
+    open.value = false
+  }
+}, ...(canManageSensitive.value
+  ? [{
+      label: 'Certificado Digital',
+      icon: 'i-lucide-file-badge',
+      to: '/monitoring/certificado',
+      onSelect: () => {
+        open.value = false
+      }
+    }]
+  : []), ...(isSuperAdmin.value
+  ? [{
+      label: 'Administração SERPRO',
+      icon: 'i-lucide-shield-check',
+      to: '/monitoring/admin',
+      onSelect: () => {
+        open.value = false
+      }
+    }]
+  : [])])
+
+const mainLinks = computed<NavigationMenuItem[]>(() => [...(links.value[0] ?? []), ...monitoringLinks.value])
+const secondaryLinks = computed<NavigationMenuItem[]>(() => links.value[1] ?? [])
+
+const monitoringSearchItems = computed(() => [{
+  id: 'monitoring',
+  label: 'Monitoramento',
+  icon: 'i-lucide-radar',
+  to: '/monitoring'
+}, {
+  id: 'monitoring-parcelamentos',
+  label: 'Parcelamentos',
+  icon: 'i-lucide-file-text',
+  to: '/monitoring/parcelamentos'
+}, ...(canManageSensitive.value
+  ? [{
+      id: 'monitoring-certificado',
+      label: 'Certificado Digital',
+      icon: 'i-lucide-file-badge',
+      to: '/monitoring/certificado'
+    }]
+  : []), ...(isSuperAdmin.value
+  ? [{
+      id: 'monitoring-admin',
+      label: 'Administração SERPRO',
+      icon: 'i-lucide-shield-check',
+      to: '/monitoring/admin'
+    }]
+  : [])])
+
 const groups = computed(() => [{
   id: 'links',
   label: 'Go to',
   items: links.value.flat() as unknown as CommandPaletteItem[]
+}, {
+  id: 'monitoring',
+  label: 'Monitoramento',
+  items: monitoringSearchItems.value
 }, {
   id: 'code',
   label: 'Code',
@@ -213,7 +274,7 @@ onMounted(async () => {
 
         <UNavigationMenu
           :collapsed="collapsed"
-          :items="links[0]"
+          :items="mainLinks"
           orientation="vertical"
           tooltip
           popover
@@ -221,7 +282,7 @@ onMounted(async () => {
 
         <UNavigationMenu
           :collapsed="collapsed"
-          :items="links[1]"
+          :items="secondaryLinks"
           orientation="vertical"
           tooltip
           class="mt-auto"

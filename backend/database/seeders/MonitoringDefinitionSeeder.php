@@ -2,153 +2,209 @@
 
 namespace Database\Seeders;
 
+use App\Integrations\Serpro\ConsultCatalog;
+use App\Integrations\Serpro\ProcurationCatalog;
 use App\Models\MonitoringDefinition;
 use Illuminate\Database\Seeder;
 
+/**
+ * Reproduces the official Integra Contador catalog for the change's scope:
+ * consult definitions, eight parcelment modalities and the two prospecting
+ * modalities. Upserts are idempotent; operations come from the catalog
+ * classes, never copied by hand.
+ */
 class MonitoringDefinitionSeeder extends Seeder
 {
-    public const CATALOG_VERSION = '2026.09';
-
-    /**
-     * Allowlist oficial de códigos de serviço aceitos em procurações.
-     *
-     * @return list<string>
-     */
-    public static function procurationAllowlist(): array
-    {
-        return [
-            'PGDASD-CONS', 'REGIME-CONS', 'DEFIS-CONS', 'MEI-CONS',
-            'DCTFWEB-CONS', 'MIT-CONS', 'SITFIS-CONS', 'CAIXAPOSTAL-CONS',
-            'DTE-CONS', 'PAG-CONS', 'PARC-CONS',
-        ];
-    }
-
-    /**
-     * @return list<array<string, mixed>>
-     */
-    public static function definitions(): array
-    {
-        $v = self::CATALOG_VERSION;
-
-        return [
-            [
-                'code' => 'pgdasd', 'family' => 'PGDAS-D', 'name' => 'PGDAS-D',
-                'catalog_version' => $v, 'availability' => 'available', 'strategy' => 'chain',
-                'person_types' => ['PJ'], 'regimes' => ['simples'],
-                'required_services' => ['PGDASD-CONS'],
-                'operations' => [
-                    ['type' => 'consultar', 'operation' => 'consultar-pgdasd-indice'],
-                    ['type' => 'consultar', 'operation' => 'consultar-pgdasd-declaracao'],
-                    ['type' => 'consultar', 'operation' => 'consultar-pgdasd-extrato'],
-                ],
-                'automatic' => true, 'unavailability_reason' => null,
-            ],
-            [
-                'code' => 'regime', 'family' => 'Regime de Apuração', 'name' => 'Regime de Apuração',
-                'catalog_version' => $v, 'availability' => 'available', 'strategy' => 'snapshot',
-                'person_types' => ['PJ'], 'regimes' => ['simples', 'presumido', 'real'],
-                'required_services' => ['REGIME-CONS'],
-                'operations' => [['type' => 'consultar', 'operation' => 'consultar-regime']],
-                'automatic' => true, 'unavailability_reason' => null,
-            ],
-            [
-                'code' => 'defis', 'family' => 'DEFIS', 'name' => 'DEFIS',
-                'catalog_version' => $v, 'availability' => 'available', 'strategy' => 'snapshot',
-                'person_types' => ['PJ'], 'regimes' => ['simples'],
-                'required_services' => ['DEFIS-CONS'],
-                'operations' => [['type' => 'consultar', 'operation' => 'consultar-defis']],
-                'automatic' => true, 'unavailability_reason' => null,
-            ],
-            [
-                'code' => 'mei', 'family' => 'MEI', 'name' => 'MEI',
-                'catalog_version' => $v, 'availability' => 'available', 'strategy' => 'snapshot',
-                'person_types' => ['PJ'], 'regimes' => ['mei'],
-                'required_services' => ['MEI-CONS'],
-                'operations' => [['type' => 'consultar', 'operation' => 'consultar-mei']],
-                'automatic' => true, 'unavailability_reason' => null,
-            ],
-            [
-                'code' => 'dctfweb', 'family' => 'DCTFWeb', 'name' => 'DCTFWeb',
-                'catalog_version' => $v, 'availability' => 'available', 'strategy' => 'snapshot',
-                'person_types' => ['PJ', 'PF'], 'regimes' => ['simples', 'presumido', 'real'],
-                'required_services' => ['DCTFWEB-CONS'],
-                'operations' => [['type' => 'consultar', 'operation' => 'consultar-dctfweb']],
-                'automatic' => true, 'unavailability_reason' => null,
-            ],
-            [
-                'code' => 'mit', 'family' => 'MIT', 'name' => 'MIT',
-                'catalog_version' => $v, 'availability' => 'available', 'strategy' => 'snapshot',
-                'person_types' => ['PJ'], 'regimes' => ['simples', 'presumido', 'real'],
-                'required_services' => ['MIT-CONS'],
-                'operations' => [['type' => 'consultar', 'operation' => 'consultar-mit']],
-                'automatic' => true, 'unavailability_reason' => null,
-            ],
-            [
-                'code' => 'sitfis', 'family' => 'Situação Fiscal', 'name' => 'Situação Fiscal',
-                'catalog_version' => $v, 'availability' => 'available', 'strategy' => 'snapshot',
-                'person_types' => ['PJ', 'PF'], 'regimes' => ['simples', 'presumido', 'real', 'mei'],
-                'required_services' => ['SITFIS-CONS'],
-                'operations' => [['type' => 'consultar', 'operation' => 'consultar-sitfis']],
-                'automatic' => true, 'unavailability_reason' => null,
-            ],
-            [
-                'code' => 'caixa-postal', 'family' => 'Caixa Postal', 'name' => 'Caixa Postal',
-                'catalog_version' => $v, 'availability' => 'available', 'strategy' => 'snapshot',
-                'person_types' => ['PJ', 'PF'], 'regimes' => ['simples', 'presumido', 'real', 'mei'],
-                'required_services' => ['CAIXAPOSTAL-CONS'],
-                'operations' => [['type' => 'consultar', 'operation' => 'consultar-caixa-postal']],
-                'automatic' => false, 'unavailability_reason' => null,
-            ],
-            [
-                'code' => 'dte', 'family' => 'DTE', 'name' => 'DTE',
-                'catalog_version' => $v, 'availability' => 'available', 'strategy' => 'snapshot',
-                'person_types' => ['PJ', 'PF'], 'regimes' => ['simples', 'presumido', 'real', 'mei'],
-                'required_services' => ['DTE-CONS'],
-                'operations' => [['type' => 'consultar', 'operation' => 'consultar-dte']],
-                'automatic' => false, 'unavailability_reason' => null,
-            ],
-            [
-                'code' => 'pagamentos', 'family' => 'Pagamentos', 'name' => 'Pagamentos',
-                'catalog_version' => $v, 'availability' => 'available', 'strategy' => 'snapshot',
-                'person_types' => ['PJ', 'PF'], 'regimes' => ['simples', 'presumido', 'real', 'mei'],
-                'required_services' => ['PAG-CONS'],
-                'operations' => [['type' => 'consultar', 'operation' => 'consultar-pagamentos']],
-                'automatic' => true, 'unavailability_reason' => null,
-            ],
-            [
-                'code' => 'parcelamentos', 'family' => 'Parcelamentos', 'name' => 'Parcelamentos',
-                'catalog_version' => $v, 'availability' => 'available', 'strategy' => 'snapshot',
-                'person_types' => ['PJ', 'PF'], 'regimes' => ['simples', 'presumido', 'real', 'mei'],
-                'required_services' => ['PARC-CONS'],
-                'operations' => [['type' => 'consultar', 'operation' => 'consultar-parcelamentos']],
-                'automatic' => false, 'unavailability_reason' => null,
-            ],
-            [
-                'code' => 'sicalc', 'family' => 'SICALC', 'name' => 'SICALC',
-                'catalog_version' => $v, 'availability' => 'unavailable', 'strategy' => 'snapshot',
-                'person_types' => ['PJ'], 'regimes' => ['simples', 'presumido', 'real'],
-                'required_services' => [],
-                'operations' => [],
-                'automatic' => false,
-                'unavailability_reason' => 'Família fora do catálogo do Integra Contador nesta versão.',
-            ],
-            [
-                'code' => 'e-processo', 'family' => 'E-Processo', 'name' => 'E-Processo',
-                'catalog_version' => $v, 'availability' => 'prospecting', 'strategy' => 'snapshot',
-                'person_types' => ['PJ'], 'regimes' => ['simples', 'presumido', 'real'],
-                'required_services' => [],
-                'operations' => [],
-                'automatic' => false,
-                'unavailability_reason' => 'Em prospecção: sem operação executável.',
-            ],
-        ];
-    }
-
     public function run(): void
     {
-        foreach (self::definitions() as $definition) {
+        $definitions = [
+            [
+                'id' => 'pgdas-declaracoes',
+                'name' => 'Declarações PGDAS-D',
+                'category' => 'Declarações',
+                'system' => 'Integra Contador',
+                'description' => 'Acompanha declarações, recibos e extratos do Simples Nacional.',
+                'default_enabled' => true,
+                'is_active' => true,
+                'requires_procuracao' => true,
+                'procuration_codes' => ['00146'],
+                'strategy' => MonitoringDefinition::STRATEGY_AUTOMATIC,
+            ],
+            [
+                'id' => 'regime-apuracao',
+                'name' => 'Regime de apuração',
+                'category' => 'Regime',
+                'system' => 'Integra Contador',
+                'description' => 'Compara opção, ano-calendário e resoluções do contribuinte.',
+                'default_enabled' => true,
+                'is_active' => true,
+                'requires_procuracao' => true,
+                'procuration_codes' => ['00060'],
+            ],
+            [
+                'id' => 'defis',
+                'name' => 'DEFIS',
+                'category' => 'Declarações',
+                'system' => 'Integra Contador',
+                'description' => 'Declaração DEFIS.',
+                'default_enabled' => true,
+                'is_active' => true,
+                'requires_procuracao' => true,
+                'procuration_codes' => ['00146'],
+            ],
+            [
+                'id' => 'dctfweb',
+                'name' => 'DCTFWeb',
+                'category' => 'Obrigações',
+                'system' => 'Integra Contador',
+                'description' => 'Sinaliza mudanças em apurações e recibos autorizados.',
+                'default_enabled' => true,
+                'is_active' => true,
+                'requires_procuracao' => true,
+                'strategy' => MonitoringDefinition::STRATEGY_AUTOMATIC,
+            ],
+            [
+                'id' => 'situacao-fiscal',
+                'name' => 'Situação Fiscal',
+                'category' => 'Regularidade',
+                'system' => 'Integra Contador',
+                'description' => 'Acompanha relatórios assíncronos de situação fiscal.',
+                'default_enabled' => false,
+                'is_active' => true,
+                'requires_procuracao' => true,
+                'strategy' => MonitoringDefinition::STRATEGY_AUTOMATIC,
+            ],
+        ];
+
+        $definitions = array_merge($definitions, [
+            [
+                'id' => 'situacao-mei',
+                'name' => 'Situação MEI',
+                'category' => 'Simples Nacional | MEI',
+                'system' => 'Integra Contador',
+                'description' => 'Situação do MEI.',
+                'default_enabled' => true,
+                'is_active' => true,
+                'requires_procuracao' => false,
+                'procuration_codes' => [],
+            ],
+            [
+                'id' => 'mit',
+                'name' => 'MIT',
+                'category' => 'Obrigações',
+                'system' => 'Integra Contador',
+                'description' => 'Módulo de inclusão de tributos.',
+                'default_enabled' => false,
+                'is_active' => true,
+                'requires_procuracao' => true,
+                'procuration_codes' => ['00103'],
+            ],
+            [
+                'id' => 'caixa-postal',
+                'name' => 'Caixa Postal',
+                'category' => 'Caixas Postais',
+                'system' => 'Integra Contador',
+                'description' => 'Mensagens da caixa postal.',
+                'default_enabled' => false,
+                'is_active' => true,
+                'requires_procuracao' => true,
+                'procuration_codes' => ['00006'],
+            ],
+            [
+                'id' => 'dte',
+                'name' => 'DTE',
+                'category' => 'Caixas Postais',
+                'system' => 'Integra Contador',
+                'description' => 'Domicílio tributário eletrônico.',
+                'default_enabled' => false,
+                'is_active' => true,
+                'requires_procuracao' => true,
+                'procuration_codes' => ['00050'],
+            ],
+            [
+                'id' => 'pagamentos',
+                'name' => 'Pagamentos',
+                'category' => 'Regularidade',
+                'system' => 'Integra Contador',
+                'description' => 'Alterações em pagamentos.',
+                'default_enabled' => false,
+                'is_active' => true,
+                'requires_procuracao' => true,
+                'procuration_codes' => ['00004'],
+            ],
+        ]);
+
+        foreach ([
+            ['parcsn', 'Parcelamento Simples Nacional'],
+            ['parcsn-esp', 'Parcelamento Simples Especial'],
+            ['pertsn', 'PERT Simples Nacional'],
+            ['relpsn', 'Relp Simples Nacional'],
+            ['parcmei', 'Parcelamento MEI'],
+            ['parcmei-esp', 'Parcelamento MEI Especial'],
+            ['pertmei', 'PERT MEI'],
+            ['relpmei', 'Relp MEI'],
+        ] as [$id, $name]) {
+            $definitions[] = [
+                'id' => $id,
+                'name' => $name,
+                'category' => 'Parcelamentos',
+                'system' => 'Integra Contador',
+                'description' => 'Pedidos e parcelas.',
+                'default_enabled' => false,
+                'is_active' => true,
+                'requires_procuracao' => true,
+            ];
+        }
+
+        $definitions[] = [
+            'id' => 'parc-paex',
+            'name' => 'Parcelamento PAEX',
+            'category' => 'Parcelamentos',
+            'system' => 'Integra Contador',
+            'description' => 'Roadmap.',
+            'default_enabled' => false,
+            'is_active' => true,
+            'requires_procuracao' => true,
+            'availability' => MonitoringDefinition::AVAILABILITY_PROSPECCAO,
+        ];
+        $definitions[] = [
+            'id' => 'parc-sipade',
+            'name' => 'Parcelamento SIPADE',
+            'category' => 'Parcelamentos',
+            'system' => 'Integra Contador',
+            'description' => 'Roadmap.',
+            'default_enabled' => false,
+            'is_active' => true,
+            'requires_procuracao' => true,
+            'availability' => MonitoringDefinition::AVAILABILITY_PROSPECCAO,
+        ];
+
+        foreach ($definitions as $definition) {
+            $definitionId = (string) $definition['id'];
+            $definition['operations'] = ConsultCatalog::operationsFor($definitionId);
+            if (! array_key_exists('procuration_codes', $definition) && ($codes = ProcurationCatalog::codesForDefinition($definitionId)) !== null) {
+                $definition['procuration_codes'] = $codes;
+            }
+            if ($personTypes = ConsultCatalog::personTypesFor($definitionId)) {
+                $definition['person_types'] = $personTypes;
+            }
+            if (ConsultCatalog::isProspeccao($definitionId)) {
+                $definition['availability'] = MonitoringDefinition::AVAILABILITY_PROSPECCAO;
+                $definition['operations'] = null;
+            }
+            $definition += [
+                'version' => MonitoringDefinition::CATALOG_VERSION,
+                'availability' => MonitoringDefinition::AVAILABILITY_PRODUCTION,
+                'strategy' => MonitoringDefinition::STRATEGY_POLLING,
+                'operations' => null,
+                'procuration_codes' => null,
+                'person_types' => ['PF', 'PJ'],
+                'regimes' => null,
+                'services' => null,
+            ];
+
             MonitoringDefinition::query()->updateOrCreate(
-                ['code' => $definition['code']],
+                ['id' => $definition['id']],
                 $definition,
             );
         }

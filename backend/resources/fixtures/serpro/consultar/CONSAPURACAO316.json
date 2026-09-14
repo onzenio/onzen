@@ -1,0 +1,13 @@
+{
+  "source": "exemplos/retorno_consultar_apuracao_mit",
+  "operation": "CONSAPURACAO316",
+  "dry_run": true,
+  "http_status": 200,
+  "body": {
+    "dados": {
+      "periodoApuracao": "2026-01",
+      "valorApurado": 150.25,
+      "situacao": "apurada"
+    }
+  }
+}

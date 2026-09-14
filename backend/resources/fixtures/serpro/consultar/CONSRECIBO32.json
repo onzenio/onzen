@@ -1,0 +1,14 @@
+{
+  "source": "exemplos/retorno_consultar_recibo_dctfweb",
+  "operation": "CONSRECIBO32",
+  "dry_run": true,
+  "http_status": 200,
+  "body": {
+    "dados": {
+      "periodoApuracao": "2026-01",
+      "numeroRecibo": "DCTF32-0001",
+      "nomeArquivoRecibo": "recibo-dctfweb.pdf",
+      "reciboPdf": "JVBERi0x"
+    }
+  }
+}

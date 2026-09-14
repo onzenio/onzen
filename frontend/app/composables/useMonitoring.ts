@@ -1,78 +1,96 @@
-export interface MonitoringDefinition {
-  code: string
-  family: string
-  name: string
-  availability: 'available' | 'unavailable' | 'prospecting'
-  strategy: string
-  automatic: boolean
-  unavailability_reason: string | null
+import type { BackendErrorBody, HealthState } from '~/types/monitoring'
+
+const ERROR_MESSAGES: Record<string, string> = {
+  serpro_gated: 'Transporte SERPRO desligado. Nenhuma chamada foi feita.',
+  quota_exceeded: 'Volume mensal de consultas esgotado.',
+  enrollment_inactive: 'Associação pausada ou encerrada.',
+  monitoring_disabled: 'Client com monitoramento desativado.',
+  definition_unavailable: 'Definição indisponível no catálogo vigente.',
+  outorga_pendente: 'Procuração pendente para este Client.',
+  outorga_expirada: 'Procuração vencida para este Client.',
+  author_pending: 'Nenhum Autor do Pedido de Dados cadastrado.',
+  author_ineligible: 'Autor do Pedido de Dados inelegível (verifique o Certificado Digital).',
+  account_certificate_unavailable: 'Certificado Digital da Account ausente.',
+  account_certificate_expired: 'Certificado Digital da Account vencido.',
+  BACKEND_UNAVAILABLE: 'Não foi possível falar com o backend. Tente novamente.'
 }
 
-export interface CatalogResponse {
-  version: string
-  data: MonitoringDefinition[]
-  procuration_allowlist: string[]
+export function monitoringErrorMessage(body?: BackendErrorBody | null): string {
+  const code = body?.error ?? body?.code
+  if (code && ERROR_MESSAGES[code]) {
+    return ERROR_MESSAGES[code]
+  }
+  return body?.message ?? 'Não foi possível concluir a operação.'
 }
 
-export interface Enrollment {
-  id: number
-  account_id: number
-  client_id: number
-  definition_code: string
-  status: 'active' | 'paused' | 'ended'
-  pause_reason: string | null
-  version: number
-  client?: { id: number, razao_social: string, cnpj: string }
+export function backendErrorBody(error: unknown): BackendErrorBody | null {
+  const data = (error as { data?: unknown })?.data
+  if (data && typeof data === 'object') {
+    return data as BackendErrorBody
+  }
+  return null
 }
 
-export interface DashboardResponse {
-  enrollments: { active: number, paused: number, ended: number }
-  open_alerts: number
-  quota: { volume: number, used: number, remaining: number, period: string }
+export function backendValidationMessages(body?: BackendErrorBody | null): string[] {
+  if (!body) {
+    return ['Não foi possível concluir a operação.']
+  }
+  const messages = Object.values(body.errors ?? {}).flat()
+  if (messages.length > 0) {
+    return messages
+  }
+  return [monitoringErrorMessage(body)]
 }
 
-export interface Snapshot {
-  id: number
-  family: string
-  normalized: Record<string, unknown>
-  version: number
-  completeness: string
-  checked_at: string | null
+export function enrollmentStatusMeta(status: string): { label: string, color: 'success' | 'warning' | 'neutral' } {
+  switch (status) {
+    case 'active': return { label: 'Ativa', color: 'success' }
+    case 'paused': return { label: 'Pausada', color: 'warning' }
+    default: return { label: 'Encerrada', color: 'neutral' }
+  }
 }
 
-export interface AlertItem {
-  id: number
-  family: string
-  status: 'open' | 'acknowledged'
-  acknowledged_at: string | null
+export function healthStateMeta(state: HealthState): { label: string, color: 'success' | 'warning' | 'error' | 'neutral' } {
+  switch (state) {
+    case 'configured': return { label: 'Configurado', color: 'success' }
+    case 'degraded': return { label: 'Degradado', color: 'warning' }
+    case 'unavailable': return { label: 'Indisponível', color: 'error' }
+    default: return { label: 'Bloqueado', color: 'neutral' }
+  }
 }
 
-export interface ChangeItem {
-  id: number
-  family: string
-  change_type: string
-  summary: Record<string, unknown> | null
+export function formatCnpj(cnpj: string): string {
+  const digits = cnpj.replace(/\D/g, '')
+  if (digits.length === 14) {
+    return digits.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5')
+  }
+  if (digits.length === 11) {
+    return digits.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4')
+  }
+  return cnpj
 }
 
-export interface CndResponse {
-  available: boolean
-  situacao_fiscal?: string | null
-  cnd_disponivel?: boolean | null
-  checked_at?: string | null
-  reason?: string
+export function formatDateTime(iso: string | null | undefined): string {
+  if (!iso) {
+    return '—'
+  }
+  return new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
-export async function fetchCatalog() {
-  return $fetch<CatalogResponse>('/api/monitoring/catalog')
+export function formatDate(iso: string | null | undefined): string {
+  if (!iso) {
+    return '—'
+  }
+  return new Date(`${iso}T12:00:00`).toLocaleDateString('pt-BR')
 }
 
-export async function fetchDashboard() {
-  return $fetch<DashboardResponse>('/api/monitoring/dashboard')
-}
-
-export async function triggerEnrollment(id: number, idempotencyKey?: string) {
-  return $fetch<{ run_id: number, status: string }>(`/api/monitoring/enrollments/${id}/trigger`, {
-    method: 'POST',
-    body: idempotencyKey ? { idempotency_key: idempotencyKey } : {}
-  })
+export function formatMoney(value: string | null | undefined): string {
+  if (value === null || value === undefined || value === '') {
+    return '—'
+  }
+  const amount = Number(value)
+  if (Number.isNaN(amount)) {
+    return value
+  }
+  return amount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 }

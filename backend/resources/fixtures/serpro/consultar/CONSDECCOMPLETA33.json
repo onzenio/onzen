@@ -1,0 +1,14 @@
+{
+  "source": "exemplos/retorno_consultar_declaracao_completa_dctfweb",
+  "operation": "CONSDECCOMPLETA33",
+  "dry_run": true,
+  "http_status": 200,
+  "body": {
+    "dados": {
+      "periodoApuracao": "2026-01",
+      "situacao": "entregue",
+      "nomeArquivoDeclaracao": "dctfweb.pdf",
+      "declaracaoPdf": "JVBERi0x"
+    }
+  }
+}

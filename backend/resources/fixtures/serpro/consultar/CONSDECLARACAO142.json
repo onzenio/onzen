@@ -1,0 +1,18 @@
+{
+  "source": "exemplos/retorno_consultar_declaracoes_defis",
+  "operation": "CONSDECLARACAO142",
+  "dry_run": true,
+  "http_status": 200,
+  "body": {
+    "dados": {
+      "declaracoes": [
+        {
+          "anoCalendario": "2025",
+          "numeroDeclaracao": "DEFIS000000000000142",
+          "tipoOperacao": "Original",
+          "dataHoraTransmissao": "2026-03-20T11:00:00Z"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "source": "exemplos/retorno_consultar_situacao_cadastral_ccmei",
+  "operation": "CCMEISITCADASTRAL123",
+  "dry_run": true,
+  "http_status": 200,
+  "body": {
+    "dados": {
+      "vinculos": [
+        { "cnpj": "00000000000191", "situacaoCadastral": "ATIVA" }
+      ]
+    }
+  }
+}

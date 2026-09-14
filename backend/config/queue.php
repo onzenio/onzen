@@ -48,9 +48,11 @@ return [
             'driver' => 'database',
             'connection' => env('DB_QUEUE_CONNECTION'),
             'table' => env('DB_QUEUE_TABLE', 'jobs'),
-            'queue' => env('SERPRO_QUEUE', 'serpro'),
-            'retry_after' => (int) env('SERPRO_QUEUE_RETRY_AFTER', 300),
-            'after_commit' => false,
+            'queue' => env('MONITORING_SERPRO_QUEUE', 'serpro'),
+            // Must exceed the serpro worker --timeout (270s) so Laravel does
+            // not re-release a still-running job.
+            'retry_after' => (int) env('MONITORING_SERPRO_QUEUE_RETRY_AFTER', 300),
+            'after_commit' => true,
         ],
 
         'beanstalkd' => [

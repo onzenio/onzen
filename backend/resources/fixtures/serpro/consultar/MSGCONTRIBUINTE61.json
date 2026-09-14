@@ -1,0 +1,19 @@
+{
+  "source": "exemplos/retorno_consultar_mensagens_contribuinte",
+  "operation": "MSGCONTRIBUINTE61",
+  "dry_run": true,
+  "http_status": 200,
+  "body": {
+    "dados": {
+      "mensagens": [
+        {
+          "idMensagem": "MSG-61-001",
+          "assunto": "Intimação de malha",
+          "lida": false,
+          "dataHora": "2026-02-18T09:00:00Z",
+          "origem": "RFB"
+        }
+      ]
+    }
+  }
+}

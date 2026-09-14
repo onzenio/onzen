@@ -1,0 +1,20 @@
+{
+  "source": "exemplos/retorno_consultar_pedidos_parcelamento",
+  "operation": "PEDIDOSPARC",
+  "dry_run": true,
+  "http_status": 200,
+  "body": {
+    "dados": {
+      "pedidos": [
+        {
+          "numero": "PARC-001",
+          "id": "PARC-001",
+          "status": "ativo",
+          "quantidadeParcelas": 12,
+          "valorTotal": 1200.5,
+          "competence": "2026-01-01"
+        }
+      ]
+    }
+  }
+}

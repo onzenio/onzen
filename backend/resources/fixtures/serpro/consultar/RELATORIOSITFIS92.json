@@ -1,0 +1,16 @@
+{
+  "source": "exemplos/retorno_relatorio_sitfis",
+  "operation": "RELATORIOSITFIS92",
+  "dry_run": true,
+  "http_status": 200,
+  "body": {
+    "obtained": true,
+    "protocol": { "protocol_id": "SITFIS-PROTO-91", "obtained": true },
+    "dados": {
+      "protocolo": "SITFIS-PROTO-91",
+      "situacao": "regular",
+      "nomeArquivoRelatorio": "sitfis.pdf",
+      "relatorioPdf": "JVBERi0x"
+    }
+  }
+}

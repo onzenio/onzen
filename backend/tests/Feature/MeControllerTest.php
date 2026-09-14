@@ -19,7 +19,7 @@ class MeControllerTest extends TestCase
 
     public function test_authenticated_user_receives_own_user_account_and_role(): void
     {
-        $account = $this->createAccount(['name' => 'Acme', 'profile' => AccountProfile::B]);
+        $account = $this->createAccount(['name' => 'Acme', 'profile' => AccountProfile::B, 'plan_id' => null]);
         $user = $this->createUser($account, [
             'name' => 'Ada',
             'email' => 'ada@example.com',

@@ -3,22 +3,28 @@
 namespace App\Providers;
 
 use App\Models\Account;
+use App\Models\AccountCertificate;
 use App\Models\AuditLog;
 use App\Models\Client;
 use App\Models\Invitation;
 use App\Models\MonitoringAlert;
+use App\Models\MonitoringArtifact;
 use App\Models\MonitoringEnrollment;
 use App\Models\Plan;
 use App\Models\SerproRequestAuthor;
+use App\Policies\AccountCertificatePolicy;
 use App\Policies\AccountPolicy;
 use App\Policies\AuditLogPolicy;
 use App\Policies\ClientPolicy;
 use App\Policies\InvitationPolicy;
 use App\Policies\MonitoringAlertPolicy;
+use App\Policies\MonitoringArtifactPolicy;
 use App\Policies\MonitoringEnrollmentPolicy;
 use App\Policies\PlanPolicy;
+use App\Policies\SerproAdminPolicy;
 use App\Policies\SerproRequestAuthorPolicy;
 use Illuminate\Foundation\Support\Providers\AuthServiceProvider as ServiceProvider;
+use Illuminate\Support\Facades\Gate;
 
 class AuthServiceProvider extends ServiceProvider
 {
@@ -31,14 +37,17 @@ class AuthServiceProvider extends ServiceProvider
         Invitation::class => InvitationPolicy::class,
         Plan::class => PlanPolicy::class,
         AuditLog::class => AuditLogPolicy::class,
-        MonitoringEnrollment::class => MonitoringEnrollmentPolicy::class,
+        MonitoringArtifact::class => MonitoringArtifactPolicy::class,
         MonitoringAlert::class => MonitoringAlertPolicy::class,
+        MonitoringEnrollment::class => MonitoringEnrollmentPolicy::class,
         SerproRequestAuthor::class => SerproRequestAuthorPolicy::class,
+        AccountCertificate::class => AccountCertificatePolicy::class,
     ];
 
     public function boot(): void
     {
         // Sem Gate::before global de propósito: super_admin NÃO bypassa o
         // escopo de dados; só acessa rotas de plataforma via policies explícitas.
+        Gate::define('manage-serpro', [SerproAdminPolicy::class, 'manage']);
     }
 }

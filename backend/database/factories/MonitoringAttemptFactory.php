@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Enums\MonitoringRunStatus;
 use App\Models\MonitoringAttempt;
 use App\Models\MonitoringRun;
 use Illuminate\Database\Eloquent\Factories\Factory;
@@ -11,15 +12,40 @@ use Illuminate\Database\Eloquent\Factories\Factory;
  */
 class MonitoringAttemptFactory extends Factory
 {
+    protected $model = MonitoringAttempt::class;
+
+    /**
+     * Define the model's default state.
+     *
+     * @return array<string, mixed>
+     */
     public function definition(): array
     {
         return [
-            'monitoring_run_id' => MonitoringRun::factory(),
-            'attempt_number' => 1,
-            'status_code' => 200,
-            'outcome' => MonitoringAttempt::OUTCOME_SUCCESS,
-            'response_summary' => ['ok' => true],
-            'backoff_seconds' => null,
+            'run_id' => MonitoringRun::factory(),
+            'attempt' => 1,
+            'status' => MonitoringRunStatus::Pending,
+            'response_code' => null,
+            'classification' => null,
+            'retry_after' => null,
         ];
+    }
+
+    public function completed(): static
+    {
+        return $this->state(fn () => [
+            'status' => MonitoringRunStatus::Completed,
+            'response_code' => 200,
+            'classification' => 'ok',
+        ]);
+    }
+
+    public function transient(): static
+    {
+        return $this->state(fn () => [
+            'status' => MonitoringRunStatus::Transient,
+            'response_code' => 503,
+            'classification' => 'transient_error',
+        ]);
     }
 }

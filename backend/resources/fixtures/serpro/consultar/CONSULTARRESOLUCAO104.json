@@ -1,0 +1,13 @@
+{
+  "source": "exemplos/retorno_consultar_resolucao",
+  "operation": "CONSULTARRESOLUCAO104",
+  "dry_run": true,
+  "http_status": 200,
+  "body": {
+    "dados": {
+      "anoCalendario": "2026",
+      "resolucao": "Regime de caixa homologado",
+      "situacao": "ativa"
+    }
+  }
+}

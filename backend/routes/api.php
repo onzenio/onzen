@@ -1,17 +1,23 @@
 <?php
 
-use App\Http\Controllers\Api\AccountCertificateController;
 use App\Http\Controllers\Api\AccountController;
-use App\Http\Controllers\Api\ArtifactDownloadController;
 use App\Http\Controllers\Api\AuditController;
+use App\Http\Controllers\Api\ClientCndController;
 use App\Http\Controllers\Api\ClientController;
 use App\Http\Controllers\Api\InvitationController;
 use App\Http\Controllers\Api\MeController;
 use App\Http\Controllers\Api\MonitoringActionController;
+use App\Http\Controllers\Api\MonitoringAlertController;
+use App\Http\Controllers\Api\MonitoringArtifactDownloadController;
 use App\Http\Controllers\Api\MonitoringAuthorController;
-use App\Http\Controllers\Api\MonitoringCatalogController;
+use App\Http\Controllers\Api\MonitoringCertificateController;
+use App\Http\Controllers\Api\MonitoringChangeController;
+use App\Http\Controllers\Api\MonitoringDashboardController;
 use App\Http\Controllers\Api\MonitoringEnrollmentController;
-use App\Http\Controllers\Api\MonitoringReadController;
+use App\Http\Controllers\Api\MonitoringHealthController;
+use App\Http\Controllers\Api\MonitoringPowerOfAttorneyController;
+use App\Http\Controllers\Api\MonitoringRunController;
+use App\Http\Controllers\Api\MonitoringSnapshotController;
 use App\Http\Controllers\Api\OnboardingController;
 use App\Http\Controllers\Api\ParcelmentController;
 use App\Http\Controllers\Api\PlanController;
@@ -56,42 +62,119 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::post('/switch', [SwitchController::class, 'store']);
     Route::delete('/switch', [SwitchController::class, 'destroy']);
     Route::get('/audit', [AuditController::class, 'index']);
-
-    Route::get('/admin/serpro', [SerproAdminController::class, 'show']);
-    Route::put('/admin/serpro/credentials', [SerproAdminController::class, 'updateCredentials']);
-    Route::post('/admin/serpro/environment', [SerproAdminController::class, 'switchEnvironment']);
-    Route::post('/admin/serpro/transport', [SerproAdminController::class, 'switchTransport']);
-
-    Route::get('/monitoring/enrollments', [MonitoringEnrollmentController::class, 'index']);
-    Route::post('/monitoring/enrollments', [MonitoringEnrollmentController::class, 'store']);
-    Route::get('/monitoring/divergences', [MonitoringEnrollmentController::class, 'divergences']);
-    Route::get('/monitoring/catalog', [MonitoringCatalogController::class, 'index']);
-    Route::get('/monitoring/enrollments/{id}', [MonitoringEnrollmentController::class, 'show'])->whereNumber('id');
-    Route::post('/monitoring/enrollments/{id}/pause', [MonitoringEnrollmentController::class, 'pause'])->whereNumber('id');
-    Route::post('/monitoring/enrollments/{id}/resume', [MonitoringEnrollmentController::class, 'resume'])->whereNumber('id');
-    Route::post('/monitoring/enrollments/{id}/trigger', [MonitoringEnrollmentController::class, 'trigger'])->whereNumber('id');
-    Route::delete('/monitoring/enrollments/{id}', [MonitoringEnrollmentController::class, 'destroy'])->whereNumber('id');
-
-    Route::get('/account/certificate', [AccountCertificateController::class, 'show']);
-    Route::put('/account/certificate', [AccountCertificateController::class, 'store']);
-    Route::get('/monitoring/authors', [MonitoringAuthorController::class, 'index']);
-    Route::post('/monitoring/authors', [MonitoringAuthorController::class, 'store']);
-
-    Route::get('/monitoring/dashboard', [MonitoringReadController::class, 'dashboard']);
-    Route::get('/monitoring/clients/{client}/snapshots', [MonitoringReadController::class, 'snapshots'])->whereNumber('client');
-    Route::get('/monitoring/clients/{client}/changes', [MonitoringReadController::class, 'changes'])->whereNumber('client');
-    Route::get('/monitoring/clients/{client}/alerts', [MonitoringReadController::class, 'alerts'])->whereNumber('client');
-    Route::post('/monitoring/clients/{client}/alerts/{alert}/acknowledge', [MonitoringReadController::class, 'acknowledge'])->whereNumber(['client', 'alert']);
-    Route::get('/monitoring/clients/{client}/cnd', [MonitoringReadController::class, 'cnd'])->whereNumber('client');
-
-    Route::get('/monitoring/clients/{client}/parcelamentos/{modality}', [ParcelmentController::class, 'index'])->whereNumber('client');
-    Route::get('/monitoring/clients/{client}/parcelamentos/orders/{order}', [ParcelmentController::class, 'show'])->whereNumber(['client', 'order']);
-    Route::get('/monitoring/clients/{client}/parcelamentos/orders/{order}/guia', [ParcelmentController::class, 'guia'])->whereNumber(['client', 'order']);
-
-    Route::post('/monitoring/actions/emissoes', [MonitoringActionController::class, 'store']);
-    Route::post('/monitoring/actions/requests/{id}/poll', [MonitoringActionController::class, 'poll'])->whereNumber('id');
-
-    Route::get('/monitoring/artifacts/{ref}/url', [ArtifactDownloadController::class, 'url']);
-    Route::get('/monitoring/artifacts/{ref}/download', [ArtifactDownloadController::class, 'download'])
-        ->name('monitoring.artifacts.download')->middleware('signed');
 });
+
+Route::middleware('auth:sanctum')
+    ->get('/monitoring/health', MonitoringHealthController::class)
+    ->name('monitoring.health');
+
+Route::middleware('auth:sanctum')->group(function (): void {
+    Route::get('/monitoring/dashboard', MonitoringDashboardController::class)
+        ->name('monitoring.dashboard');
+
+    Route::get('/monitoring/runs', [MonitoringRunController::class, 'index'])
+        ->name('monitoring.runs.index');
+
+    Route::get('/monitoring/alerts', [MonitoringAlertController::class, 'index'])
+        ->name('monitoring.alerts.index');
+
+    Route::post('/monitoring/alerts/{alert}/acknowledge', [MonitoringAlertController::class, 'acknowledge'])
+        ->name('monitoring.alerts.acknowledge');
+
+    Route::get('/monitoring/enrollments', [MonitoringEnrollmentController::class, 'index'])
+        ->name('monitoring.enrollments.index');
+
+    Route::get('/monitoring/enrollments/{enrollment}/snapshots', [MonitoringSnapshotController::class, 'index'])
+        ->name('monitoring.enrollments.snapshots');
+
+    Route::get('/monitoring/enrollments/{enrollment}/changes', [MonitoringChangeController::class, 'index'])
+        ->name('monitoring.enrollments.changes');
+
+    Route::post('/monitoring/enrollments', [MonitoringEnrollmentController::class, 'store'])
+        ->name('monitoring.enrollments.store');
+
+    Route::get('/monitoring/enrollments/{enrollment}', [MonitoringEnrollmentController::class, 'show'])
+        ->name('monitoring.enrollments.show');
+
+    Route::patch('/monitoring/enrollments/{enrollment}', [MonitoringEnrollmentController::class, 'update'])
+        ->name('monitoring.enrollments.update');
+
+    Route::delete('/monitoring/enrollments/{enrollment}', [MonitoringEnrollmentController::class, 'destroy'])
+        ->name('monitoring.enrollments.destroy');
+
+    Route::post('/monitoring/enrollments/{enrollment}/run', [MonitoringRunController::class, 'run'])
+        ->name('monitoring.enrollments.run');
+
+    Route::post('/monitoring/sync', [MonitoringRunController::class, 'sync'])
+        ->name('monitoring.sync');
+
+    Route::get('/monitoring/authors', [MonitoringAuthorController::class, 'index'])
+        ->name('monitoring.authors.index');
+
+    Route::get('/monitoring/certificate', [MonitoringCertificateController::class, 'show'])
+        ->name('monitoring.certificate.show');
+
+    Route::post('/monitoring/certificate', [MonitoringCertificateController::class, 'store'])
+        ->name('monitoring.certificate.store');
+
+    Route::delete('/monitoring/certificate', [MonitoringCertificateController::class, 'destroy'])
+        ->name('monitoring.certificate.destroy');
+    Route::post('/monitoring/authors', [MonitoringAuthorController::class, 'store'])
+        ->name('monitoring.authors.store');
+
+    Route::post('/monitoring/authors/{author}/term', [MonitoringAuthorController::class, 'submitTerm'])
+        ->name('monitoring.authors.term');
+
+    Route::get('/monitoring/clients/{client}/cnd', ClientCndController::class)
+        ->name('monitoring.clients.cnd');
+
+    Route::get('/monitoring/parcelamentos', [ParcelmentController::class, 'index'])
+        ->name('monitoring.parcelments.index');
+
+    Route::get('/monitoring/parcelamentos/{parcelment}', [ParcelmentController::class, 'show'])
+        ->name('monitoring.parcelments.show');
+
+    Route::get('/monitoring/parcelamentos/{parcelment}/parcelas', [ParcelmentController::class, 'installments'])
+        ->name('monitoring.parcelments.installments');
+
+    Route::get('/monitoring/parcelas/{installment}/pagamentos', [ParcelmentController::class, 'payments'])
+        ->name('monitoring.parcelments.payments');
+
+    Route::post('/monitoring/enrollments/{enrollment}/gerar-das', [MonitoringActionController::class, 'generateDasForEnrollment'])
+        ->name('monitoring.enrollments.gerar-das');
+
+    Route::post('/monitoring/parcelas/{installment}/gerar-das', [MonitoringActionController::class, 'generateDasForInstallment'])
+        ->name('monitoring.parcelments.gerar-das');
+
+    Route::get('/monitoring/actions/{action}', [MonitoringActionController::class, 'show'])
+        ->name('monitoring.actions.show');
+
+    Route::get('/monitoring/parcelas/{installment}/guia/download', [ParcelmentController::class, 'downloadGuide'])
+        ->name('monitoring.parcelments.guide');
+
+    Route::get('/monitoring/clients/{client}/powers-of-attorney', [MonitoringPowerOfAttorneyController::class, 'index'])
+        ->name('monitoring.powers.index');
+
+    Route::post('/monitoring/clients/{client}/powers-of-attorney/verify', [MonitoringPowerOfAttorneyController::class, 'verify'])
+        ->name('monitoring.powers.verify');
+
+    Route::get('/monitoring/powers-of-attorney/divergences', [MonitoringPowerOfAttorneyController::class, 'divergences'])
+        ->name('monitoring.powers.divergences');
+
+    Route::get('/admin/serpro', [SerproAdminController::class, 'show'])
+        ->name('admin.serpro.show');
+
+    Route::post('/admin/serpro/credentials', [SerproAdminController::class, 'storeCredentials'])
+        ->name('admin.serpro.credentials');
+
+    Route::post('/admin/serpro/environment', [SerproAdminController::class, 'switchEnvironment'])
+        ->name('admin.serpro.environment');
+
+    Route::post('/admin/serpro/transport', [SerproAdminController::class, 'setTransport'])
+        ->name('admin.serpro.transport');
+});
+
+Route::middleware(['auth:sanctum', 'signed'])
+    ->get('/monitoring/artifacts/{ref}/download', MonitoringArtifactDownloadController::class)
+    ->where('ref', '[A-Za-z0-9_-]+')
+    ->name('monitoring.artifacts.download');

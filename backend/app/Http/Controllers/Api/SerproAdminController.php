@@ -3,170 +3,63 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Account;
-use App\Models\SerproContract;
-use App\Services\AuditService;
-use App\Services\MonitoringHealthService;
-use App\Services\SerproContractService;
-use App\Services\VaultService;
+use App\Http\Requests\Admin\Serpro\SetSerproTransportRequest;
+use App\Http\Requests\Admin\Serpro\StoreSerproCredentialsRequest;
+use App\Http\Requests\Admin\Serpro\SwitchSerproEnvironmentRequest;
+use App\Models\User;
+use App\Services\Monitoring\SerproAdminService;
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
+/**
+ * Administração SERPRO da Account A (abilities via `manage-serpro`).
+ *
+ * Contrato fino: autorização e validação vivem nos Form Requests/policy; o
+ * controller apenas delega ao serviço e devolve o overview factual, sempre
+ * com identificadores mascarados e sem segredo, PFX ou senha.
+ */
 class SerproAdminController extends Controller
 {
-    public function __construct(
-        private readonly SerproContractService $contracts,
-        private readonly VaultService $vault,
-        private readonly MonitoringHealthService $health,
-        private readonly AuditService $audit,
-    ) {}
+    use AuthorizesRequests;
 
-    private function denyUnlessSuperAdmin(Request $request): ?JsonResponse
+    public function show(Request $request, SerproAdminService $service): JsonResponse
     {
-        if (! $request->user()?->isSuperAdmin()) {
-            return response()->json(['message' => 'Acesso restrito à administração da plataforma.'], 403);
-        }
+        $this->authorize('manage-serpro');
 
-        return null;
+        return response()->json(['data' => $service->overview()]);
     }
 
-    private function platformAccount(Request $request): Account
+    public function storeCredentials(StoreSerproCredentialsRequest $request, SerproAdminService $service): JsonResponse
     {
-        return Account::query()->where('profile', 'A')->first()
-            ?? $request->user()->account;
-    }
-
-    public function show(Request $request): JsonResponse
-    {
-        if ($denied = $this->denyUnlessSuperAdmin($request)) {
-            return $denied;
-        }
-
-        $contract = $this->contracts->getOrCreate();
-        $platform = $this->platformAccount($request);
-
-        return response()->json([
-            ...$contract->toMaskedArray(),
-            'dry_run' => (bool) config('monitoring.dry_run', true),
-            'health' => $this->health->check($platform),
-        ]);
-    }
-
-    public function updateCredentials(Request $request): JsonResponse
-    {
-        if ($denied = $this->denyUnlessSuperAdmin($request)) {
-            return $denied;
-        }
-
-        $data = $request->validate([
-            'consumer_key' => ['required', 'string', 'min:1', 'max:255'],
-            'consumer_secret' => ['required', 'string', 'min:1', 'max:1000'],
-            'contractor_document' => ['nullable', 'string', 'regex:/^\d{11}$|^\d{14}$/'],
-        ]);
-
-        $platform = $this->platformAccount($request);
-        $contract = $this->contracts->getOrCreate();
-
-        $keyRef = $this->vault->put($platform, 'consumer-key', $data['consumer_key']);
-        $secretRef = $this->vault->put($platform, 'consumer-secret', $data['consumer_secret']);
-
-        if (! empty($data['contractor_document'])) {
-            $contract->forceFill(['contractor_document' => $data['contractor_document']])->save();
-        }
-
-        $this->contracts->rotateCredentials($contract, $keyRef, $secretRef, $request->user());
-
-        return response()->json($contract->refresh()->toMaskedArray());
-    }
-
-    public function switchEnvironment(Request $request): JsonResponse
-    {
-        if ($denied = $this->denyUnlessSuperAdmin($request)) {
-            return $denied;
-        }
-
-        $data = $request->validate([
-            'environment' => ['required', 'in:homologacao,producao'],
-            'confirmed' => ['required', 'boolean'],
-            'evidence' => ['nullable', 'string', 'max:2000'],
-        ]);
-
-        $contract = $this->contracts->getOrCreate();
+        /** @var User $actor */
         $actor = $request->user();
+        $data = $request->validated();
 
-        $needsEvidence = $data['environment'] === SerproContract::ENV_PRODUCAO;
+        $service->replaceCredentials($actor, (string) $data['environment'], $data);
 
-        if (! $data['confirmed'] || ($needsEvidence && empty($data['evidence']))) {
-            $this->audit->record($actor, $actor->account_id, null, 'serpro_contract.environment_switch_refused', [
-                'from' => $contract->environment,
-                'to' => $data['environment'],
-            ]);
-
-            return response()->json([
-                'message' => 'Alternância para produção exige dupla confirmação com evidência.',
-            ], 422);
-        }
-
-        $from = $contract->environment;
-        $contract->forceFill([
-            'environment' => $data['environment'],
-            // Fail-closed: ambiente novo começa com transporte desligado.
-            'transport_approved' => $from === $data['environment'] ? $contract->transport_approved : false,
-        ])->save();
-
-        $this->audit->record($actor, $actor->account_id, null, 'serpro_contract.environment_switched', [
-            'from' => $from,
-            'to' => $data['environment'],
-            'evidence' => $needsEvidence ? true : false,
-        ]);
-
-        return response()->json($contract->refresh()->toMaskedArray());
+        return response()->json(['data' => $service->overview()], 201);
     }
 
-    public function switchTransport(Request $request): JsonResponse
+    public function switchEnvironment(SwitchSerproEnvironmentRequest $request, SerproAdminService $service): JsonResponse
     {
-        if ($denied = $this->denyUnlessSuperAdmin($request)) {
-            return $denied;
-        }
-
-        $data = $request->validate([
-            'approved' => ['required', 'boolean'],
-            'confirmed' => ['required', 'boolean'],
-            'evidence' => ['nullable', 'string', 'max:2000'],
-        ]);
-
-        $contract = $this->contracts->getOrCreate();
+        /** @var User $actor */
         $actor = $request->user();
+        $data = $request->validated();
 
-        // Desligar é imediato: sem evidência, sem espera.
-        if (! $data['approved']) {
-            $contract->forceFill(['transport_approved' => false])->save();
+        $service->switchEnvironment($actor, (string) $data['environment'], $data['evidence'] ?? null);
 
-            $this->audit->record($actor, $actor->account_id, null, 'serpro_transport.disabled', [
-                'environment' => $contract->environment,
-            ]);
+        return response()->json(['data' => $service->overview()]);
+    }
 
-            return response()->json($contract->refresh()->toMaskedArray());
-        }
+    public function setTransport(SetSerproTransportRequest $request, SerproAdminService $service): JsonResponse
+    {
+        /** @var User $actor */
+        $actor = $request->user();
+        $data = $request->validated();
 
-        $needsEvidence = $contract->environment === SerproContract::ENV_PRODUCAO;
+        $service->setTransport($actor, (bool) $data['enabled'], $data['evidence'] ?? null);
 
-        if (! $data['confirmed'] || ($needsEvidence && empty($data['evidence']))) {
-            $this->audit->record($actor, $actor->account_id, null, 'serpro_transport.enable_refused', [
-                'environment' => $contract->environment,
-            ]);
-
-            return response()->json([
-                'message' => 'Religar o transporte em produção exige dupla confirmação com evidência.',
-            ], 422);
-        }
-
-        $contract->forceFill(['transport_approved' => true])->save();
-
-        $this->audit->record($actor, $actor->account_id, null, 'serpro_transport.enabled', [
-            'environment' => $contract->environment,
-        ]);
-
-        return response()->json($contract->refresh()->toMaskedArray());
+        return response()->json(['data' => $service->overview()]);
     }
 }

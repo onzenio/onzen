@@ -1,0 +1,13 @@
+{
+  "source": "exemplos/retorno_consultar_divida_ativa_mei",
+  "operation": "DIVIDAATIVA24",
+  "dry_run": true,
+  "http_status": 200,
+  "body": {
+    "dados": {
+      "situacao": "sem_divida",
+      "valorInscrito": 0,
+      "competencias": []
+    }
+  }
+}

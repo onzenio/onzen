@@ -2,117 +2,83 @@
 
 namespace App\Integrations\Serpro;
 
-use App\Models\Account;
+use App\Contracts\VaultResolver;
+use App\Exceptions\SerproBlockedException;
 use App\Models\SerproContract;
-use App\Services\VaultService;
-use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
 
-class SerproCredentialResolver
+/**
+ * Resolves the Contratante SERPRO credential from the opaque vault ref on
+ * {@see SerproContract}.
+ *
+ * Accepts the JSON form (`client_id`/`e_cnpj`, `consumer_secret`,
+ * `contratante_doc`) and the legacy pair form (`e_cnpj:consumer_secret`).
+ * Refs must be `secret:`; anything missing, unresolved or invalid fails
+ * closed with a factual reason code. Secrets are never logged or returned
+ * outside {@see SerproCredentials}.
+ */
+final class SerproCredentialResolver
 {
-    public function __construct(private readonly VaultService $vault) {}
+    public function __construct(private readonly VaultResolver $vault) {}
 
-    public static function cacheKey(string $environment): string
+    public function resolve(?SerproContract $contract): SerproCredentials
     {
-        return "serpro:token:{$environment}";
-    }
-
-    /**
-     * Resolve o consumer do Contratante no escopo da Account da plataforma.
-     * O ambiente efetivo vem do painel (singleton), não do .env.
-     *
-     * @return array{key: string, secret: string}|null
-     */
-    public function resolveConsumer(Account $platformAccount, ?string $environment = null): ?array
-    {
-        $contract = SerproContract::query()->first();
-
         if ($contract === null) {
-            return null;
+            throw new SerproBlockedException('serpro_credential_missing');
         }
 
-        $environment ??= $contract->environment;
-
-        if ($contract->environment !== $environment
-            || $contract->consumer_key_ref === null
-            || $contract->consumer_secret_ref === null) {
-            return null;
-        }
-
-        // Escopo: refs do cofre pertencem à Account da plataforma.
-        $key = $this->vault->get($this->scopedRef($platformAccount, $contract->consumer_key_ref));
-        $secret = $this->vault->get($this->scopedRef($platformAccount, $contract->consumer_secret_ref));
-
-        if ($key === null || $secret === null) {
-            return null;
-        }
-
-        return ['key' => $key, 'secret' => $secret];
+        return $this->resolveRef($contract->credential_ref);
     }
 
-    public function token(Account $platformAccount, ?string $environment = null): ?string
+    public function resolveRef(?string $ref): SerproCredentials
     {
-        $environment ??= SerproContract::query()->first()?->environment
-            ?? (string) config('monitoring.environment', 'homologacao');
-
-        $cached = Cache::get(self::cacheKey($environment));
-
-        if (is_string($cached) && $cached !== '') {
-            return $cached;
+        if ($ref === null || $ref === '' || ! str_starts_with($ref, 'secret:') || $ref === 'secret:') {
+            throw new SerproBlockedException('serpro_credential_ref_invalid');
         }
 
-        $consumer = $this->resolveConsumer($platformAccount, $environment);
-
-        if ($consumer === null) {
-            return null;
+        $raw = $this->vault->get($ref);
+        if ($raw === null) {
+            throw new SerproBlockedException('serpro_credential_unresolved');
         }
 
-        try {
-            $response = Http::asForm()
-                ->withBasicAuth($consumer['key'], $consumer['secret'])
-                ->post((string) config('monitoring.token_url'), ['grant_type' => 'client_credentials']);
-
-            if (! $response->successful()) {
-                Log::warning('serpro.token_failed', ['environment' => $environment, 'status' => $response->status()]);
-
-                return null;
-            }
-
-            $token = $response->json('access_token');
-
-            if (! is_string($token) || $token === '') {
-                return null;
-            }
-
-            Cache::put(self::cacheKey($environment), $token, now()->addMinutes(50));
-
-            return $token;
-        } catch (\Throwable $e) {
-            Log::warning('serpro.token_error', ['environment' => $environment]);
-
-            return null;
-        }
-    }
-
-    public function clearToken(?string $environment = null): void
-    {
-        $environment ??= SerproContract::query()->first()?->environment
-            ?? (string) config('monitoring.environment', 'homologacao');
-
-        Cache::forget(self::cacheKey($environment));
+        return $this->parse($raw);
     }
 
     /**
-     * Refs legadas `secret:valor` (sem conta) são interpretadas no escopo
-     * da Account da plataforma; refs `secret:{id}:{nome}` valem como estão.
+     * @param  array<string, mixed>|string  $raw
      */
-    private function scopedRef(Account $platformAccount, string $ref): string
+    private function parse(array|string $raw): SerproCredentials
     {
-        if ($this->vault->parse($ref) !== null) {
-            return $ref;
+        $data = is_array($raw) ? $raw : json_decode($raw, true);
+        if (! is_array($data)) {
+            [$eCnpj, $secret] = array_pad(explode(':', $raw, 2), 2, '');
+            $data = ['client_id' => $eCnpj, 'consumer_secret' => $secret];
         }
 
-        return $this->vault->ref($platformAccount, $ref);
+        $eCnpj = (string) ($data['client_id'] ?? $data['e_cnpj'] ?? $data['ecnpj'] ?? '');
+        $secret = (string) ($data['consumer_secret'] ?? $data['secret'] ?? '');
+        if ($eCnpj === '' || $secret === '') {
+            throw new SerproBlockedException('serpro_credential_invalid');
+        }
+
+        // A consumer key opaca não é o CNPJ da contratante: o documento
+        // explícito vence, com fallback para a própria chave.
+        $explicitDoc = (string) ($data['contratante_doc'] ?? $data['contratante'] ?? '');
+        $contratanteDoc = preg_replace('/\D/', '', $explicitDoc) !== '' ? $explicitDoc : $eCnpj;
+
+        // Material de mTLS opcional: ou vem completo (PFX + senha) ou não vem,
+        // senão o transporte falharia no meio do caminho — falha-se aqui.
+        $certificate = (string) ($data['certificate'] ?? '');
+        $certificatePassword = (string) ($data['certificate_password'] ?? '');
+        if (($certificate === '') !== ($certificatePassword === '')) {
+            throw new SerproBlockedException('serpro_credential_invalid');
+        }
+
+        return new SerproCredentials(
+            $eCnpj,
+            $secret,
+            $contratanteDoc,
+            $certificate !== '' ? $certificate : null,
+            $certificatePassword !== '' ? $certificatePassword : null,
+        );
     }
 }

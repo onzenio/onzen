@@ -21,6 +21,9 @@ class MonitoringEnrollmentPolicy
         return $this->belongsToEffectiveAccount($user, $enrollment->account_id);
     }
 
+    /**
+     * Writes stay with admin/operator; `user` is read-only.
+     */
     public function create(User $user): bool
     {
         return in_array($user->role, [UserRole::SuperAdmin, UserRole::Admin, UserRole::Operator], true);
@@ -28,11 +31,19 @@ class MonitoringEnrollmentPolicy
 
     public function update(User $user, MonitoringEnrollment $enrollment): bool
     {
-        return $this->belongsToEffectiveAccount($user, $enrollment->account_id)
-            && $this->create($user);
+        return $this->view($user, $enrollment) && $this->create($user);
     }
 
     public function delete(User $user, MonitoringEnrollment $enrollment): bool
+    {
+        return $this->update($user, $enrollment);
+    }
+
+    /**
+     * Triggering a manual execution follows the write rule: `admin`/`operator`
+     * (and super_admin) may run, `user` may not.
+     */
+    public function run(User $user, MonitoringEnrollment $enrollment): bool
     {
         return $this->update($user, $enrollment);
     }

@@ -19,12 +19,17 @@ return Application::configure(basePath: dirname(__DIR__))
     // AuditAuthListener@handle uma segunda vez (2 linhas por login/logout).
     ->withEvents(discover: false)
     ->withMiddleware(function (Middleware $middleware): void {
+        // Headless (sem rotas de view do Fortify): guests nunca são
+        // redirecionados para uma inexistente página de login; a API
+        // responde 401 e o handler abaixo serializa em JSON para api/*.
+        $middleware->redirectGuestsTo(null);
         // Sessão stateful ANTES do ResolveAccount (que lê switch_account_id
         // da sessão). O Ensure só abre sessão/CSRF para origens stateful,
         // então não há duplo StartSession/EncryptCookies no grupo api.
+        // ResolveAccount ANTES do SubstituteBindings para que o model binding
+        // honre o escopo da Account efetiva (bindings cross-account dão 404).
         $middleware->api(prepend: [
             EnsureFrontendRequestsAreStateful::class,
-        ], append: [
             ResolveAccount::class,
         ]);
     })
