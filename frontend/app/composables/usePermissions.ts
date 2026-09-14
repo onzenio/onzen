@@ -8,6 +8,9 @@ export type PermissionAction
     | 'clients.write'
     | 'invites.manage'
     | 'switch.use'
+    | 'monitoring.view'
+    | 'monitoring.write'
+    | 'serpro.view'
 
 export function usePermissions() {
   const { me } = useMe()
@@ -32,6 +35,13 @@ export function usePermissions() {
       case 'invites.manage':
         return isSuperAdmin.value || role.value === 'admin'
       case 'switch.use':
+        return isSuperAdmin.value
+      case 'monitoring.view':
+        // Papel da carteira + Module liberado (monitoring ou clients).
+        return role.value !== null && (canAccessModule('monitoring') || canAccessModule('clients'))
+      case 'monitoring.write':
+        return (isSuperAdmin.value || role.value === 'admin' || role.value === 'operator') && (canAccessModule('monitoring') || canAccessModule('clients'))
+      case 'serpro.view':
         return isSuperAdmin.value
       default:
         return false

@@ -28,6 +28,14 @@ const links = computed<NavigationMenuItem[][]>(() => {
       onSelect: closeSidebar
     })
   }
+  if (can('monitoring.view')) {
+    main.push({
+      label: 'Monitoramento',
+      icon: 'i-lucide-activity',
+      to: '/monitoring',
+      onSelect: closeSidebar
+    })
+  }
   const adminChildren: NavigationMenuItem[] = []
   if (can('accounts.view')) {
     adminChildren.push({
@@ -47,6 +55,13 @@ const links = computed<NavigationMenuItem[][]>(() => {
     adminChildren.push({
       label: 'Auditoria',
       to: '/audit',
+      onSelect: closeSidebar
+    })
+  }
+  if (can('serpro.view')) {
+    adminChildren.push({
+      label: 'SERPRO',
+      to: '/serpro',
       onSelect: closeSidebar
     })
   }

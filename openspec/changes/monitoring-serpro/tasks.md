@@ -55,12 +55,12 @@
 
 ## 8. UI com o template
 
-- [ ] 8.1 Implementar a tela de monitoramento com módulos, associações e busca usando os componentes do template e verificar com `pnpm typecheck` e smoke manual de lista, indisponibilidade e disparo.
-- [ ] 8.2 Implementar o painel do Client com snapshots, mudanças, alertas e CND sem consulta ao abrir e verificar com smoke manual de leitura e reconhecimento de alerta.
-- [ ] 8.3 Implementar a tela de parcelamentos com detalhe e download de guia e verificar com smoke manual de listagem, detalhe e guia ausente.
-- [ ] 8.4 Implementar a administração SERPRO da Account A e a gestão de Certificado Digital e autores e verificar com smoke manual de mascaramento, confirmações e validade.
-- [ ] 8.5 Implementar a exibição de quota e as mensagens de bloqueio/upgrade e verificar com smoke manual de saldo, esgotamento e erro acionável.
-- [ ] 8.6 Implementar a navegação de monitoramento filtrada por Role e Module e verificar com smoke manual por papel e `pnpm typecheck`.
+- [x] 8.1 Implementar a tela de monitoramento com módulos, associações e busca usando os componentes do template e verificar com `pnpm typecheck` e smoke manual de lista, indisponibilidade e disparo.
+- [x] 8.2 Implementar o painel do Client com snapshots, mudanças, alertas e CND sem consulta ao abrir e verificar com smoke manual de leitura e reconhecimento de alerta.
+- [x] 8.3 Implementar a tela de parcelamentos com detalhe e download de guia e verificar com smoke manual de listagem, detalhe e guia ausente.
+- [x] 8.4 Implementar a administração SERPRO da Account A e a gestão de Certificado Digital e autores e verificar com smoke manual de mascaramento, confirmações e validade.
+- [x] 8.5 Implementar a exibição de quota e as mensagens de bloqueio/upgrade e verificar com smoke manual de saldo, esgotamento e erro acionável.
+- [x] 8.6 Implementar a navegação de monitoramento filtrada por Role e Module e verificar com smoke manual por papel e `pnpm typecheck`.
 
 ## 9. Verificação final
 
