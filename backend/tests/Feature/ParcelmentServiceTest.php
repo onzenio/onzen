@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Client;
+use App\Models\ParcelmentOrder;
 use App\Services\ParcelmentService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -55,11 +56,11 @@ class ParcelmentServiceTest extends TestCase
         app(ParcelmentService::class)->list($a, '012');
 
         $this->assertCount(1, app(ParcelmentService::class)->list($a, '012'));
-        $this->assertSame(0, \App\Models\ParcelmentOrder::query()->withoutGlobalScopes()
+        $this->assertSame(0, ParcelmentOrder::query()->withoutGlobalScopes()
             ->where('account_id', $b->account_id)->count());
 
         // Repetição não duplica (idempotência do sync).
         app(ParcelmentService::class)->list($a, '012');
-        $this->assertSame(1, \App\Models\ParcelmentOrder::query()->withoutGlobalScopes()->count());
+        $this->assertSame(1, ParcelmentOrder::query()->withoutGlobalScopes()->count());
     }
 }

@@ -3,8 +3,10 @@
 namespace Tests\Feature;
 
 use App\Enums\UserRole;
+use App\Models\AuditLog;
 use App\Models\Client;
 use App\Models\SerproServiceRequest;
+use App\Services\AuditService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Http;
@@ -18,7 +20,7 @@ class MonitoringActionAuditTest extends TestCase
     {
         $account = $this->createAccount();
         $actor = $this->createUser($account, ['role' => UserRole::Admin]);
-        $service = app(\App\Services\AuditService::class);
+        $service = app(AuditService::class);
 
         $service->record($actor, $account->id, $account->id, 'serpro_action.requested', [
             'kind' => SerproServiceRequest::KIND_DAS_PGDASD,
@@ -27,7 +29,7 @@ class MonitoringActionAuditTest extends TestCase
             'status' => 'completed',
         ]);
 
-        $audit = \App\Models\AuditLog::query()->where('action', 'serpro_action.requested')->firstOrFail();
+        $audit = AuditLog::query()->where('action', 'serpro_action.requested')->firstOrFail();
         $json = json_encode($audit->metadata);
 
         $this->assertStringContainsString('emitir-das-pgdasd', (string) $json);

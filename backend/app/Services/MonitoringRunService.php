@@ -11,7 +11,7 @@ class MonitoringRunService
     /**
      * Cria ou retorna a execução existente (idempotência por chave).
      *
-     * @param array{client_id?: int|null, definition_code: string, origin?: string, fencing_token?: int} $attrs
+     * @param  array{client_id?: int|null, definition_code: string, origin?: string, fencing_token?: int}  $attrs
      */
     public function startOrGet(Account $account, string $idempotencyKey, array $attrs, ?User $actor = null): MonitoringRun
     {

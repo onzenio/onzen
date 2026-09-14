@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Enums\UserRole;
 use App\Jobs\ExecuteSerproJob;
+use App\Models\Account;
 use App\Models\MonitoringRun;
 use App\Models\Plan;
 use App\Services\MonitoringScheduler;
@@ -17,7 +18,7 @@ class MonitoringSchedulerTest extends TestCase
 {
     use RefreshDatabase;
 
-    private function accountWithVolume(int $volume): \App\Models\Account
+    private function accountWithVolume(int $volume): Account
     {
         $account = $this->createAccount();
         $account->forceFill(['plan_id' => Plan::factory()->create(['monthly_query_volume' => $volume])->id])->save();

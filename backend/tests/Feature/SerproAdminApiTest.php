@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Enums\AccountProfile;
 use App\Enums\UserRole;
 use App\Models\SerproContract;
+use App\Models\User;
 use App\Services\VaultService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -13,7 +14,7 @@ class SerproAdminApiTest extends TestCase
 {
     use RefreshDatabase;
 
-    private function superAdmin(): \App\Models\User
+    private function superAdmin(): User
     {
         $platform = $this->createAccount(['profile' => AccountProfile::A]);
 

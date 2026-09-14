@@ -3,6 +3,7 @@
 namespace App\Integrations\Serpro;
 
 use App\Models\Account;
+use App\Models\SerproContract;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -21,15 +22,15 @@ class SerproTransport
      * Fail-closed: com dry-run ativo ou transporte não aprovado, resolve
      * via fixture sem nenhum tráfego HTTP.
      *
-     * @param array<string, mixed> $envelope
-     * @param array{idempotency_key?: string, procurador_token?: string, pfx_contents?: string, pfx_password?: string, environment?: string, platform_account?: Account} $options
+     * @param  array<string, mixed>  $envelope
+     * @param  array{idempotency_key?: string, procurador_token?: string, pfx_contents?: string, pfx_password?: string, environment?: string, platform_account?: Account}  $options
      * @return array<string, mixed>
      */
     public function request(string $operation, array $envelope, array $options = []): array
     {
         $environment = $options['environment'] ?? (string) config('monitoring.environment', 'homologacao');
         // Gate efetivo: painel da Account A prevalece; config vale como fallback.
-        $panel = \App\Models\SerproContract::query()->first();
+        $panel = SerproContract::query()->first();
         $approved = $panel?->transport_approved ?? (bool) config('monitoring.transport.approved', false);
         $dryRun = (bool) config('monitoring.dry_run', true);
 

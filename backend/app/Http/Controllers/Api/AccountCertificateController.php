@@ -2,7 +2,9 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
+use App\Models\Account;
 use App\Models\AccountCertificate;
 use App\Services\AccountCertificateService;
 use App\Services\VaultService;
@@ -27,7 +29,7 @@ class AccountCertificateController extends Controller
 
     private function denyUnlessManager(Request $request): ?JsonResponse
     {
-        if (! in_array($request->user()->role, [\App\Enums\UserRole::SuperAdmin, \App\Enums\UserRole::Admin], true)) {
+        if (! in_array($request->user()->role, [UserRole::SuperAdmin, UserRole::Admin], true)) {
             return response()->json(['message' => 'Gestão de Certificado restrita a admin.'], 403);
         }
 
@@ -71,7 +73,7 @@ class AccountCertificateController extends Controller
             return response()->json(['message' => 'PFX inválido.'], 422);
         }
 
-        $account = \App\Models\Account::query()->findOrFail($this->effectiveAccountId($request));
+        $account = Account::query()->findOrFail($this->effectiveAccountId($request));
 
         $cert = $this->certificates->register($account, [
             'pfx_ref' => $this->vault->put($account, 'pfx', $pfx),

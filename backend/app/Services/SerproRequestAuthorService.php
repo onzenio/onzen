@@ -13,7 +13,7 @@ class SerproRequestAuthorService
     public function __construct(private readonly AuditService $audit) {}
 
     /**
-     * @param array{document: string, name: string} $data
+     * @param  array{document: string, name: string}  $data
      */
     public function register(Account $account, array $data, ?User $actor = null): SerproRequestAuthor
     {

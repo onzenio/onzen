@@ -5,9 +5,11 @@ namespace Tests\Feature;
 use App\Enums\AccountProfile;
 use App\Integrations\Serpro\SerproTransport;
 use App\Integrations\Serpro\SerproTransportException;
+use App\Models\Account;
 use App\Models\SerproContract;
 use App\Services\VaultService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
@@ -17,7 +19,7 @@ class SerproTransportTest extends TestCase
     use RefreshDatabase;
 
     /**
-     * @return array{0: \App\Models\Account, 1: SerproTransport}
+     * @return array{0: Account, 1: SerproTransport}
      */
     private function liveTransport(): array
     {
@@ -115,7 +117,7 @@ class SerproTransportTest extends TestCase
         }
 
         $this->assertSame([], $this->tempLeftovers());
-        $this->assertNull(\Illuminate\Support\Facades\Cache::get('serpro:token:homologacao'));
+        $this->assertNull(Cache::get('serpro:token:homologacao'));
     }
 
     public function test_dry_run_usa_fixture_sem_http(): void

@@ -3,10 +3,12 @@
 namespace Tests\Feature;
 
 use App\Integrations\Serpro\ProcuradorTermSender;
+use App\Integrations\Serpro\SerproTermSigner;
+use App\Models\AccountCertificate;
 use App\Models\Client;
 use App\Models\MonitoringEnrollment;
 use App\Models\Plan;
-use App\Models\SerproRequestAuthor;
+use App\Services\EnrollmentService;
 use App\Services\ProcurationChecker;
 use App\Services\SerproRequestAuthorService;
 use App\Services\VaultService;
@@ -48,13 +50,13 @@ class RenewProcuradorTermsTest extends TestCase
         $account->forceFill(['plan_id' => Plan::factory()->create(['max_clients' => 10])->id])->save();
         $vault = app(VaultService::class);
 
-        $signer = \Mockery::mock(\App\Integrations\Serpro\SerproTermSigner::class);
+        $signer = \Mockery::mock(SerproTermSigner::class);
         $signer->shouldReceive('canonical')->andReturn('canonico');
         $signer->shouldReceive('sign')->andReturn('ASSINATURA');
-        $this->app->instance(\App\Integrations\Serpro\SerproTermSigner::class, $signer);
+        $this->app->instance(SerproTermSigner::class, $signer);
         $pfxRef = $vault->put($account, 'pfx', 'PFX');
         $pwdRef = $vault->put($account, 'pfx-password', 'PWD');
-        \App\Models\AccountCertificate::query()->withoutGlobalScopes()->create([
+        AccountCertificate::query()->withoutGlobalScopes()->create([
             'account_id' => $account->id,
             'pfx_ref' => $pfxRef,
             'password_ref' => $pwdRef,
@@ -74,7 +76,7 @@ class RenewProcuradorTermsTest extends TestCase
         $client = Client::factory()->for($account, 'account')->create([
             'monitoring_enabled' => true, 'regime' => 'simples',
         ]);
-        $enrollment = app(\App\Services\EnrollmentService::class)->create($account, $client->id, 'sitfis');
+        $enrollment = app(EnrollmentService::class)->create($account, $client->id, 'sitfis');
         $enrollment->pause('outorga pendente');
 
         $this->artisan('monitoring:renew-terms')->assertSuccessful();

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\AuditLog;
 use App\Models\SerproContract;
 use App\Services\SerproContractService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -69,7 +70,7 @@ class SerproContractTest extends TestCase
             'action' => 'serpro_contract.credentials_rotated',
         ]);
 
-        $audit = \App\Models\AuditLog::query()
+        $audit = AuditLog::query()
             ->where('action', 'serpro_contract.credentials_rotated')
             ->firstOrFail();
         $meta = json_encode($audit->metadata);

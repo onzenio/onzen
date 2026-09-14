@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Account;
 use App\Models\MonitoringQuotaUsage;
 use App\Models\MonitoringRun;
 use App\Models\Plan;
@@ -14,7 +15,7 @@ class QueryQuotaTest extends TestCase
 {
     use RefreshDatabase;
 
-    private function accountWithVolume(int $volume): \App\Models\Account
+    private function accountWithVolume(int $volume): Account
     {
         $plan = Plan::factory()->create(['monthly_query_volume' => $volume]);
         $account = $this->createAccount();

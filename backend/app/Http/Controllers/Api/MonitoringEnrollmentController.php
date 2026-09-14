@@ -3,13 +3,19 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Account;
 use App\Models\Client;
 use App\Models\MonitoringEnrollment;
 use App\Services\EnrollmentService;
+use App\Services\MonitoringScheduler;
+use App\Services\OutorgaSyncService;
+use App\Services\QuotaExhaustedException;
 use App\Support\CurrentAccount;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 
 class MonitoringEnrollmentController extends Controller
 {
@@ -17,7 +23,7 @@ class MonitoringEnrollmentController extends Controller
 
     public function __construct(
         private readonly EnrollmentService $enrollments,
-        private readonly \App\Services\OutorgaSyncService $outorga,
+        private readonly OutorgaSyncService $outorga,
     ) {}
 
     private function effectiveAccountId(Request $request): int
@@ -39,7 +45,7 @@ class MonitoringEnrollmentController extends Controller
         $this->authorize('viewAny', MonitoringEnrollment::class);
 
         $accountId = CurrentAccount::get() ?? $request->user()->account_id;
-        $account = \App\Models\Account::query()->findOrFail($accountId);
+        $account = Account::query()->findOrFail($accountId);
 
         $page = $this->enrollments->search($account, $request->query('q'), 15);
 
@@ -64,7 +70,7 @@ class MonitoringEnrollmentController extends Controller
         ]);
 
         $accountId = CurrentAccount::get() ?? $request->user()->account_id;
-        $account = \App\Models\Account::query()->findOrFail($accountId);
+        $account = Account::query()->findOrFail($accountId);
 
         // 404 cross-account antes de qualquer validação de negócio.
         $client = Client::query()->whereKey($data['client_id'])->firstOrFail();
@@ -137,19 +143,19 @@ class MonitoringEnrollmentController extends Controller
             'idempotency_key' => ['sometimes', 'string', 'max:120'],
         ]);
 
-        $account = \App\Models\Account::query()->findOrFail($enrollment->account_id);
+        $account = Account::query()->findOrFail($enrollment->account_id);
 
         try {
-            $run = app(\App\Services\MonitoringScheduler::class)->triggerManual(
+            $run = app(MonitoringScheduler::class)->triggerManual(
                 $account,
                 $request->user(),
                 $enrollment->definition_code,
                 $enrollment->client_id,
-                $data['idempotency_key'] ?? (string) \Illuminate\Support\Str::uuid(),
+                $data['idempotency_key'] ?? (string) Str::uuid(),
             );
-        } catch (\Illuminate\Auth\Access\AuthorizationException $e) {
+        } catch (AuthorizationException $e) {
             return response()->json(['message' => $e->getMessage()], 403);
-        } catch (\App\Services\QuotaExhaustedException $e) {
+        } catch (QuotaExhaustedException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         }
 

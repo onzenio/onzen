@@ -3,12 +3,14 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Account;
 use App\Models\SerproRequestAuthor;
 use App\Services\SerproRequestAuthorService;
 use App\Support\CurrentAccount;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 
 class MonitoringAuthorController extends Controller
 {
@@ -43,11 +45,11 @@ class MonitoringAuthorController extends Controller
             'name' => ['required', 'string', 'max:255'],
         ]);
 
-        $account = \App\Models\Account::query()->findOrFail($this->effectiveAccountId($request));
+        $account = Account::query()->findOrFail($this->effectiveAccountId($request));
 
         try {
             $author = $this->authors->register($account, $data, $request->user());
-        } catch (\Illuminate\Validation\ValidationException $e) {
+        } catch (ValidationException $e) {
             throw $e;
         }
 

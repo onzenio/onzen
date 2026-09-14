@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Enums\UserRole;
+use App\Models\AuditLog;
 use App\Models\Client;
 use App\Models\MonitoringAlert;
 use App\Models\MonitoringChange;
@@ -65,6 +66,6 @@ class MonitoringSnapshotTest extends TestCase
 
         // Reconhecimento repetido: bem-sucedido, sem duplicar registro.
         $service->acknowledge($alert->refresh(), $actor);
-        $this->assertSame(1, \App\Models\AuditLog::query()->where('action', 'monitoring_alert.acknowledged')->count());
+        $this->assertSame(1, AuditLog::query()->where('action', 'monitoring_alert.acknowledged')->count());
     }
 }

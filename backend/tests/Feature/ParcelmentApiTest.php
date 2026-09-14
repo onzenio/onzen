@@ -4,7 +4,6 @@ namespace Tests\Feature;
 
 use App\Enums\UserRole;
 use App\Models\Client;
-use App\Models\ParcelmentOrder;
 use App\Services\ArtifactStore;
 use App\Services\ParcelmentService;
 use Illuminate\Foundation\Testing\RefreshDatabase;

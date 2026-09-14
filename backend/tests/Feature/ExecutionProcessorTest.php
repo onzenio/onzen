@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Client;
+use App\Models\MonitoringArtifact;
 use App\Models\MonitoringRun;
 use App\Models\MonitoringSnapshot;
 use App\Services\ExecutionProcessor;
@@ -39,7 +40,7 @@ class ExecutionProcessorTest extends TestCase
         $this->assertSame(MonitoringRun::COMPLETED, $processed->status);
         $this->assertNotNull($processed->artifact_ref);
         $this->assertSame(1, MonitoringSnapshot::query()->withoutGlobalScopes()->count());
-        $this->assertSame(1, \App\Models\MonitoringArtifact::query()->withoutGlobalScopes()->count());
+        $this->assertSame(1, MonitoringArtifact::query()->withoutGlobalScopes()->count());
     }
 
     public function test_falha_de_artefato_nao_quebra_execucao(): void

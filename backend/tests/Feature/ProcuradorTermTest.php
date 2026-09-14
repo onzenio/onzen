@@ -3,9 +3,13 @@
 namespace Tests\Feature;
 
 use App\Integrations\Serpro\ProcuradorTermSender;
+use App\Models\Account;
+use App\Models\AccountCertificate;
+use App\Models\AuditLog;
 use App\Models\SerproRequestAuthor;
 use App\Services\AccountCertificateService;
 use App\Services\ProcuradorTermService;
+use App\Services\SerproRequestAuthorService;
 use App\Services\VaultService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -41,7 +45,7 @@ class ProcuradorTermTest extends TestCase
     }
 
     /**
-     * @return array{0: \App\Models\Account, 1: SerproRequestAuthor, 2: object}
+     * @return array{0: Account, 1: SerproRequestAuthor, 2: object}
      */
     private function authorWithCert(string $pfx, string $password): array
     {
@@ -51,7 +55,7 @@ class ProcuradorTermTest extends TestCase
         $pfxRef = $vault->put($account, 'pfx', $pfx);
         $pwdRef = $vault->put($account, 'pfx-password', $password);
 
-        \App\Models\AccountCertificate::query()->withoutGlobalScopes()->create([
+        AccountCertificate::query()->withoutGlobalScopes()->create([
             'account_id' => $account->id,
             'pfx_ref' => $pfxRef,
             'password_ref' => $pwdRef,
@@ -60,7 +64,7 @@ class ProcuradorTermTest extends TestCase
             'expires_at' => now()->addYear(),
         ]);
 
-        $author = app(\App\Services\SerproRequestAuthorService::class)->register($account, [
+        $author = app(SerproRequestAuthorService::class)->register($account, [
             'document' => '12345678901',
             'name' => 'Procurador',
         ]);
@@ -143,7 +147,7 @@ class ProcuradorTermTest extends TestCase
         $masked = $author->refresh()->toMaskedArray();
         $this->assertStringNotContainsString('TOKEN-SUPER-SECRETO', json_encode($masked));
 
-        $audits = json_encode(\App\Models\AuditLog::query()->pluck('metadata')->all());
+        $audits = json_encode(AuditLog::query()->pluck('metadata')->all());
         $this->assertStringNotContainsString('TOKEN-SUPER-SECRETO', $audits);
     }
 }

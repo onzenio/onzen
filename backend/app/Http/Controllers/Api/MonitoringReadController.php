@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Account;
 use App\Models\Client;
 use App\Models\MonitoringAlert;
 use App\Models\MonitoringChange;
@@ -42,7 +43,7 @@ class MonitoringReadController extends Controller
         $this->authorize('viewAny', MonitoringEnrollment::class);
 
         $accountId = $this->effectiveAccountId($request);
-        $account = \App\Models\Account::query()->findOrFail($accountId);
+        $account = Account::query()->findOrFail($accountId);
 
         return response()->json([
             'enrollments' => [

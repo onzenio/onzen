@@ -20,7 +20,7 @@ class ExecutionProcessor
      * snapshot e decodifica conteúdos em artefatos. Falha de artefato é
      * registrada sem quebrar a execução.
      *
-     * @param array<string, mixed> $payload resposta (fixture ou transporte)
+     * @param  array<string, mixed>  $payload  resposta (fixture ou transporte)
      */
     public function processCompletedRun(MonitoringRun $run, array $payload): MonitoringRun
     {
@@ -49,7 +49,7 @@ class ExecutionProcessor
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      */
     private function decodeContents(MonitoringRun $run, array $payload): void
     {

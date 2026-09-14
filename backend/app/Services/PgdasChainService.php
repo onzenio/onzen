@@ -21,7 +21,7 @@ class PgdasChainService
      * Encadeia índice→declaração→extrato quando o índice traz novidade.
      * Idempotente por período: sem novidade, nada é enfileirado.
      *
-     * @param array<string, mixed> $indexPayload
+     * @param  array<string, mixed>  $indexPayload
      * @return list<string> operações enfileiradas
      */
     public function chainFromIndex(
@@ -73,7 +73,7 @@ class PgdasChainService
     }
 
     /**
-     * @param array<string, mixed> $indexPayload
+     * @param  array<string, mixed>  $indexPayload
      * @return list<string>
      */
     private function periods(array $indexPayload): array

@@ -3,19 +3,21 @@
 namespace Tests\Feature;
 
 use App\Enums\UserRole;
+use App\Models\Account;
 use App\Models\Client;
 use App\Models\MonitoringEnrollment;
 use App\Models\Plan;
 use App\Services\EnrollmentService;
 use Database\Seeders\MonitoringDefinitionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 
 class MonitoringEnrollmentTest extends TestCase
 {
     use RefreshDatabase;
 
-    private function accountWithPlan(int $maxClients = 10): \App\Models\Account
+    private function accountWithPlan(int $maxClients = 10): Account
     {
         $account = $this->createAccount();
         $account->forceFill(['plan_id' => Plan::factory()->create(['max_clients' => $maxClients])->id])->save();
@@ -56,7 +58,7 @@ class MonitoringEnrollmentTest extends TestCase
         try {
             $service->create($account, $inactive->id, 'pagamentos');
             $this->fail('Client inativo deveria ser recusado');
-        } catch (\Illuminate\Validation\ValidationException) {
+        } catch (ValidationException) {
         }
 
         // Definição indisponível / em prospecção.
@@ -65,7 +67,7 @@ class MonitoringEnrollmentTest extends TestCase
             try {
                 $service->create($account, $client->id, $code);
                 $this->fail("{$code} deveria ser recusada");
-            } catch (\Illuminate\Validation\ValidationException) {
+            } catch (ValidationException) {
             }
         }
 
@@ -74,7 +76,7 @@ class MonitoringEnrollmentTest extends TestCase
         try {
             $service->create($account, $mei->id, 'defis');
             $this->fail('Regime inelegível deveria ser recusado');
-        } catch (\Illuminate\Validation\ValidationException) {
+        } catch (ValidationException) {
         }
 
         $this->assertDatabaseCount('monitoring_enrollments', 0);
@@ -92,7 +94,7 @@ class MonitoringEnrollmentTest extends TestCase
         try {
             $service->create($account, $client->id, 'pagamentos');
             $this->fail('Duplicada deveria ser impedida');
-        } catch (\Illuminate\Validation\ValidationException) {
+        } catch (ValidationException) {
         }
 
         $enrollment->pause('outorga pendente');
@@ -115,7 +117,7 @@ class MonitoringEnrollmentTest extends TestCase
         try {
             $service->create($account, $this->enabledClient($account)->id, 'sitfis');
             $this->fail('Limite do Plan deveria recusar');
-        } catch (\Illuminate\Validation\ValidationException $e) {
+        } catch (ValidationException $e) {
             $this->assertStringContainsString('Plan', json_encode($e->errors()));
         }
     }

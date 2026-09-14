@@ -15,7 +15,7 @@ class SerproResponseClassifier
     /**
      * Classifica a resposta para dirigir retry, backoff e polling.
      *
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array{outcome: string, backoff_seconds: int|null}
      */
     public static function classify(?int $statusCode, array $payload = [], int $attempt = 1, int $backoffBase = 60): array
@@ -45,7 +45,7 @@ class SerproResponseClassifier
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      */
     private static function hasPendingProtocol(array $payload): bool
     {
@@ -59,7 +59,7 @@ class SerproResponseClassifier
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      */
     private static function isDefinitiveRejection(?int $statusCode, array $payload): bool
     {

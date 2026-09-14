@@ -12,6 +12,7 @@ use App\Services\OutorgaSyncService;
 use App\Services\ProcurationChecker;
 use Database\Seeders\MonitoringDefinitionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Tests\TestCase;
 
 class OutorgaSyncTest extends TestCase
@@ -74,7 +75,7 @@ class OutorgaSyncTest extends TestCase
             }
         };
         $this->app->instance(ProcurationChecker::class, $checker);
-        \Illuminate\Support\Facades\Cache::flush();
+        Cache::flush();
 
         app(OutorgaSyncService::class)->syncClient($client);
 

@@ -171,7 +171,7 @@ class ActionService
     }
 
     /**
-     * @param array<string, mixed> $response
+     * @param  array<string, mixed>  $response
      */
     private function applyResponse(SerproServiceRequest $serviceRequest, array $response, int $accountId): void
     {

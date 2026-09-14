@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Enums\UserRole;
+use App\Models\AccountCertificate;
 use App\Models\SerproRequestAuthor;
 use App\Policies\SerproRequestAuthorPolicy;
 use App\Services\AccountCertificateService;
@@ -60,7 +61,7 @@ class SerproRequestAuthorTest extends TestCase
         $this->assertTrue($author->isEligible());
 
         $account->certificates ?? null;
-        \App\Models\AccountCertificate::query()->withoutGlobalScopes()
+        AccountCertificate::query()->withoutGlobalScopes()
             ->where('account_id', $account->id)
             ->update(['expires_at' => now()->subDay()]);
 

@@ -10,7 +10,7 @@ class SerproEnvelope
      * Monta o envelope de 3 partes do Integra Contador:
      * contratante + autor do pedido + pedido (operação e contribuinte).
      *
-     * @param array<string, mixed> $params
+     * @param  array<string, mixed>  $params
      * @return array{contratante: array{tipo: string, numero: string}, autorPedidoDados: array{tipo: string, numero: string}, pedido: array<string, mixed>}
      */
     public static function build(

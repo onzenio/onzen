@@ -3,12 +3,16 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Account;
 use App\Models\SerproServiceRequest;
 use App\Services\ActionService;
 use App\Support\CurrentAccount;
+use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 
 class MonitoringActionController extends Controller
 {
@@ -26,7 +30,7 @@ class MonitoringActionController extends Controller
         ]);
 
         $accountId = CurrentAccount::get() ?? $request->user()->account_id;
-        $account = \App\Models\Account::query()->findOrFail($accountId);
+        $account = Account::query()->findOrFail($accountId);
 
         try {
             $serviceRequest = $this->actions->requestEmission(
@@ -37,11 +41,11 @@ class MonitoringActionController extends Controller
                 $data['idempotency_key'],
                 $data['confirmed'],
             );
-        } catch (\Illuminate\Auth\Access\AuthorizationException $e) {
+        } catch (AuthorizationException $e) {
             return response()->json(['message' => $e->getMessage()], 403);
-        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException) {
+        } catch (ModelNotFoundException) {
             return response()->json(['message' => 'Client não encontrado.'], 404);
-        } catch (\Illuminate\Validation\ValidationException $e) {
+        } catch (ValidationException $e) {
             throw $e;
         } catch (\Throwable $e) {
             return response()->json(['message' => $e->getMessage()], $e->getCode() >= 400 && $e->getCode() < 600 ? $e->getCode() : 422);

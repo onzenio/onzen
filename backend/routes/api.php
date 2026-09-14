@@ -1,19 +1,19 @@
 <?php
 
+use App\Http\Controllers\Api\AccountCertificateController;
 use App\Http\Controllers\Api\AccountController;
+use App\Http\Controllers\Api\ArtifactDownloadController;
 use App\Http\Controllers\Api\AuditController;
 use App\Http\Controllers\Api\ClientController;
 use App\Http\Controllers\Api\InvitationController;
 use App\Http\Controllers\Api\MeController;
-use App\Http\Controllers\Api\AccountCertificateController;
 use App\Http\Controllers\Api\MonitoringActionController;
 use App\Http\Controllers\Api\MonitoringAuthorController;
 use App\Http\Controllers\Api\MonitoringCatalogController;
-use App\Http\Controllers\Api\ArtifactDownloadController;
 use App\Http\Controllers\Api\MonitoringEnrollmentController;
 use App\Http\Controllers\Api\MonitoringReadController;
-use App\Http\Controllers\Api\ParcelmentController;
 use App\Http\Controllers\Api\OnboardingController;
+use App\Http\Controllers\Api\ParcelmentController;
 use App\Http\Controllers\Api\PlanController;
 use App\Http\Controllers\Api\SerproAdminController;
 use App\Http\Controllers\Api\SwitchController;

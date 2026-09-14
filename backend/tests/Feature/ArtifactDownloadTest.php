@@ -3,7 +3,6 @@
 namespace Tests\Feature;
 
 use App\Enums\UserRole;
-use App\Models\MonitoringArtifact;
 use App\Services\ArtifactStore;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;

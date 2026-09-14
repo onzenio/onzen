@@ -9,7 +9,7 @@ class SerproNormalizer
      * Ausentes ficam nulos/vazios — nunca inventados. Família sem
      * normalizador retorna bruto controlado + sinalização.
      *
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
     public static function normalize(string $family, array $payload): array

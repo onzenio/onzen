@@ -3,10 +3,13 @@
 namespace Tests\Feature;
 
 use App\Enums\UserRole;
+use App\Jobs\ExecuteSerproJob;
+use App\Models\Account;
 use App\Models\Client;
 use App\Models\MonitoringRun;
 use App\Models\Plan;
 use App\Services\AccountCertificateService;
+use App\Services\EnrollmentService;
 use Database\Seeders\MonitoringDefinitionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
@@ -16,7 +19,7 @@ class MonitoringSupportApiTest extends TestCase
 {
     use RefreshDatabase;
 
-    private function accountWithPlan(): \App\Models\Account
+    private function accountWithPlan(): Account
     {
         $account = $this->createAccount();
         $account->forceFill(['plan_id' => Plan::factory()->create(['max_clients' => 10, 'monthly_query_volume' => 10])->id])->save();
@@ -30,7 +33,7 @@ class MonitoringSupportApiTest extends TestCase
         $user = $this->createUser($this->accountWithPlan(), ['role' => UserRole::Operator]);
 
         $this->actingAs($user)->getJson('/api/monitoring/catalog')->assertOk()
-            ->assertJsonPath('version', \Database\Seeders\MonitoringDefinitionSeeder::CATALOG_VERSION)
+            ->assertJsonPath('version', MonitoringDefinitionSeeder::CATALOG_VERSION)
             ->assertJsonCount(13, 'data');
     }
 
@@ -44,7 +47,7 @@ class MonitoringSupportApiTest extends TestCase
         $client = Client::factory()->for($account, 'account')->create([
             'monitoring_enabled' => true, 'regime' => 'simples',
         ]);
-        $enrollment = app(\App\Services\EnrollmentService::class)->create($account, $client->id, 'sitfis');
+        $enrollment = app(EnrollmentService::class)->create($account, $client->id, 'sitfis');
 
         $this->actingAs($operator)
             ->postJson("/api/monitoring/enrollments/{$enrollment->id}/trigger", ['idempotency_key' => 'TRG-1'])
@@ -52,7 +55,7 @@ class MonitoringSupportApiTest extends TestCase
             ->assertJsonStructure(['run_id', 'status']);
 
         $this->assertSame(1, MonitoringRun::query()->withoutGlobalScopes()->count());
-        Queue::assertPushedOn('serpro', \App\Jobs\ExecuteSerproJob::class);
+        Queue::assertPushedOn('serpro', ExecuteSerproJob::class);
 
         $user = $this->createUser($account, ['role' => UserRole::User]);
         $this->actingAs($user)

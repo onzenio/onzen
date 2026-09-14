@@ -86,7 +86,7 @@ class VaultService
     /**
      * Mascara refs opacas em payloads destinados a log/API.
      *
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
     public function redact(array $payload): array

@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Enums\AccountProfile;
+use App\Models\Account;
 use App\Models\SerproContract;
 use App\Services\AccountCertificateService;
 use App\Services\MonitoringHealthService;
@@ -15,7 +16,7 @@ class MonitoringHealthTest extends TestCase
 {
     use RefreshDatabase;
 
-    private function platform(): \App\Models\Account
+    private function platform(): Account
     {
         return $this->createAccount(['profile' => AccountProfile::A]);
     }

@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\MonitoringDefinition;
+use Database\Seeders\MonitoringDefinitionSeeder;
 use RuntimeException;
 
 class MonitoringCatalogService
@@ -36,6 +37,6 @@ class MonitoringCatalogService
      */
     public function procurationAllowlist(): array
     {
-        return \Database\Seeders\MonitoringDefinitionSeeder::procurationAllowlist();
+        return MonitoringDefinitionSeeder::procurationAllowlist();
     }
 }

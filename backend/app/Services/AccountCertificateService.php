@@ -12,7 +12,7 @@ class AccountCertificateService
     public function __construct(private readonly AuditService $audit) {}
 
     /**
-     * @param array{pfx_ref: string, password_ref: string, holder_name: string, thumbprint: string, expires_at: mixed} $data
+     * @param  array{pfx_ref: string, password_ref: string, holder_name: string, thumbprint: string, expires_at: mixed}  $data
      */
     public function register(Account $account, array $data, ?User $actor = null): AccountCertificate
     {
