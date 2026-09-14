@@ -12,7 +12,7 @@
 
 - [x] 2.1 Portar a montagem do envelope de 3 partes e o roteamento por operação e verificar com teste de campos, tipos de pessoa PF/PJ e caminho por tipo de operação.
 - [x] 2.2 Implementar a resolução de credencial e token com cache, escopo de Account e limpeza em 401/403 e verificar com teste de resolução, expiração e renovação.
-- [ ] 2.3 Implementar o transporte OAuth + mTLS com arquivo temporário de certificado de permissão restrita e remoção garantida e verificar com teste com HTTP fake cobrindo headers, mTLS e remoção do arquivo em sucesso e falha.
+- [x] 2.3 Implementar o transporte OAuth + mTLS com arquivo temporário de certificado de permissão restrita e remoção garantida e verificar com teste com HTTP fake cobrindo headers, mTLS e remoção do arquivo em sucesso e falha.
 - [ ] 2.4 Implementar o gate efetivo (painel sobre ambiente) e o health com estados `gated`, `configured`, `unavailable` e `degraded` e verificar com teste dos quatro estados.
 - [ ] 2.5 Implementar as rotas de administração SERPRO com credenciais mascaradas, alternância de ambiente e interruptor de transporte com confirmações e verificar com teste de permissões, dupla confirmação e desligamento imediato.
 
