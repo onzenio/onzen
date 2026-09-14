@@ -35,7 +35,16 @@ abstract class TestCase extends BaseTestCase
                 ?? Plan::factory()->create()->getKey();
         }
 
-        return Account::factory()->create($attributes);
+        $account = Account::factory()->create($attributes);
+
+        // O escopo BelongsToAccount é fail-closed (sem CurrentAccount nada
+        // é visível); fixa a primeira Account como contexto dos testes de
+        // serviço que consultam models direto sem request HTTP.
+        if (CurrentAccount::get() === null) {
+            CurrentAccount::set($account->id);
+        }
+
+        return $account;
     }
 
     /**

@@ -3,7 +3,6 @@
 namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
-use App\Concerns\BelongsToAccount;
 use App\Enums\UserRole;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -19,7 +18,11 @@ use Laravel\Sanctum\HasApiTokens;
 class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
-    use BelongsToAccount, HasApiTokens, HasFactory, Notifiable;
+    // Sem BelongsToAccount de propósito: o provider de auth (sessão/token)
+    // resolve o User ANTES do ResolveAccount definir CurrentAccount; um
+    // escopo fail-closed aqui travaria o login em 401. Tenancy de leitura
+    // é aplicada por queries explícitas por account_id nos services.
+    use HasApiTokens, HasFactory, Notifiable;
 
     /**
      * @return BelongsTo<Account, $this>

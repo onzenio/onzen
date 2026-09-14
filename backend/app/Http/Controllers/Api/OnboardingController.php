@@ -7,6 +7,7 @@ use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
 use App\Models\Account;
 use App\Models\User;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -36,22 +37,34 @@ class OnboardingController extends Controller
             'account_name' => ['required', 'string', 'max:255'],
         ]);
 
-        [$account, $user] = DB::transaction(function () use ($data) {
-            $account = Account::query()->create([
-                'name' => $data['account_name'],
-                'profile' => AccountProfile::A,
-            ]);
+        try {
+            [$account, $user] = DB::transaction(function () use ($data) {
+                // Trava a tabela contra corrida: segunda conclusão concorrente
+                // bloqueia aqui e depois viola a constraint parcial (profile=A).
+                if (DB::getDriverName() !== 'sqlite') {
+                    Account::query()->where('profile', AccountProfile::A)->lockForUpdate()->exists();
+                }
+                $account = Account::query()->create([
+                    'name' => $data['account_name'],
+                    'profile' => AccountProfile::A,
+                ]);
 
-            $user = User::query()->create([
-                'account_id' => $account->id,
-                'name' => $data['name'],
-                'email' => $data['email'],
-                'password' => $data['password'],
-                'role' => UserRole::SuperAdmin,
-            ]);
+                $user = User::query()->create([
+                    'account_id' => $account->id,
+                    'name' => $data['name'],
+                    'email' => $data['email'],
+                    'password' => $data['password'],
+                    'role' => UserRole::SuperAdmin,
+                ]);
 
-            return [$account, $user];
-        });
+                return [$account, $user];
+            });
+        } catch (QueryException) {
+            // Corrida entre duas conclusões: a perdedora vira 409 sem autenticar.
+            return response()->json([
+                'message' => 'O cadastro inicial já foi concluído. Solicite um convite para entrar.',
+            ], 409);
+        }
 
         Auth::login($user);
 

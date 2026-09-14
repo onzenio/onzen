@@ -32,8 +32,8 @@ Route::get('/user', function (Request $request) {
 
 Route::middleware('auth:sanctum')->get('/me', MeController::class);
 
-Route::get('/onboarding/status', [OnboardingController::class, 'status']);
-Route::post('/onboarding', [OnboardingController::class, 'store']);
+Route::middleware('throttle:10,1')->get('/onboarding/status', [OnboardingController::class, 'status']);
+Route::middleware('throttle:6,1')->post('/onboarding', [OnboardingController::class, 'store']);
 
 Route::middleware('auth:sanctum')->apiResource('accounts', AccountController::class)->only(['index', 'store']);
 
@@ -56,7 +56,7 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::post('/invitations', [InvitationController::class, 'store']);
     Route::delete('/invitations/{id}', [InvitationController::class, 'destroy']);
 });
-Route::post('/invitations/{token}/accept', [InvitationController::class, 'accept']);
+Route::middleware('throttle:10,1')->post('/invitations/{token}/accept', [InvitationController::class, 'accept']);
 
 Route::middleware('auth:sanctum')->group(function (): void {
     Route::post('/switch', [SwitchController::class, 'store']);
@@ -149,7 +149,7 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::get('/monitoring/actions/{action}', [MonitoringActionController::class, 'show'])
         ->name('monitoring.actions.show');
 
-    Route::get('/monitoring/parcelas/{installment}/guia/download', [ParcelmentController::class, 'downloadGuide'])
+    Route::middleware('signed')->get('/monitoring/parcelas/{installment}/guia/download', [ParcelmentController::class, 'downloadGuide'])
         ->name('monitoring.parcelments.guide');
 
     Route::get('/monitoring/clients/{client}/powers-of-attorney', [MonitoringPowerOfAttorneyController::class, 'index'])

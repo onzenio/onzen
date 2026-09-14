@@ -23,6 +23,7 @@ use App\Services\Monitoring\SerproActionExecutor;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\URL;
 use Tests\Support\FakeSerproTransport;
 use Tests\TestCase;
 
@@ -343,7 +344,7 @@ final class DasEmissionTest extends TestCase
 
         $this->assertTrue($detail['guide_available']);
 
-        $download = $this->actingAs($actor)->get("/api/monitoring/parcelas/{$installment->id}/guia/download");
+        $download = $this->actingAs($actor)->get(URL::signedRoute('monitoring.parcelments.guide', ['installment' => $installment->id]));
 
         $download->assertOk();
         $this->assertSame($pdf, $download->streamedContent());

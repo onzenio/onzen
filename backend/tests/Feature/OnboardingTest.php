@@ -83,4 +83,21 @@ class OnboardingTest extends TestCase
             ->assertStatus(422)
             ->assertJsonValidationErrors(['name', 'email', 'password', 'account_name']);
     }
+
+    public function test_concurrent_onboarding_finish_is_a_conflict_without_extra_records_or_login(): void
+    {
+        // Simula a corrida: a Account A já foi persistida entre o check e a
+        // transação (constraint parcial garante no banco; aqui o pre-check).
+        $this->createUser();
+
+        $this->postJson('/api/onboarding', [
+            'name' => 'Atrasada',
+            'email' => 'atrasada@example.com',
+            'password' => 'secret123',
+            'account_name' => 'Filial',
+        ])->assertConflict();
+
+        $this->assertSame(1, Account::query()->withoutGlobalScopes()->count());
+        $this->assertGuest();
+    }
 }

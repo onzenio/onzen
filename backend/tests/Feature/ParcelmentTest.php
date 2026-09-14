@@ -31,6 +31,7 @@ use App\Services\Monitoring\SerproExecutor;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\URL;
 use Tests\Support\FakeSerproTransport;
 use Tests\TestCase;
 
@@ -600,7 +601,7 @@ final class ParcelmentTest extends TestCase
             ->assertNotFound();
 
         $this->actingAs($actor)
-            ->getJson("/api/monitoring/parcelas/{$foreignInstallment->id}/guia/download")
+            ->getJson(URL::signedRoute('monitoring.parcelments.guide', ['installment' => $foreignInstallment->id]))
             ->assertNotFound();
 
         $this->actingAs($actor)
@@ -631,7 +632,7 @@ final class ParcelmentTest extends TestCase
         $this->app->instance(SerproTransport::class, $transport);
 
         $response = $this->actingAs($actor)
-            ->get("/api/monitoring/parcelas/{$installment->id}/guia/download");
+            ->get(URL::signedRoute('monitoring.parcelments.guide', ['installment' => $installment->id]));
 
         $response->assertOk();
         $response->assertHeader('Content-Type', 'application/pdf');
@@ -669,12 +670,12 @@ final class ParcelmentTest extends TestCase
         $this->app->instance(SerproTransport::class, $transport);
 
         $missing = $this->actingAs($actor)
-            ->getJson("/api/monitoring/parcelas/{$withoutGuide->id}/guia/download")
+            ->getJson(URL::signedRoute('monitoring.parcelments.guide', ['installment' => $withoutGuide->id]))
             ->assertNotFound()
             ->json();
 
         $unknown = $this->actingAs($actor)
-            ->getJson("/api/monitoring/parcelas/{$withUnknownRef->id}/guia/download")
+            ->getJson(URL::signedRoute('monitoring.parcelments.guide', ['installment' => $withUnknownRef->id]))
             ->assertNotFound()
             ->json();
 
@@ -723,7 +724,7 @@ final class ParcelmentTest extends TestCase
         });
 
         $response = $this->actingAs($actor)
-            ->getJson("/api/monitoring/parcelas/{$installment->id}/guia/download");
+            ->getJson(URL::signedRoute('monitoring.parcelments.guide', ['installment' => $installment->id]));
 
         $response->assertStatus(503)
             ->assertJsonPath('code', 'ARTIFACT_STORAGE_UNAVAILABLE')
@@ -751,7 +752,7 @@ final class ParcelmentTest extends TestCase
         ]);
 
         $this->actingAs($user)
-            ->getJson("/api/monitoring/parcelas/{$installment->id}/guia/download")
+            ->getJson(URL::signedRoute('monitoring.parcelments.guide', ['installment' => $installment->id]))
             ->assertForbidden();
 
         $this->assertDatabaseMissing('audit_logs', ['action' => 'monitoring.parcelment.guide.downloaded']);
