@@ -42,7 +42,7 @@ const changeSorting = ref<{ id: string, desc: boolean }[]>([])
 const changePagination = ref({ pageIndex: 0, pageSize: 10 })
 const changeNormalized = ref('all')
 
-const alertFilters = ref([{ id: 'status', value: '' }])
+const alertFilters = ref<{ id: string, value: unknown }[]>([])
 const alertVisibility = ref()
 const alertSelection = ref<Record<string, boolean>>({})
 const alertSorting = ref<{ id: string, desc: boolean }[]>([])
