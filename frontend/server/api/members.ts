@@ -1,3 +1,5 @@
+declare const process: { env: Record<string, string | undefined> }
+
 const members = [{
   name: 'Anthony Fu',
   username: 'antfu',
@@ -56,5 +58,8 @@ const members = [{
 }]
 
 export default eventHandler(async () => {
+  if (process.env.NODE_ENV === 'production') {
+    throw createError({ statusCode: 410, statusMessage: 'Gone', message: 'Mock do template desabilitado em produção.' })
+  }
   return members
 })

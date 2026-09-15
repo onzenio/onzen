@@ -104,16 +104,24 @@ function storeSession(event: H3Event, payload: SessionPayload): void {
   })
 }
 
-function backendBaseUrl(): string {
-  const url = process.env.BACKEND_URL
-  if (!url) {
-    throw createError({
-      statusCode: 500,
-      statusMessage: 'Backend is not configured',
-      message: 'BACKEND_URL não configurado.'
-    })
+function backendBaseUrl(event?: H3Event): string {
+  // Fonte única: BACKEND_URL (server env) vence; runtimeConfig/NUXT_BACKEND_URL
+  // segue como fallback para o compose atual. Sem nenhuma, 500 factual.
+  const fromEnv = process.env.BACKEND_URL?.replace(/\/$/, '')
+  if (fromEnv) {
+    return fromEnv
   }
-  return url.replace(/\/$/, '')
+  if (event) {
+    const fromConfig = (useRuntimeConfig(event).backendUrl as string | undefined)?.replace(/\/$/, '')
+    if (fromConfig) {
+      return fromConfig
+    }
+  }
+  throw createError({
+    statusCode: 500,
+    statusMessage: 'Backend is not configured',
+    message: 'BACKEND_URL não configurado.'
+  })
 }
 
 function frontendOrigin(event: H3Event): string {
@@ -214,7 +222,7 @@ async function bootstrapCsrf(base: string, origin: string): Promise<SessionPaylo
 }
 
 export async function backendFetch<T = unknown>(event: H3Event, path: string, init: BackendFetchOptions = {}): Promise<T> {
-  const base = backendBaseUrl()
+  const base = backendBaseUrl(event)
   const method = init.method ?? 'GET'
   const origin = frontendOrigin(event)
   let session = readSession(event)
@@ -255,25 +263,42 @@ export async function backendFetch<T = unknown>(event: H3Event, path: string, in
 }
 
 /**
- * Passthrough binário (guia de parcela): repassa cookies e devolve o corpo
+ * Passthrough binário (guia de parcela): restaura a sessão selada do BFF e
+ * encaminha cookies Laravel + XSRF como o backendFetch, devolvendo o corpo
  * com os cabeçalhos de download do backend. Erros JSON do backend são
  * repassados com o status original.
  */
 export async function proxyBinaryToBackend(event: H3Event, path: string): Promise<unknown> {
-  const base = (useRuntimeConfig(event).backendUrl as string | undefined)?.replace(/\/$/, '')
-
-  if (!base) {
+  let base: string
+  try {
+    base = backendBaseUrl(event)
+  } catch {
     setResponseStatus(event, 503)
-    return { message: 'Backend não configurado (NUXT_BACKEND_URL).', code: 'BACKEND_UNAVAILABLE' }
+    return { message: 'Backend não configurado (BACKEND_URL).', code: 'BACKEND_UNAVAILABLE' }
   }
 
-  const cookie = getRequestHeader(event, 'cookie')
+  const origin = frontendOrigin(event)
+  let session = readSession(event)
+  if (!session) {
+    session = await bootstrapCsrf(base, origin)
+  }
+  const headers: Record<string, string> = {
+    'Accept': '*/*',
+    'X-Requested-With': 'XMLHttpRequest',
+    'Origin': origin
+  }
+  if (session && session.cookies.length > 0) {
+    headers.cookie = session.cookies.join('; ')
+  }
+  if (session?.xsrf) {
+    headers['X-XSRF-TOKEN'] = session.xsrf
+  }
 
   try {
     const res = await $fetch.raw<ArrayBuffer>(`${base}/api${path}`, {
       method: 'GET',
       responseType: 'arrayBuffer',
-      headers: cookie ? { cookie } : {}
+      headers
     })
     for (const [key, value] of res.headers.entries()) {
       if (['content-type', 'content-disposition', 'cache-control'].includes(key.toLowerCase())) {
@@ -310,15 +335,20 @@ export async function proxyBinaryToBackend(event: H3Event, path: string): Promis
  * Sem backend alcançável, responde 503 factual em vez de estourar.
  */
 export async function proxyToBackend<T>(event: H3Event, path: string): Promise<T> {
-  const base = (useRuntimeConfig(event).backendUrl as string | undefined)?.replace(/\/$/, '')
-
-  if (!base) {
+  let base: string
+  try {
+    base = backendBaseUrl(event)
+  } catch {
     setResponseStatus(event, 503)
-    return { message: 'Backend não configurado (NUXT_BACKEND_URL).', code: 'BACKEND_UNAVAILABLE' } as T
+    return { message: 'Backend não configurado (BACKEND_URL).', code: 'BACKEND_UNAVAILABLE' } as T
   }
 
-  const cookie = getRequestHeader(event, 'cookie')
   const method = getMethod(event)
+  const origin = frontendOrigin(event)
+  let session = readSession(event)
+  if (!session && method !== 'GET' && method !== 'HEAD') {
+    session = await bootstrapCsrf(base, origin)
+  }
 
   let body: unknown
 
@@ -331,18 +361,23 @@ export async function proxyToBackend<T>(event: H3Event, path: string): Promise<T
   }
 
   try {
-    const data: unknown = await $fetch(`${base}/api${path}`, {
+    const res = await $fetch.raw(`${base}/api${path}`, {
       method,
       query: getQuery(event),
       body: body as BodyInit | Record<string, unknown> | undefined,
       headers: {
-        ...(cookie ? { cookie } : {}),
+        'Accept': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+        'Origin': origin,
+        ...(session && session.cookies.length > 0 ? { cookie: session.cookies.join('; ') } : {}),
+        ...(session?.xsrf ? { 'X-XSRF-TOKEN': session.xsrf } : {}),
         ...(typeof body !== 'undefined' && getRequestHeader(event, 'content-type')
           ? { 'content-type': getRequestHeader(event, 'content-type') as string }
           : {})
       }
     })
-    return data as T
+    relaySetCookies(event, getSetCookieHeaders(res.headers), session)
+    return res._data as T
   } catch (error: unknown) {
     const fetchError = error as { response?: { status?: number, _data?: unknown } }
     const status = fetchError?.response?.status

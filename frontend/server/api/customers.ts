@@ -1,5 +1,7 @@
 import type { User } from '~/types'
 
+declare const process: { env: Record<string, string | undefined> }
+
 const customers: User[] = [{
   id: 1,
   name: 'Alex Smith',
@@ -183,5 +185,8 @@ const customers: User[] = [{
 }]
 
 export default eventHandler(async () => {
+  if (process.env.NODE_ENV === 'production') {
+    throw createError({ statusCode: 410, statusMessage: 'Gone', message: 'Mock do template desabilitado em produção.' })
+  }
   return customers
 })

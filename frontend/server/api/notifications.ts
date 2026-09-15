@@ -1,5 +1,7 @@
 import { sub } from 'date-fns'
 
+declare const process: { env: Record<string, string | undefined> }
+
 const notifications = [{
   id: 1,
   unread: true,
@@ -252,5 +254,8 @@ const notifications = [{
 }]
 
 export default eventHandler(async () => {
+  if (process.env.NODE_ENV === 'production') {
+    throw createError({ statusCode: 410, statusMessage: 'Gone', message: 'Mock do template desabilitado em produção.' })
+  }
   return notifications
 })

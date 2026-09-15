@@ -6,8 +6,12 @@ const { data: members } = await useFetch<Member[]>('/api/members', { default: ()
 const q = ref('')
 
 const filteredMembers = computed(() => {
+  const needle = q.value.toLowerCase()
+  if (!needle) {
+    return members.value
+  }
   return members.value.filter((member) => {
-    return member.name.search(new RegExp(q.value, 'i')) !== -1 || member.username.search(new RegExp(q.value, 'i')) !== -1
+    return member.name.toLowerCase().includes(needle) || member.username.toLowerCase().includes(needle)
   })
 })
 </script>
