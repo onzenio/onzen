@@ -1,34 +1,44 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
+import { upperFirst } from 'scule'
+import { getPaginationRowModel } from '@tanstack/table-core'
 import type { Row } from '@tanstack/table-core'
-import { refDebounced } from '@vueuse/core'
 import type { DashboardData, Enrollment, Health, Paginated, RunQueued } from '~/types/monitoring'
 
 const UBadge = resolveComponent('UBadge')
 const UButton = resolveComponent('UButton')
+const UCheckbox = resolveComponent('UCheckbox')
 const UDropdownMenu = resolveComponent('UDropdownMenu')
 
 const toast = useToast()
 const { canWrite } = useSession()
 
-const page = ref(1)
-const search = ref('')
-const searchDebounced = refDebounced(search, 400)
-const statusFilter = ref('all')
+interface EnrollmentTableApi {
+  getFilteredSelectedRowModel: () => { rows: Row<Enrollment>[] }
+  getFilteredRowModel: () => { rows: Row<Enrollment>[] }
+  getColumn: (id: string) => { setFilterValue: (value: string | undefined) => void, getFilterValue: () => unknown, toggleVisibility: (value?: boolean) => void } | undefined
+  getAllColumns: () => { id: string, getCanHide: () => boolean, getIsVisible: () => boolean }[]
+  getState: () => { pagination: { pageIndex: number, pageSize: number } }
+  setPageIndex: (index: number) => void
+}
 
-const statusQuery = computed(() => statusFilter.value === 'all' ? undefined : statusFilter.value)
+const table = useTemplateRef<{ tableApi?: EnrollmentTableApi | null }>('table')
+const columnFilters = ref([{ id: 'client', value: '' }])
+const columnVisibility = ref()
+const rowSelection = ref<Record<string, boolean>>({})
+const sorting = ref<{ id: string, desc: boolean }[]>([])
+const pagination = ref({ pageIndex: 0, pageSize: 10 })
+const statusFilter = ref('all')
 
 const { data: health, error: healthError } = await useFetch<{ data: Health }>('/api/monitoring/health', { lazy: true })
 const { data: dashboard, status: dashboardStatus, error: dashboardError, refresh: refreshDashboard } = await useFetch<{ data: DashboardData }>('/api/monitoring/dashboard', { lazy: true })
 
 const { data: enrollments, status: tableStatus, error: enrollmentsError, refresh: refreshEnrollments } = await useFetch<Paginated<Enrollment>>('/api/monitoring/enrollments', {
   lazy: true,
-  query: { page, search: searchDebounced, status: statusQuery, per_page: 25 }
+  query: { per_page: 500 }
 })
 
-watch([searchDebounced, statusQuery], () => {
-  page.value = 1
-})
+const rows = computed((): Enrollment[] => enrollments.value?.data ?? [])
 
 const runTarget = ref<Enrollment | null>(null)
 const runOpen = computed({
@@ -36,11 +46,12 @@ const runOpen = computed({
   set: value => !value && (runTarget.value = null)
 })
 const running = ref(false)
+const bulkRunning = ref(false)
 const syncing = ref(false)
 
 const quota = computed(() => dashboard.value?.data.quota)
 const quotaExhausted = computed(() => quota.value !== undefined && quota.value.limit > 0 && quota.value.consumed >= quota.value.limit)
-const quotaPercent = computed(() => {
+const quotaPercent = computed((): number => {
   if (!quota.value || quota.value.limit <= 0) {
     return 0
   }
@@ -49,6 +60,9 @@ const quotaPercent = computed(() => {
 
 function getRowItems(row: Row<Enrollment>) {
   const items = [{
+    type: 'label' as const,
+    label: 'Ações'
+  }, {
     label: 'Abrir painel',
     icon: 'i-lucide-panel-right-open',
     onSelect() {
@@ -67,14 +81,49 @@ function getRowItems(row: Row<Enrollment>) {
   return items
 }
 
+function sortableHeader(label: string) {
+  return ({ column }: { column: { getIsSorted: () => false | 'asc' | 'desc', toggleSorting: (desc?: boolean) => void } }) => {
+    const isSorted = column.getIsSorted()
+    return h(UButton, {
+      color: 'neutral',
+      variant: 'ghost',
+      label,
+      icon: isSorted ? (isSorted === 'asc' ? 'i-lucide-arrow-up-narrow-wide' : 'i-lucide-arrow-down-wide-narrow') : 'i-lucide-arrow-up-down',
+      class: '-mx-2.5',
+      onClick: () => column.toggleSorting(column.getIsSorted() === 'asc')
+    })
+  }
+}
+
 const columns: TableColumn<Enrollment>[] = [
   {
+    id: 'select',
+    header: ({ table: api }) => h(UCheckbox, {
+      'modelValue': api.getIsSomePageRowsSelected() ? 'indeterminate' : api.getIsAllPageRowsSelected(),
+      'onUpdate:modelValue': (value: boolean | 'indeterminate') => api.toggleAllPageRowsSelected(!!value),
+      'ariaLabel': 'Selecionar todos'
+    }),
+    cell: ({ row }) => h(UCheckbox, {
+      'modelValue': row.getIsSelected(),
+      'onUpdate:modelValue': (value: boolean | 'indeterminate') => row.toggleSelected(!!value),
+      'ariaLabel': 'Selecionar linha'
+    })
+  },
+  {
     accessorKey: 'client',
-    header: 'Client',
+    header: sortableHeader('Cliente'),
+    filterFn: (row, _columnId, value) => {
+      const term = String(value ?? '').toLowerCase()
+      if (!term) return true
+      const client = row.original.client
+      const name = (client?.razao_social ?? '').toLowerCase()
+      const cnpj = (client?.cnpj ?? '').toLowerCase()
+      return name.includes(term) || cnpj.includes(term)
+    },
     cell: ({ row }) => {
       const client = row.original.client
       return h('div', { class: 'flex flex-col' }, [
-        h('p', { class: 'font-medium text-highlighted' }, client?.razao_social ?? `Client #${row.original.id}`),
+        h('p', { class: 'font-medium text-highlighted' }, client?.razao_social ?? `Cliente #${row.original.id}`),
         h('p', { class: 'text-sm text-muted' }, client ? formatCnpj(client.cnpj) : '—')
       ])
     }
@@ -85,7 +134,7 @@ const columns: TableColumn<Enrollment>[] = [
     cell: ({ row }) => {
       const definition = row.original.definition
       return h('div', { class: 'flex flex-col gap-1' }, [
-        h('p', { class: 'font-medium text-highlighted' }, definition?.name ?? row.original.id),
+        h('p', { class: 'font-medium text-highlighted' }, definition?.name ?? String(row.original.id)),
         definition && !definition.is_active
           ? h(UBadge, { color: 'neutral', variant: 'subtle' }, () => 'Indisponível')
           : null
@@ -95,6 +144,7 @@ const columns: TableColumn<Enrollment>[] = [
   {
     accessorKey: 'status',
     header: 'Estado',
+    filterFn: 'equals',
     cell: ({ row }) => {
       const meta = enrollmentStatusMeta(row.original.status)
       return h('div', { class: 'flex flex-col gap-1' }, [
@@ -107,7 +157,7 @@ const columns: TableColumn<Enrollment>[] = [
   },
   {
     accessorKey: 'last_change_at',
-    header: 'Última mudança',
+    header: sortableHeader('Última mudança'),
     cell: ({ row }) => h('p', { class: 'text-sm text-muted' }, formatDateTime(row.original.last_change_at))
   },
   {
@@ -116,12 +166,66 @@ const columns: TableColumn<Enrollment>[] = [
       h(UDropdownMenu, {
         content: { align: 'end' },
         items: getRowItems(row)
-      }, () => h(UButton, { icon: 'i-lucide-ellipsis-vertical', color: 'neutral', variant: 'ghost' }))
+      }, () => h(UButton, { icon: 'i-lucide-ellipsis-vertical', color: 'neutral', variant: 'ghost', class: 'ml-auto', ariaLabel: 'Ações da associação' }))
     ])
   }
 ]
 
-async function confirmRun() {
+watch(() => statusFilter.value, (newVal) => {
+  const column = table.value?.tableApi?.getColumn('status')
+  if (!column) return
+  if (newVal === 'all') column.setFilterValue(undefined)
+  else column.setFilterValue(newVal)
+  pagination.value.pageIndex = 0
+})
+
+const search = computed({
+  get: (): string => (table.value?.tableApi?.getColumn('client')?.getFilterValue() as string) || '',
+  set: (value: string) => {
+    table.value?.tableApi?.getColumn('client')?.setFilterValue(value || undefined)
+    pagination.value.pageIndex = 0
+  }
+})
+
+const selectedRows = computed((): Row<Enrollment>[] => table.value?.tableApi?.getFilteredSelectedRowModel().rows ?? [])
+const filteredCount = computed((): number => table.value?.tableApi?.getFilteredRowModel().rows.length ?? rows.value.length)
+
+function exportCsv(): void {
+  const list = (selectedRows.value.length > 0 ? selectedRows.value : (table.value?.tableApi?.getFilteredRowModel().rows ?? [])).map((r: Row<Enrollment>) => r.original)
+  if (list.length === 0) {
+    toast.add({ title: 'Nada para exportar', description: 'Ajuste os filtros ou selecione ao menos uma associação.', color: 'warning' })
+    return
+  }
+  exportToCsv('associacoes', list.map(e => ({
+    id: e.id,
+    cliente: e.client?.razao_social ?? '',
+    cnpj: e.client?.cnpj ?? '',
+    definicao: e.definition?.name ?? '',
+    estado: enrollmentStatusMeta(e.status).label,
+    ultima_mudanca: e.last_change_at ?? ''
+  })))
+  toast.add({ title: 'CSV exportado', description: `${list.length} associação(ões) exportada(s).`, color: 'success' })
+}
+
+async function bulkRun(): Promise<void> {
+  const list = selectedRows.value.map((r: Row<Enrollment>) => r.original)
+  if (list.length === 0) return
+  bulkRunning.value = true
+  try {
+    for (const enrollment of list) {
+      await $fetch(`/api/monitoring/enrollments/${enrollment.id}/run`, { method: 'POST' })
+    }
+    toast.add({ title: 'Consultas enfileiradas', description: `${list.length} associação(ões) na fila.`, color: 'success' })
+    rowSelection.value = {}
+    await Promise.all([refreshEnrollments(), refreshDashboard()])
+  } catch (error: unknown) {
+    toast.add({ title: 'Disparo recusado', description: monitoringErrorMessage(backendErrorBody(error)), color: 'error' })
+  } finally {
+    bulkRunning.value = false
+  }
+}
+
+async function confirmRun(): Promise<void> {
   const target = runTarget.value
   if (!target) {
     return
@@ -139,7 +243,7 @@ async function confirmRun() {
   }
 }
 
-async function syncNow() {
+async function syncNow(): Promise<void> {
   syncing.value = true
   try {
     const { data } = await $fetch<{ data: { queued: number, blocked: number, skipped: number } }>('/api/monitoring/sync', { method: 'POST' })
@@ -268,27 +372,72 @@ async function syncNow() {
               :description="monitoringErrorMessage(backendErrorBody(enrollmentsError))"
             />
 
-            <div class="flex flex-col gap-2 sm:flex-row">
+            <div class="flex flex-wrap items-center justify-between gap-1.5">
               <UInput
                 v-model="search"
                 icon="i-lucide-search"
                 placeholder="Buscar por nome ou CNPJ…"
                 class="max-w-sm"
               />
-              <USelect
-                v-model="statusFilter"
-                :items="[
-                  { label: 'Todos os estados', value: 'all' },
-                  { label: 'Ativas', value: 'active' },
-                  { label: 'Pausadas', value: 'paused' },
-                  { label: 'Encerradas', value: 'ended' }
-                ]"
-                class="w-48"
-              />
+              <div class="flex flex-wrap items-center gap-1.5">
+                <UButton
+                  v-if="canWrite && selectedRows.length"
+                  :label="`Disparar (${selectedRows.length})`"
+                  icon="i-lucide-play"
+                  :loading="bulkRunning"
+                  @click="bulkRun"
+                />
+                <UButton
+                  label="Exportar CSV"
+                  color="neutral"
+                  variant="outline"
+                  icon="i-lucide-download"
+                  @click="exportCsv"
+                />
+                <USelect
+                  v-model="statusFilter"
+                  :items="[
+                    { label: 'Todos os estados', value: 'all' },
+                    { label: 'Ativas', value: 'active' },
+                    { label: 'Pausadas', value: 'paused' },
+                    { label: 'Encerradas', value: 'ended' }
+                  ]"
+                  class="w-48"
+                />
+                <UDropdownMenu
+                  :items="table?.tableApi?.getAllColumns().filter((column: any) => column.getCanHide()).map((column: any) => ({
+                    label: upperFirst(column.id),
+                    type: 'checkbox' as const,
+                    checked: column.getIsVisible(),
+                    onUpdateChecked(checked: boolean) {
+                      table?.tableApi?.getColumn(column.id)?.toggleVisibility(!!checked)
+                    },
+                    onSelect(e?: Event) {
+                      e?.preventDefault()
+                    }
+                  }))"
+                  :content="{ align: 'end' }"
+                >
+                  <UButton
+                    label="Exibir"
+                    color="neutral"
+                    variant="outline"
+                    trailing-icon="i-lucide-settings-2"
+                  />
+                </UDropdownMenu>
+              </div>
             </div>
 
             <UTable
-              :data="enrollments?.data ?? []"
+              ref="table"
+              v-model:column-filters="columnFilters"
+              v-model:column-visibility="columnVisibility"
+              v-model:row-selection="rowSelection"
+              v-model:sorting="sorting"
+              v-model:pagination="pagination"
+              :pagination-options="{ getPaginationRowModel: getPaginationRowModel() }"
+              class="shrink-0"
+              :data="rows"
               :columns="columns"
               :loading="tableStatus === 'pending' || dashboardStatus === 'pending'"
               :ui="{
@@ -296,17 +445,31 @@ async function syncNow() {
                 thead: '[&>tr]:bg-elevated/50 [&>tr]:after:content-none',
                 tbody: '[&>tr]:last:[&>td]:border-b-0',
                 th: 'py-2 first:rounded-l-lg last:rounded-r-lg border-y border-default first:border-l last:border-r',
-                td: 'border-b border-default'
+                td: 'border-b border-default',
+                separator: 'h-0'
               }"
-            />
+            >
+              <template #empty>
+                <div class="flex flex-col items-center justify-center gap-2 py-8 text-center">
+                  <p class="font-medium text-highlighted">
+                    Nenhuma associação encontrada
+                  </p>
+                  <p class="text-sm text-muted">
+                    Ajuste a busca ou o filtro de estado.
+                  </p>
+                </div>
+              </template>
+            </UTable>
 
-            <div class="flex justify-end">
+            <div class="flex items-center justify-between gap-3 border-t border-default pt-4 mt-auto">
+              <div class="text-sm text-muted">
+                {{ selectedRows.length }} de {{ filteredCount }} associação(ões) selecionada(s).
+              </div>
               <UPagination
-                v-if="enrollments && enrollments.last_page > 1"
-                :default-page="enrollments.current_page"
-                :items-per-page="enrollments.per_page"
-                :total="enrollments.total"
-                @update:page="(p: number) => page = p"
+                :page="(table?.tableApi?.getState().pagination.pageIndex || 0) + 1"
+                :items-per-page="table?.tableApi?.getState().pagination.pageSize"
+                :total="filteredCount"
+                @update:page="(p: number) => table?.tableApi?.setPageIndex(p - 1)"
               />
             </div>
           </div>
