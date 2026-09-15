@@ -2,6 +2,8 @@
 import { getPaginationRowModel } from '@tanstack/table-core'
 import type { Row } from '@tanstack/table-core'
 import { TABLE_UI as tableUi, type TableApi } from '~/utils/table-chrome'
+import { useTableCsv } from '~/composables/tables/useTableCsv'
+import { useTableState } from '~/composables/tables/useTableState'
 import { buildEnrollmentColumns, ENROLLMENT_COLUMN_LABELS, enrollmentStatusItems } from '~/components/tables/monitoring/enrollmentColumns'
 import type { DashboardData, Enrollment, Health, Paginated, RunQueued } from '~/types/monitoring'
 
@@ -9,12 +11,23 @@ const toast = useToast()
 const { canWrite } = useSession()
 
 const table = useTemplateRef<{ tableApi?: TableApi<Enrollment> | null }>('table')
-const columnFilters = ref([{ id: 'client', value: '' }])
-const columnVisibility = ref()
-const rowSelection = ref<Record<string, boolean>>({})
-const sorting = ref<{ id: string, desc: boolean }[]>([])
-const pagination = ref({ pageIndex: 0, pageSize: 10 })
-const statusFilter = ref('all')
+const {
+  columnFilters,
+  columnVisibility,
+  rowSelection,
+  sorting,
+  pagination,
+  search,
+  filterValue: statusFilter,
+  selectedRows,
+  filteredCount,
+  clearSelection
+} = useTableState<Enrollment>(() => table.value?.tableApi, {
+  searchColumn: 'client',
+  filterColumn: 'status',
+  getTotal: () => rows.value.length
+})
+const { exportCsv: exportTableCsv } = useTableCsv<Enrollment>(() => table.value?.tableApi)
 
 const { data: health, error: healthError } = await useFetch<{ data: Health }>('/api/monitoring/health', { lazy: true })
 const { data: dashboard, status: dashboardStatus, error: dashboardError, refresh: refreshDashboard } = await useFetch<{ data: DashboardData }>('/api/monitoring/dashboard', { lazy: true })
@@ -50,40 +63,18 @@ const quotaPercent = computed((): number => {
   return Math.min(100, Math.round((quota.value.consumed / quota.value.limit) * 100))
 })
 
-watch(() => statusFilter.value, (newVal) => {
-  const column = table.value?.tableApi?.getColumn('status')
-  if (!column) return
-  if (newVal === 'all') column.setFilterValue(undefined)
-  else column.setFilterValue(newVal)
-  pagination.value.pageIndex = 0
-})
-
-const search = computed({
-  get: (): string => (table.value?.tableApi?.getColumn('client')?.getFilterValue() as string) || '',
-  set: (value: string) => {
-    table.value?.tableApi?.getColumn('client')?.setFilterValue(value || undefined)
-    pagination.value.pageIndex = 0
-  }
-})
-
-const selectedRows = computed((): Row<Enrollment>[] => table.value?.tableApi?.getFilteredSelectedRowModel().rows ?? [])
-const filteredCount = computed((): number => table.value?.tableApi?.getFilteredRowModel().rows.length ?? rows.value.length)
-
 function exportCsv(): void {
-  const list = (selectedRows.value.length > 0 ? selectedRows.value : (table.value?.tableApi?.getFilteredRowModel().rows ?? [])).map((r: Row<Enrollment>) => r.original)
-  if (list.length === 0) {
-    toast.add({ title: 'Nada para exportar', description: 'Ajuste os filtros ou selecione ao menos uma associação.', color: 'warning' })
-    return
-  }
-  exportToCsv('associacoes', list.map(e => ({
+  exportTableCsv('associacoes', e => ({
     id: e.id,
     cliente: e.client?.razao_social ?? '',
     cnpj: e.client?.cnpj ?? '',
     definicao: e.definition?.name ?? '',
     estado: enrollmentStatusMeta(e.status).label,
     ultima_mudanca: e.last_change_at ?? ''
-  })))
-  toast.add({ title: 'CSV exportado', description: `${list.length} associação(ões) exportada(s).`, color: 'success' })
+  }), {
+    emptyDescription: 'Ajuste os filtros ou selecione ao menos uma associação.',
+    exportedUnit: 'associação(ões) exportada(s)'
+  })
 }
 
 async function bulkRun(): Promise<void> {
@@ -95,7 +86,7 @@ async function bulkRun(): Promise<void> {
       await $fetch(`/api/monitoring/enrollments/${enrollment.id}/run`, { method: 'POST' })
     }
     toast.add({ title: 'Consultas enfileiradas', description: `${list.length} associação(ões) na fila.`, color: 'success' })
-    rowSelection.value = {}
+    clearSelection()
     await Promise.all([refreshEnrollments(), refreshDashboard()])
   } catch (error: unknown) {
     toast.add({ title: 'Disparo recusado', description: monitoringErrorMessage(backendErrorBody(error)), color: 'error' })

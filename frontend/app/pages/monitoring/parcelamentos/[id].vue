@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { getPaginationRowModel } from '@tanstack/table-core'
-import type { Row } from '@tanstack/table-core'
 import { TABLE_UI as tableUi, type TableApi } from '~/utils/table-chrome'
+import { useTableCsv } from '~/composables/tables/useTableCsv'
+import { useTableState } from '~/composables/tables/useTableState'
 import { buildInstallmentColumns, buildPaymentColumns, INSTALLMENT_COLUMN_LABELS, installmentStatusItems, PAYMENT_COLUMN_LABELS, paymentStatusItems } from '~/components/tables/monitoring/parcelDetailColumns'
 import type { Installment, Paginated, ParcelmentOrderDetail, Payment } from '~/types/monitoring'
 
@@ -12,20 +13,38 @@ const orderId = computed(() => route.params.id as string)
 const installmentsTable = useTemplateRef<{ tableApi?: TableApi<Installment> | null }>('installmentsTable')
 const paymentsTable = useTemplateRef<{ tableApi?: TableApi<Payment> | null }>('paymentsTable')
 
-const installmentFilters = ref<{ id: string, value: unknown }[]>([])
-const installmentVisibility = ref()
-const installmentSelection = ref<Record<string, boolean>>({})
-const installmentSorting = ref<{ id: string, desc: boolean }[]>([])
-const installmentPagination = ref({ pageIndex: 0, pageSize: 10 })
-const installmentStatus = ref('all')
-const installmentSearchText = ref('')
+const {
+  columnFilters: installmentFilters,
+  columnVisibility: installmentVisibility,
+  rowSelection: installmentSelection,
+  sorting: installmentSorting,
+  pagination: installmentPagination,
+  search: installmentSearch,
+  filterValue: installmentStatus,
+  selectedRows: installmentSelected,
+  filteredCount: installmentFiltered
+} = useTableState<Installment>(() => installmentsTable.value?.tableApi, {
+  searchColumn: 'number',
+  filterColumn: 'status',
+  getTotal: () => installmentRows.value.length
+})
 
-const paymentFilters = ref<{ id: string, value: unknown }[]>([])
-const paymentVisibility = ref()
-const paymentSelection = ref<Record<string, boolean>>({})
-const paymentSorting = ref<{ id: string, desc: boolean }[]>([])
-const paymentPagination = ref({ pageIndex: 0, pageSize: 10 })
-const paymentStatus = ref('all')
+const {
+  columnFilters: paymentFilters,
+  columnVisibility: paymentVisibility,
+  rowSelection: paymentSelection,
+  sorting: paymentSorting,
+  pagination: paymentPagination,
+  filterValue: paymentStatus,
+  selectedRows: paymentSelected,
+  filteredCount: paymentFiltered
+} = useTableState<Payment>(() => paymentsTable.value?.tableApi, {
+  filterColumn: 'status',
+  getTotal: () => paymentRows.value.length
+})
+
+const { exportCsv: exportInstallmentCsv } = useTableCsv<Installment>(() => installmentsTable.value?.tableApi)
+const { exportCsv: exportPaymentCsv } = useTableCsv<Payment>(() => paymentsTable.value?.tableApi)
 
 const { data: order, status: orderStatus, error: orderError, refresh: refreshOrder } = await useFetch<{ data: ParcelmentOrderDetail }>(
   () => `/api/monitoring/parcelamentos/${orderId.value}`,
@@ -78,54 +97,29 @@ const paymentColumns = buildPaymentColumns({
   }
 })
 
-const installmentSearch = computed({
-  get: (): string => installmentSearchText.value,
-  set: (value: string) => {
-    installmentSearchText.value = value
-    installmentsTable.value?.tableApi?.getColumn('number')?.setFilterValue(value || undefined)
-    installmentPagination.value.pageIndex = 0
-  }
-})
-
-watch(() => installmentStatus.value, (newVal) => {
-  const column = installmentsTable.value?.tableApi?.getColumn('status')
-  if (!column) return
-  if (newVal === 'all') column.setFilterValue(undefined)
-  else column.setFilterValue(newVal)
-  installmentPagination.value.pageIndex = 0
-})
-
-watch(() => paymentStatus.value, (newVal) => {
-  const column = paymentsTable.value?.tableApi?.getColumn('status')
-  if (!column) return
-  if (newVal === 'all') column.setFilterValue(undefined)
-  else column.setFilterValue(newVal)
-  paymentPagination.value.pageIndex = 0
-})
-
-const installmentSelected = computed((): Row<Installment>[] => installmentsTable.value?.tableApi?.getFilteredSelectedRowModel().rows ?? [])
-const installmentFiltered = computed((): number => installmentsTable.value?.tableApi?.getFilteredRowModel().rows.length ?? installmentRows.value.length)
-const paymentSelected = computed((): Row<Payment>[] => paymentsTable.value?.tableApi?.getFilteredSelectedRowModel().rows ?? [])
-const paymentFiltered = computed((): number => paymentsTable.value?.tableApi?.getFilteredRowModel().rows.length ?? paymentRows.value.length)
-
 function exportInstallments(): void {
-  const list = (installmentSelected.value.length > 0 ? installmentSelected.value : (installmentsTable.value?.tableApi?.getFilteredRowModel().rows ?? [])).map((r: Row<Installment>) => r.original)
-  if (list.length === 0) {
-    toast.add({ title: 'Nada para exportar', description: 'Ajuste os filtros de parcelas.', color: 'warning' })
-    return
-  }
-  exportToCsv('parcelas', list.map(i => ({ numero: i.number, estado: i.status ?? '', valor: i.amount ?? '', vencimento: i.due_date ?? '', guia: i.guide_available ? 'Sim' : 'Não' })))
-  toast.add({ title: 'CSV exportado', description: `${list.length} parcela(s) exportada(s).`, color: 'success' })
+  exportInstallmentCsv('parcelas', i => ({
+    numero: i.number,
+    estado: i.status ?? '',
+    valor: i.amount ?? '',
+    vencimento: i.due_date ?? '',
+    guia: i.guide_available ? 'Sim' : 'Não'
+  }), {
+    emptyDescription: 'Ajuste os filtros de parcelas.',
+    exportedUnit: 'parcela(s) exportada(s)'
+  })
 }
 
 function exportPayments(): void {
-  const list = (paymentSelected.value.length > 0 ? paymentSelected.value : (paymentsTable.value?.tableApi?.getFilteredRowModel().rows ?? [])).map((r: Row<Payment>) => r.original)
-  if (list.length === 0) {
-    toast.add({ title: 'Nada para exportar', description: 'Ajuste os filtros de pagamentos.', color: 'warning' })
-    return
-  }
-  exportToCsv('pagamentos', list.map(p => ({ id: p.id, estado: p.status ?? '', valor: p.amount ?? '', pago_em: p.paid_at ?? '' })))
-  toast.add({ title: 'CSV exportado', description: `${list.length} pagamento(s) exportado(s).`, color: 'success' })
+  exportPaymentCsv('pagamentos', p => ({
+    id: p.id,
+    estado: p.status ?? '',
+    valor: p.amount ?? '',
+    pago_em: p.paid_at ?? ''
+  }), {
+    emptyDescription: 'Ajuste os filtros de pagamentos.',
+    exportedUnit: 'pagamento(s) exportado(s)'
+  })
 }
 </script>
 

@@ -4,6 +4,8 @@ import type { FormSubmitEvent } from '@nuxt/ui'
 import { getPaginationRowModel } from '@tanstack/table-core'
 import type { Row } from '@tanstack/table-core'
 import { TABLE_UI as tableUi, type TableApi } from '~/utils/table-chrome'
+import { useTableCsv } from '~/composables/tables/useTableCsv'
+import { useTableState } from '~/composables/tables/useTableState'
 import { buildClientColumns, CLIENT_COLUMN_LABELS, regimeItems, regimeLabel, type ClientRow } from '~/components/tables/clients/columns'
 
 interface ClientsResponse {
@@ -16,12 +18,23 @@ const { can } = usePermissions()
 const canWrite = computed(() => can('clients.write'))
 
 const table = useTemplateRef<{ tableApi?: TableApi<ClientRow> | null }>('table')
-const columnFilters = ref([{ id: 'razao_social', value: '' }])
-const columnVisibility = ref()
-const rowSelection = ref<Record<string, boolean>>({})
-const sorting = ref<{ id: string, desc: boolean }[]>([])
-const pagination = ref({ pageIndex: 0, pageSize: 10 })
-const regimeFilter = ref('all')
+const {
+  columnFilters,
+  columnVisibility,
+  rowSelection,
+  sorting,
+  pagination,
+  search,
+  filterValue: regimeFilter,
+  selectedRows,
+  filteredCount,
+  clearSelection
+} = useTableState<ClientRow>(() => table.value?.tableApi, {
+  searchColumn: 'razao_social',
+  filterColumn: 'regime',
+  getTotal: () => clients.value.length
+})
+const { exportCsv: exportTableCsv } = useTableCsv<ClientRow>(() => table.value?.tableApi)
 
 const { data, error, status, refresh } = await useFetch<ClientsResponse>('/api/clients', {
   key: 'clients-list',
@@ -37,41 +50,18 @@ const columns = buildClientColumns({
   onAskDelete: askDelete
 })
 
-watch(() => regimeFilter.value, (newVal) => {
-  if (!table?.value?.tableApi) return
-  const column = table.value.tableApi.getColumn('regime')
-  if (!column) return
-  if (newVal === 'all') column.setFilterValue(undefined)
-  else column.setFilterValue(newVal)
-  pagination.value.pageIndex = 0
-})
-
-const search = computed({
-  get: (): string => (table.value?.tableApi?.getColumn('razao_social')?.getFilterValue() as string) || '',
-  set: (value: string) => {
-    table.value?.tableApi?.getColumn('razao_social')?.setFilterValue(value || undefined)
-    pagination.value.pageIndex = 0
-  }
-})
-
-const selectedRows = computed((): Row<ClientRow>[] => table.value?.tableApi?.getFilteredSelectedRowModel().rows ?? [])
-const filteredCount = computed((): number => table.value?.tableApi?.getFilteredRowModel().rows.length ?? clients.value.length)
-
 function exportCsv() {
-  const rows = (selectedRows.value.length > 0 ? selectedRows.value : (table.value?.tableApi?.getFilteredRowModel().rows ?? [])).map((r: Row<ClientRow>) => r.original)
-  if (rows.length === 0) {
-    toast.add({ title: 'Nada para exportar', description: 'Ajuste os filtros ou selecione ao menos um cliente.', color: 'warning' })
-    return
-  }
-  exportToCsv('clientes', rows.map((c: ClientRow) => ({
+  exportTableCsv('clientes', (c: ClientRow) => ({
     id: c.id,
     razao_social: c.razao_social,
     cnpj: c.cnpj,
     regime: regimeLabel(c.regime),
     contador_responsavel: c.contador_responsavel,
     monitoramento: c.monitoring_enabled ? 'Ativo' : 'Inativo'
-  })))
-  toast.add({ title: 'CSV exportado', description: `${rows.length} cliente(s) exportado(s).`, color: 'success' })
+  }), {
+    emptyDescription: 'Ajuste os filtros ou selecione ao menos um cliente.',
+    exportedUnit: 'cliente(s) exportado(s)'
+  })
 }
 
 const bulkDeleting = ref(false)
@@ -84,7 +74,7 @@ async function removeSelected() {
       await $fetch(`/api/clients/${client.id}`, { method: 'DELETE' })
     }
     toast.add({ title: `${rows.length} cliente(s) excluído(s)`, color: 'success' })
-    rowSelection.value = {}
+    clearSelection()
     await refresh()
   } catch (error) {
     toast.add({ title: 'Não foi possível excluir a seleção', description: backendMessage(error), color: 'error' })

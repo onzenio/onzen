@@ -2,8 +2,9 @@
 import * as z from 'zod'
 import type { FormSubmitEvent } from '@nuxt/ui'
 import { getPaginationRowModel } from '@tanstack/table-core'
-import type { Row } from '@tanstack/table-core'
 import { TABLE_UI as tableUi, type TableApi } from '~/utils/table-chrome'
+import { useTableCsv } from '~/composables/tables/useTableCsv'
+import { useTableState } from '~/composables/tables/useTableState'
 import { buildAccountColumns, ACCOUNT_COLUMN_LABELS, profileItems, profileLabel, type AccountRow } from '~/components/tables/accounts/columns'
 
 definePageMeta({ middleware: 'super-admin' })
@@ -19,12 +20,22 @@ interface AccountsResponse {
 const toast = useToast()
 
 const table = useTemplateRef<{ tableApi?: TableApi<AccountRow> | null }>('table')
-const columnFilters = ref([{ id: 'name', value: '' }])
-const columnVisibility = ref()
-const rowSelection = ref<Record<string, boolean>>({})
-const sorting = ref<{ id: string, desc: boolean }[]>([])
-const pagination = ref({ pageIndex: 0, pageSize: 10 })
-const profileFilter = ref('all')
+const {
+  columnFilters,
+  columnVisibility,
+  rowSelection,
+  sorting,
+  pagination,
+  search,
+  filterValue: profileFilter,
+  selectedRows,
+  filteredCount
+} = useTableState<AccountRow>(() => table.value?.tableApi, {
+  searchColumn: 'name',
+  filterColumn: 'profile',
+  getTotal: () => accounts.value.length
+})
+const { exportCsv: exportTableCsv } = useTableCsv<AccountRow>(() => table.value?.tableApi)
 
 const { data, error, status, refresh } = await useFetch<AccountsResponse>('/api/accounts', {
   key: 'accounts-list',
@@ -35,39 +46,16 @@ const accounts = computed(() => data.value?.data ?? [])
 
 const columns = buildAccountColumns()
 
-watch(() => profileFilter.value, (newVal) => {
-  if (!table?.value?.tableApi) return
-  const column = table.value.tableApi.getColumn('profile')
-  if (!column) return
-  if (newVal === 'all') column.setFilterValue(undefined)
-  else column.setFilterValue(newVal)
-  pagination.value.pageIndex = 0
-})
-
-const search = computed({
-  get: (): string => (table.value?.tableApi?.getColumn('name')?.getFilterValue() as string) || '',
-  set: (value: string) => {
-    table.value?.tableApi?.getColumn('name')?.setFilterValue(value || undefined)
-    pagination.value.pageIndex = 0
-  }
-})
-
-const selectedRows = computed((): Row<AccountRow>[] => table.value?.tableApi?.getFilteredSelectedRowModel().rows ?? [])
-const filteredCount = computed((): number => table.value?.tableApi?.getFilteredRowModel().rows.length ?? accounts.value.length)
-
 function exportCsv() {
-  const rows = (selectedRows.value.length > 0 ? selectedRows.value : (table.value?.tableApi?.getFilteredRowModel().rows ?? [])).map((r: Row<AccountRow>) => r.original)
-  if (rows.length === 0) {
-    toast.add({ title: 'Nada para exportar', description: 'Ajuste os filtros ou selecione ao menos uma conta.', color: 'warning' })
-    return
-  }
-  exportToCsv('contas', rows.map((a: AccountRow) => ({
+  exportTableCsv('contas', (a: AccountRow) => ({
     id: a.id,
     nome: a.name,
     tipo: profileLabel(a.profile),
     plano: a.plan?.name ?? ''
-  })))
-  toast.add({ title: 'CSV exportado', description: `${rows.length} conta(s) exportada(s).`, color: 'success' })
+  }), {
+    emptyDescription: 'Ajuste os filtros ou selecione ao menos uma conta.',
+    exportedUnit: 'conta(s) exportada(s)'
+  })
 }
 
 const schema = z.object({

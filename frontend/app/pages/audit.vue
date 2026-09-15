@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { getPaginationRowModel } from '@tanstack/table-core'
-import type { Row } from '@tanstack/table-core'
 import { TABLE_UI as tableUi, type TableApi } from '~/utils/table-chrome'
+import { useTableCsv } from '~/composables/tables/useTableCsv'
+import { useTableState } from '~/composables/tables/useTableState'
 import { actorLabel, AUDIT_COLUMN_LABELS, buildAuditActionItems, buildAuditColumns, type AuditRow } from '~/components/tables/audit/columns'
 
 interface AuditResponse {
@@ -9,15 +10,24 @@ interface AuditResponse {
   meta: { current_page: number, last_page: number, per_page: number, total: number }
 }
 
-const toast = useToast()
-
 const table = useTemplateRef<{ tableApi?: TableApi<AuditRow> | null }>('table')
-const columnFilters = ref([{ id: 'actor', value: '' }])
-const columnVisibility = ref()
-const rowSelection = ref<Record<string, boolean>>({})
-const sorting = ref<{ id: string, desc: boolean }[]>([])
-const pagination = ref({ pageIndex: 0, pageSize: 10 })
-const actionFilter = ref('all')
+const {
+  columnFilters,
+  columnVisibility,
+  rowSelection,
+  sorting,
+  pagination,
+  search,
+  filterValue: actionFilter,
+  selectedRows,
+  filteredCount,
+  resetPage
+} = useTableState<AuditRow>(() => table.value?.tableApi, {
+  searchColumn: 'actor',
+  filterColumn: 'action',
+  getTotal: () => logs.value.length
+})
+const { exportCsv: exportTableCsv } = useTableCsv<AuditRow>(() => table.value?.tableApi)
 
 const accountId = ref('')
 const actorUserId = ref('')
@@ -41,7 +51,7 @@ const logs = computed(() => data.value?.data ?? [])
 const columns = buildAuditColumns()
 
 function applyFilters() {
-  pagination.value.pageIndex = 0
+  resetPage()
   void refresh()
 }
 
@@ -51,47 +61,24 @@ function clearFilters() {
   from.value = ''
   to.value = ''
   actionFilter.value = 'all'
-  pagination.value.pageIndex = 0
+  resetPage()
   void refresh()
 }
 
 const actionItems = computed(() => buildAuditActionItems(logs.value))
 
-watch(() => actionFilter.value, (newVal) => {
-  if (!table?.value?.tableApi) return
-  const column = table.value.tableApi.getColumn('action')
-  if (!column) return
-  if (newVal === 'all') column.setFilterValue(undefined)
-  else column.setFilterValue(newVal)
-  pagination.value.pageIndex = 0
-})
-
-const search = computed({
-  get: (): string => (table.value?.tableApi?.getColumn('actor')?.getFilterValue() as string) || '',
-  set: (value: string) => {
-    table.value?.tableApi?.getColumn('actor')?.setFilterValue(value || undefined)
-    pagination.value.pageIndex = 0
-  }
-})
-
-const selectedRows = computed((): Row<AuditRow>[] => table.value?.tableApi?.getFilteredSelectedRowModel().rows ?? [])
-const filteredCount = computed((): number => table.value?.tableApi?.getFilteredRowModel().rows.length ?? logs.value.length)
-
 function exportCsv() {
-  const rows = (selectedRows.value.length > 0 ? selectedRows.value : (table.value?.tableApi?.getFilteredRowModel().rows ?? [])).map((r: Row<AuditRow>) => r.original)
-  if (rows.length === 0) {
-    toast.add({ title: 'Nada para exportar', description: 'Ajuste os filtros ou selecione ao menos um registro.', color: 'warning' })
-    return
-  }
-  exportToCsv('auditoria', rows.map((log: AuditRow) => ({
+  exportTableCsv('auditoria', (log: AuditRow) => ({
     id: log.id,
     data: formatDateTime(log.created_at),
     acao: log.action,
     ator: actorLabel(log),
     origem: log.origin_account_id,
     alvo: log.target_account_id ?? ''
-  })))
-  toast.add({ title: 'CSV exportado', description: `${rows.length} registro(s) exportado(s).`, color: 'success' })
+  }), {
+    emptyDescription: 'Ajuste os filtros ou selecione ao menos um registro.',
+    exportedUnit: 'registro(s) exportado(s)'
+  })
 }
 </script>
 

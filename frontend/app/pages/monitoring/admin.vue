@@ -2,8 +2,9 @@
 import * as z from 'zod'
 import type { FormSubmitEvent } from '@nuxt/ui'
 import { getPaginationRowModel } from '@tanstack/table-core'
-import type { Row } from '@tanstack/table-core'
 import { TABLE_UI as tableUi, type TableApi } from '~/utils/table-chrome'
+import { useTableCsv } from '~/composables/tables/useTableCsv'
+import { useTableState } from '~/composables/tables/useTableState'
 import { buildCredentialColumns, CREDENTIAL_COLUMN_LABELS, credentialValidityItems, type CredentialRow } from '~/components/tables/monitoring/credentialColumns'
 import type { SerproAdminOverview } from '~/types/monitoring'
 
@@ -62,12 +63,22 @@ const transportState = reactive({
 const environmentBadgeColor = computed(() => overview.value?.data.environment === 'producao' ? 'error' : 'info')
 
 const credentialTable = useTemplateRef<{ tableApi?: TableApi<CredentialRow> | null }>('credentialTable')
-const credentialFilters = ref([{ id: 'identifier', value: '' }])
-const credentialVisibility = ref()
-const credentialSelection = ref<Record<string, boolean>>({})
-const credentialSorting = ref<{ id: string, desc: boolean }[]>([])
-const credentialPagination = ref({ pageIndex: 0, pageSize: 10 })
-const credentialValidity = ref('all')
+const {
+  columnFilters: credentialFilters,
+  columnVisibility: credentialVisibility,
+  rowSelection: credentialSelection,
+  sorting: credentialSorting,
+  pagination: credentialPagination,
+  search: credentialSearch,
+  filterValue: credentialValidity,
+  selectedRows: credentialSelected,
+  filteredCount: credentialFiltered
+} = useTableState<CredentialRow>(() => credentialTable.value?.tableApi, {
+  searchColumn: 'identifier',
+  filterColumn: 'resolved',
+  getTotal: () => credentialRows.value.length
+})
+const { exportCsv: exportCredentialCsv } = useTableCsv<CredentialRow>(() => credentialTable.value?.tableApi)
 
 const credentialRows = computed((): CredentialRow[] => overview.value ? Object.entries(overview.value.data.credentials).map(([env, cred]) => ({ environment: env, ...cred })) : [])
 
@@ -78,39 +89,17 @@ const credentialColumns = buildCredentialColumns({
   }
 })
 
-watch(() => credentialValidity.value, (newVal) => {
-  const column = credentialTable.value?.tableApi?.getColumn('resolved')
-  if (!column) return
-  if (newVal === 'all') column.setFilterValue(undefined)
-  else column.setFilterValue(newVal)
-  credentialPagination.value.pageIndex = 0
-})
-
-const credentialSearch = computed({
-  get: (): string => (credentialTable.value?.tableApi?.getColumn('identifier')?.getFilterValue() as string) || '',
-  set: (value: string) => {
-    credentialTable.value?.tableApi?.getColumn('identifier')?.setFilterValue(value || undefined)
-    credentialPagination.value.pageIndex = 0
-  }
-})
-
-const credentialSelected = computed((): Row<CredentialRow>[] => credentialTable.value?.tableApi?.getFilteredSelectedRowModel().rows ?? [])
-const credentialFiltered = computed((): number => credentialTable.value?.tableApi?.getFilteredRowModel().rows.length ?? credentialRows.value.length)
-
 function exportCredentials(): void {
-  const list = (credentialSelected.value.length > 0 ? credentialSelected.value : (credentialTable.value?.tableApi?.getFilteredRowModel().rows ?? [])).map((r: Row<CredentialRow>) => r.original)
-  if (list.length === 0) {
-    toast.add({ title: 'Nada para exportar', description: 'Ajuste os filtros de credenciais.', color: 'warning' })
-    return
-  }
-  exportToCsv('credenciais-serpro', list.map(c => ({
+  exportCredentialCsv('credenciais-serpro', c => ({
     ambiente: c.environment,
     identificador: c.identifier ?? '',
     validas: c.resolved ? 'Sim' : 'Não',
     certificado_mtls: c.has_certificate ? 'Sim' : 'Não',
     atualizadas_em: c.updated_at ?? ''
-  })))
-  toast.add({ title: 'CSV exportado', description: `${list.length} credencial(is) exportada(s).`, color: 'success' })
+  }), {
+    emptyDescription: 'Ajuste os filtros de credenciais.',
+    exportedUnit: 'credencial(is) exportada(s)'
+  })
 }
 
 function readFileAsBase64(file: File): Promise<string> {

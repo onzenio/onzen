@@ -4,6 +4,8 @@ import type { FormSubmitEvent } from '@nuxt/ui'
 import { getPaginationRowModel } from '@tanstack/table-core'
 import type { Row } from '@tanstack/table-core'
 import { TABLE_UI as tableUi, type TableApi } from '~/utils/table-chrome'
+import { useTableCsv } from '~/composables/tables/useTableCsv'
+import { useTableState } from '~/composables/tables/useTableState'
 import { AUTHOR_COLUMN_LABELS, authorStatusItems, buildAuthorColumns } from '~/components/tables/monitoring/authorColumns'
 import type { CertificateState, RequestAuthor } from '~/types/monitoring'
 
@@ -11,12 +13,23 @@ const toast = useToast()
 const { canManageSensitive } = useSession()
 
 const table = useTemplateRef<{ tableApi?: TableApi<RequestAuthor> | null }>('table')
-const columnFilters = ref([{ id: 'name', value: '' }])
-const columnVisibility = ref()
-const rowSelection = ref<Record<string, boolean>>({})
-const sorting = ref<{ id: string, desc: boolean }[]>([])
-const pagination = ref({ pageIndex: 0, pageSize: 10 })
-const statusFilter = ref('all')
+const {
+  columnFilters,
+  columnVisibility,
+  rowSelection,
+  sorting,
+  pagination,
+  search,
+  filterValue: statusFilter,
+  selectedRows,
+  filteredCount,
+  clearSelection
+} = useTableState<RequestAuthor>(() => table.value?.tableApi, {
+  searchColumn: 'name',
+  filterColumn: 'status',
+  getTotal: () => authorRows.value.length
+})
+const { exportCsv: exportTableCsv } = useTableCsv<RequestAuthor>(() => table.value?.tableApi)
 
 const { data: certificate, refresh: refreshCertificate } = await useFetch<{ data: CertificateState }>('/api/monitoring/certificate', { lazy: true })
 const { data: authors, status: authorsStatus, error: authorsError, refresh: refreshAuthors } = await useFetch<{ data: RequestAuthor[] }>('/api/monitoring/authors', { lazy: true })
@@ -54,38 +67,16 @@ const authorColumns = buildAuthorColumns({
   }
 })
 
-watch(() => statusFilter.value, (newVal) => {
-  const column = table.value?.tableApi?.getColumn('status')
-  if (!column) return
-  if (newVal === 'all') column.setFilterValue(undefined)
-  else column.setFilterValue(newVal)
-  pagination.value.pageIndex = 0
-})
-
-const search = computed({
-  get: (): string => (table.value?.tableApi?.getColumn('name')?.getFilterValue() as string) || '',
-  set: (value: string) => {
-    table.value?.tableApi?.getColumn('name')?.setFilterValue(value || undefined)
-    pagination.value.pageIndex = 0
-  }
-})
-
-const selectedRows = computed((): Row<RequestAuthor>[] => table.value?.tableApi?.getFilteredSelectedRowModel().rows ?? [])
-const filteredCount = computed((): number => table.value?.tableApi?.getFilteredRowModel().rows.length ?? authorRows.value.length)
-
 function exportCsv(): void {
-  const list = (selectedRows.value.length > 0 ? selectedRows.value : (table.value?.tableApi?.getFilteredRowModel().rows ?? [])).map((r: Row<RequestAuthor>) => r.original)
-  if (list.length === 0) {
-    toast.add({ title: 'Nada para exportar', description: 'Ajuste os filtros ou selecione ao menos um autor.', color: 'warning' })
-    return
-  }
-  exportToCsv('autores', list.map(a => ({
+  exportTableCsv('autores', a => ({
     nome: a.name,
     documento: a.document ?? '',
     estado: a.status === 'active' ? 'Ativo' : 'Inelegível',
     certificado_valido_ate: a.certificate_expires_at ?? ''
-  })))
-  toast.add({ title: 'CSV exportado', description: `${list.length} autor(es) exportado(s).`, color: 'success' })
+  }), {
+    emptyDescription: 'Ajuste os filtros ou selecione ao menos um autor.',
+    exportedUnit: 'autor(es) exportado(s)'
+  })
 }
 
 async function submitTermBulk(): Promise<void> {
@@ -97,7 +88,7 @@ async function submitTermBulk(): Promise<void> {
       await $fetch(`/api/monitoring/authors/${author.id}/term`, { method: 'POST' })
     }
     toast.add({ title: 'Termos enviados', description: `${list.length} termo(s) enviado(s).`, color: 'success' })
-    rowSelection.value = {}
+    clearSelection()
     await refreshAuthors()
   } catch (error: unknown) {
     toast.add({ title: 'Envio recusado', description: monitoringErrorMessage(backendErrorBody(error)), color: 'error' })

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { getPaginationRowModel } from '@tanstack/table-core'
-import type { Row } from '@tanstack/table-core'
 import { TABLE_UI as tableUi, type TableApi } from '~/utils/table-chrome'
+import { useTableCsv } from '~/composables/tables/useTableCsv'
+import { useTableState } from '~/composables/tables/useTableState'
 import { ALERT_COLUMN_LABELS, alertStatusItems, buildAlertColumns, buildChangeColumns, buildSnapshotColumns, CHANGE_COLUMN_LABELS, changeNormalizedItems, SNAPSHOT_COLUMN_LABELS, snapshotFreshnessItems } from '~/components/tables/monitoring/enrollmentDetailColumns'
 import type { AlertItem, ChangeItem, CndData, Enrollment, Paginated, Snapshot, SnapshotsResponse } from '~/types/monitoring'
 
@@ -14,26 +15,56 @@ const snapshotsTable = useTemplateRef<{ tableApi?: TableApi<Snapshot> | null }>(
 const changesTable = useTemplateRef<{ tableApi?: TableApi<ChangeItem> | null }>('changesTable')
 const alertsTable = useTemplateRef<{ tableApi?: TableApi<AlertItem> | null }>('alertsTable')
 
-const snapshotFilters = ref([{ id: 'operation_code', value: '' }])
-const snapshotVisibility = ref()
-const snapshotSelection = ref<Record<string, boolean>>({})
-const snapshotSorting = ref<{ id: string, desc: boolean }[]>([])
-const snapshotPagination = ref({ pageIndex: 0, pageSize: 10 })
-const snapshotFreshness = ref('all')
+const {
+  columnFilters: snapshotFilters,
+  columnVisibility: snapshotVisibility,
+  rowSelection: snapshotSelection,
+  sorting: snapshotSorting,
+  pagination: snapshotPagination,
+  search: snapshotSearch,
+  filterValue: snapshotFreshness,
+  selectedRows: snapshotSelected,
+  filteredCount: snapshotFiltered
+} = useTableState<Snapshot>(() => snapshotsTable.value?.tableApi, {
+  searchColumn: 'operation_code',
+  filterColumn: 'freshness',
+  getTotal: () => snapshotRows.value.length
+})
 
-const changeFilters = ref([{ id: 'operation_code', value: '' }])
-const changeVisibility = ref()
-const changeSelection = ref<Record<string, boolean>>({})
-const changeSorting = ref<{ id: string, desc: boolean }[]>([])
-const changePagination = ref({ pageIndex: 0, pageSize: 10 })
-const changeNormalized = ref('all')
+const {
+  columnFilters: changeFilters,
+  columnVisibility: changeVisibility,
+  rowSelection: changeSelection,
+  sorting: changeSorting,
+  pagination: changePagination,
+  search: changeSearch,
+  filterValue: changeNormalized,
+  selectedRows: changeSelected,
+  filteredCount: changeFiltered
+} = useTableState<ChangeItem>(() => changesTable.value?.tableApi, {
+  searchColumn: 'operation_code',
+  filterColumn: 'normalized',
+  getTotal: () => changeRows.value.length
+})
 
-const alertFilters = ref<{ id: string, value: unknown }[]>([])
-const alertVisibility = ref()
-const alertSelection = ref<Record<string, boolean>>({})
-const alertSorting = ref<{ id: string, desc: boolean }[]>([])
-const alertPagination = ref({ pageIndex: 0, pageSize: 10 })
-const alertStatus = ref('all')
+const {
+  columnFilters: alertFilters,
+  columnVisibility: alertVisibility,
+  rowSelection: alertSelection,
+  sorting: alertSorting,
+  pagination: alertPagination,
+  filterValue: alertStatus,
+  selectedRows: alertSelected,
+  filteredCount: alertFiltered,
+  clearSelection: clearAlertSelection
+} = useTableState<AlertItem>(() => alertsTable.value?.tableApi, {
+  filterColumn: 'status',
+  getTotal: () => alertRows.value.length
+})
+
+const { exportCsv: exportSnapshotCsv } = useTableCsv<Snapshot>(() => snapshotsTable.value?.tableApi)
+const { exportCsv: exportChangeCsv } = useTableCsv<ChangeItem>(() => changesTable.value?.tableApi)
+const { exportCsv: exportAlertCsv } = useTableCsv<AlertItem>(() => alertsTable.value?.tableApi)
 
 const { data: enrollment, status: enrollmentStatus, error: enrollmentError, refresh: refreshEnrollment } = await useFetch<{ data: Enrollment }>(
   () => `/api/monitoring/enrollments/${enrollmentId.value}`,
@@ -104,7 +135,7 @@ async function acknowledge(alertId: number): Promise<void> {
 }
 
 async function acknowledgeSelected(): Promise<void> {
-  const list = (alertsTable.value?.tableApi?.getFilteredSelectedRowModel().rows ?? []).map((r: Row<AlertItem>) => r.original).filter(a => a.status === 'pending')
+  const list = alertSelected.value.map(r => r.original).filter(a => a.status === 'pending')
   if (list.length === 0) return
   bulkAcknowledging.value = true
   try {
@@ -112,7 +143,7 @@ async function acknowledgeSelected(): Promise<void> {
       await $fetch(`/api/monitoring/alerts/${alert.id}/acknowledge`, { method: 'POST' })
     }
     toast.add({ title: `${list.length} alerta(s) reconhecido(s)`, color: 'success' })
-    alertSelection.value = {}
+    clearAlertSelection()
     await refreshAlerts()
   } catch (error: unknown) {
     toast.add({ title: 'Não foi possível reconhecer a seleção', description: monitoringErrorMessage(backendErrorBody(error)), color: 'error' })
@@ -140,81 +171,42 @@ const alertColumns = buildAlertColumns({
   onAcknowledge: alertId => void acknowledge(alertId)
 })
 
-watch(() => snapshotFreshness.value, (newVal) => {
-  const column = snapshotsTable.value?.tableApi?.getColumn('freshness')
-  if (!column) return
-  if (newVal === 'all') column.setFilterValue(undefined)
-  else column.setFilterValue(newVal)
-  snapshotPagination.value.pageIndex = 0
-})
-
-watch(() => changeNormalized.value, (newVal) => {
-  const column = changesTable.value?.tableApi?.getColumn('normalized')
-  if (!column) return
-  if (newVal === 'all') column.setFilterValue(undefined)
-  else column.setFilterValue(newVal)
-  changePagination.value.pageIndex = 0
-})
-
-watch(() => alertStatus.value, (newVal) => {
-  const column = alertsTable.value?.tableApi?.getColumn('status')
-  if (!column) return
-  if (newVal === 'all') column.setFilterValue(undefined)
-  else column.setFilterValue(newVal)
-  alertPagination.value.pageIndex = 0
-})
-
-const snapshotSearch = computed({
-  get: (): string => (snapshotsTable.value?.tableApi?.getColumn('operation_code')?.getFilterValue() as string) || '',
-  set: (value: string) => {
-    snapshotsTable.value?.tableApi?.getColumn('operation_code')?.setFilterValue(value || undefined)
-    snapshotPagination.value.pageIndex = 0
-  }
-})
-
-const changeSearch = computed({
-  get: (): string => (changesTable.value?.tableApi?.getColumn('operation_code')?.getFilterValue() as string) || '',
-  set: (value: string) => {
-    changesTable.value?.tableApi?.getColumn('operation_code')?.setFilterValue(value || undefined)
-    changePagination.value.pageIndex = 0
-  }
-})
-
-const snapshotSelected = computed((): Row<Snapshot>[] => snapshotsTable.value?.tableApi?.getFilteredSelectedRowModel().rows ?? [])
-const snapshotFiltered = computed((): number => snapshotsTable.value?.tableApi?.getFilteredRowModel().rows.length ?? snapshotRows.value.length)
-const changeSelected = computed((): Row<ChangeItem>[] => changesTable.value?.tableApi?.getFilteredSelectedRowModel().rows ?? [])
-const changeFiltered = computed((): number => changesTable.value?.tableApi?.getFilteredRowModel().rows.length ?? changeRows.value.length)
-const alertSelected = computed((): Row<AlertItem>[] => alertsTable.value?.tableApi?.getFilteredSelectedRowModel().rows ?? [])
-const alertFiltered = computed((): number => alertsTable.value?.tableApi?.getFilteredRowModel().rows.length ?? alertRows.value.length)
-
 function exportSnapshots(): void {
-  const list = (snapshotSelected.value.length > 0 ? snapshotSelected.value : (snapshotsTable.value?.tableApi?.getFilteredRowModel().rows ?? [])).map((r: Row<Snapshot>) => r.original)
-  if (list.length === 0) {
-    toast.add({ title: 'Nada para exportar', description: 'Ajuste os filtros de snapshots.', color: 'warning' })
-    return
-  }
-  exportToCsv('snapshots', list.map(s => ({ id: s.id, operacao: s.operation_code, familia: s.family, atualidade: s.freshness, integridade: s.completeness, verificado_em: s.verified_at ?? '' })))
-  toast.add({ title: 'CSV exportado', description: `${list.length} snapshot(s) exportado(s).`, color: 'success' })
+  exportSnapshotCsv('snapshots', s => ({
+    id: s.id,
+    operacao: s.operation_code,
+    familia: s.family,
+    atualidade: s.freshness,
+    integridade: s.completeness,
+    verificado_em: s.verified_at ?? ''
+  }), {
+    emptyDescription: 'Ajuste os filtros de snapshots.',
+    exportedUnit: 'snapshot(s) exportado(s)'
+  })
 }
 
 function exportChanges(): void {
-  const list = (changeSelected.value.length > 0 ? changeSelected.value : (changesTable.value?.tableApi?.getFilteredRowModel().rows ?? [])).map((r: Row<ChangeItem>) => r.original)
-  if (list.length === 0) {
-    toast.add({ title: 'Nada para exportar', description: 'Ajuste os filtros de mudanças.', color: 'warning' })
-    return
-  }
-  exportToCsv('mudancas', list.map(c => ({ id: c.id, operacao: c.operation_code, normalizado: c.normalized ? 'Sim' : 'Não', detectada_em: c.created_at ?? '' })))
-  toast.add({ title: 'CSV exportado', description: `${list.length} mudança(s) exportada(s).`, color: 'success' })
+  exportChangeCsv('mudancas', c => ({
+    id: c.id,
+    operacao: c.operation_code,
+    normalizado: c.normalized ? 'Sim' : 'Não',
+    detectada_em: c.created_at ?? ''
+  }), {
+    emptyDescription: 'Ajuste os filtros de mudanças.',
+    exportedUnit: 'mudança(s) exportada(s)'
+  })
 }
 
 function exportAlerts(): void {
-  const list = (alertSelected.value.length > 0 ? alertSelected.value : (alertsTable.value?.tableApi?.getFilteredRowModel().rows ?? [])).map((r: Row<AlertItem>) => r.original)
-  if (list.length === 0) {
-    toast.add({ title: 'Nada para exportar', description: 'Ajuste os filtros de alertas.', color: 'warning' })
-    return
-  }
-  exportToCsv('alertas', list.map(a => ({ id: a.id, estado: a.status === 'pending' ? 'Pendente' : 'Reconhecido', criado_em: a.created_at ?? '', reconhecido_em: a.acknowledged_at ?? '' })))
-  toast.add({ title: 'CSV exportado', description: `${list.length} alerta(s) exportado(s).`, color: 'success' })
+  exportAlertCsv('alertas', a => ({
+    id: a.id,
+    estado: a.status === 'pending' ? 'Pendente' : 'Reconhecido',
+    criado_em: a.created_at ?? '',
+    reconhecido_em: a.acknowledged_at ?? ''
+  }), {
+    emptyDescription: 'Ajuste os filtros de alertas.',
+    exportedUnit: 'alerta(s) exportado(s)'
+  })
 }
 </script>
 

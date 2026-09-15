@@ -2,8 +2,9 @@
 import * as z from 'zod'
 import type { FormSubmitEvent } from '@nuxt/ui'
 import { getPaginationRowModel } from '@tanstack/table-core'
-import type { Row } from '@tanstack/table-core'
 import { TABLE_UI as tableUi, type TableApi } from '~/utils/table-chrome'
+import { useTableCsv } from '~/composables/tables/useTableCsv'
+import { useTableState } from '~/composables/tables/useTableState'
 import { buildPlanColumns, PLAN_COLUMN_LABELS, defaultItems, formatPlanPrice, type PlanRow } from '~/components/tables/plans/columns'
 
 definePageMeta({ middleware: 'super-admin' })
@@ -27,12 +28,22 @@ interface AccountsResponse {
 const toast = useToast()
 
 const table = useTemplateRef<{ tableApi?: TableApi<PlanRow> | null }>('table')
-const columnFilters = ref([{ id: 'name', value: '' }])
-const columnVisibility = ref()
-const rowSelection = ref<Record<string, boolean>>({})
-const sorting = ref<{ id: string, desc: boolean }[]>([])
-const pagination = ref({ pageIndex: 0, pageSize: 10 })
-const defaultFilter = ref('all')
+const {
+  columnFilters,
+  columnVisibility,
+  rowSelection,
+  sorting,
+  pagination,
+  search,
+  filterValue: defaultFilter,
+  selectedRows,
+  filteredCount
+} = useTableState<PlanRow>(() => table.value?.tableApi, {
+  searchColumn: 'name',
+  filterColumn: 'is_default',
+  getTotal: () => plans.value.length
+})
+const { exportCsv: exportTableCsv } = useTableCsv<PlanRow>(() => table.value?.tableApi)
 
 const { data, error, status, refresh } = await useFetch<PlansResponse>('/api/plans', {
   key: 'plans-list',
@@ -131,33 +142,8 @@ async function onSubmit(event: FormSubmitEvent<Schema>) {
   }
 }
 
-watch(() => defaultFilter.value, (newVal) => {
-  if (!table?.value?.tableApi) return
-  const column = table.value.tableApi.getColumn('is_default')
-  if (!column) return
-  if (newVal === 'all') column.setFilterValue(undefined)
-  else column.setFilterValue(newVal)
-  pagination.value.pageIndex = 0
-})
-
-const search = computed({
-  get: (): string => (table.value?.tableApi?.getColumn('name')?.getFilterValue() as string) || '',
-  set: (value: string) => {
-    table.value?.tableApi?.getColumn('name')?.setFilterValue(value || undefined)
-    pagination.value.pageIndex = 0
-  }
-})
-
-const selectedRows = computed((): Row<PlanRow>[] => table.value?.tableApi?.getFilteredSelectedRowModel().rows ?? [])
-const filteredCount = computed((): number => table.value?.tableApi?.getFilteredRowModel().rows.length ?? plans.value.length)
-
 function exportCsv() {
-  const rows = (selectedRows.value.length > 0 ? selectedRows.value : (table.value?.tableApi?.getFilteredRowModel().rows ?? [])).map((r: Row<PlanRow>) => r.original)
-  if (rows.length === 0) {
-    toast.add({ title: 'Nada para exportar', description: 'Ajuste os filtros ou selecione ao menos um plano.', color: 'warning' })
-    return
-  }
-  exportToCsv('planos', rows.map((p: PlanRow) => ({
+  exportTableCsv('planos', (p: PlanRow) => ({
     id: p.id,
     nome: p.name,
     preco: formatPlanPrice(p.price_cents),
@@ -165,8 +151,10 @@ function exportCsv() {
     max_clientes: p.max_clients,
     modulos: p.modules.join(', '),
     padrao: p.is_default ? 'Sim' : 'Não'
-  })))
-  toast.add({ title: 'CSV exportado', description: `${rows.length} plano(s) exportado(s).`, color: 'success' })
+  }), {
+    emptyDescription: 'Ajuste os filtros ou selecione ao menos um plano.',
+    exportedUnit: 'plano(s) exportado(s)'
+  })
 }
 
 const switchAccountId = ref<number | undefined>(undefined)
