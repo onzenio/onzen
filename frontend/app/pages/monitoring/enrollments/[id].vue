@@ -1,32 +1,18 @@
 <script setup lang="ts">
-import type { TableColumn } from '@nuxt/ui'
-import { upperFirst } from 'scule'
 import { getPaginationRowModel } from '@tanstack/table-core'
 import type { Row } from '@tanstack/table-core'
+import { TABLE_UI as tableUi, type TableApi } from '~/utils/table-chrome'
+import { ALERT_COLUMN_LABELS, alertStatusItems, buildAlertColumns, buildChangeColumns, buildSnapshotColumns, CHANGE_COLUMN_LABELS, changeNormalizedItems, SNAPSHOT_COLUMN_LABELS, snapshotFreshnessItems } from '~/components/tables/monitoring/enrollmentDetailColumns'
 import type { AlertItem, ChangeItem, CndData, Enrollment, Paginated, Snapshot, SnapshotsResponse } from '~/types/monitoring'
-
-const UBadge = resolveComponent('UBadge')
-const UButton = resolveComponent('UButton')
-const UCheckbox = resolveComponent('UCheckbox')
-const UDropdownMenu = resolveComponent('UDropdownMenu')
 
 const route = useRoute()
 const toast = useToast()
 const { canWrite } = useSession()
 const enrollmentId = computed(() => route.params.id as string)
 
-interface SimpleTableApi<T> {
-  getFilteredSelectedRowModel: () => { rows: Row<T>[] }
-  getFilteredRowModel: () => { rows: Row<T>[] }
-  getColumn: (id: string) => { setFilterValue: (value: string | undefined) => void, getFilterValue: () => unknown, toggleVisibility: (value?: boolean) => void } | undefined
-  getAllColumns: () => { id: string, getCanHide: () => boolean, getIsVisible: () => boolean }[]
-  getState: () => { pagination: { pageIndex: number, pageSize: number } }
-  setPageIndex: (index: number) => void
-}
-
-const snapshotsTable = useTemplateRef<{ tableApi?: SimpleTableApi<Snapshot> | null }>('snapshotsTable')
-const changesTable = useTemplateRef<{ tableApi?: SimpleTableApi<ChangeItem> | null }>('changesTable')
-const alertsTable = useTemplateRef<{ tableApi?: SimpleTableApi<AlertItem> | null }>('alertsTable')
+const snapshotsTable = useTemplateRef<{ tableApi?: TableApi<Snapshot> | null }>('snapshotsTable')
+const changesTable = useTemplateRef<{ tableApi?: TableApi<ChangeItem> | null }>('changesTable')
+const alertsTable = useTemplateRef<{ tableApi?: TableApi<AlertItem> | null }>('alertsTable')
 
 const snapshotFilters = ref([{ id: 'operation_code', value: '' }])
 const snapshotVisibility = ref()
@@ -94,19 +80,12 @@ const snapshotRows = computed((): Snapshot[] => snapshots.value?.data ?? [])
 const changeRows = computed((): ChangeItem[] => changes.value?.data ?? [])
 const alertRows = computed((): AlertItem[] => alerts.value?.data ?? [])
 
-function tableRetryActions(retry: () => void) {
-  return [{
-    label: 'Tentar novamente',
-    color: 'error' as const,
-    variant: 'outline' as const,
-    onClick: () => retry()
-  }]
-}
-
-const enrollmentRetryActions = tableRetryActions(() => refreshEnrollment())
-const snapshotsRetryActions = tableRetryActions(() => refreshSnapshots())
-const changesRetryActions = tableRetryActions(() => refreshChanges())
-const alertsRetryActions = tableRetryActions(() => refreshAlerts())
+const enrollmentRetryActions = [{
+  label: 'Tentar novamente',
+  color: 'error' as const,
+  variant: 'outline' as const,
+  onClick: () => refreshEnrollment()
+}]
 
 const acknowledging = ref<number | null>(null)
 const bulkAcknowledging = ref(false)
@@ -142,175 +121,24 @@ async function acknowledgeSelected(): Promise<void> {
   }
 }
 
-function sortableHeader(label: string) {
-  return ({ column }: { column: { getIsSorted: () => false | 'asc' | 'desc', toggleSorting: (desc?: boolean) => void } }) => {
-    const isSorted = column.getIsSorted()
-    return h(UButton, {
-      color: 'neutral',
-      variant: 'ghost',
-      label,
-      icon: isSorted ? (isSorted === 'asc' ? 'i-lucide-arrow-up-narrow-wide' : 'i-lucide-arrow-down-wide-narrow') : 'i-lucide-arrow-up-down',
-      class: '-mx-2.5',
-      onClick: () => column.toggleSorting(column.getIsSorted() === 'asc')
-    })
+const snapshotColumns = buildSnapshotColumns({
+  onCopyFingerprint: (snapshot) => {
+    navigator.clipboard.writeText(snapshot.fingerprint)
+    toast.add({ title: 'Fingerprint copiado', color: 'success' })
   }
-}
+})
 
-function selectColumn<T>() {
-  return {
-    id: 'select',
-    header: ({ table: api }: { table: { getIsSomePageRowsSelected: () => boolean, getIsAllPageRowsSelected: () => boolean, toggleAllPageRowsSelected: (v: boolean) => void } }) => h(UCheckbox, {
-      'modelValue': api.getIsSomePageRowsSelected() ? 'indeterminate' : api.getIsAllPageRowsSelected(),
-      'onUpdate:modelValue': (value: boolean | 'indeterminate') => api.toggleAllPageRowsSelected(!!value),
-      'ariaLabel': 'Selecionar todos'
-    }),
-    cell: ({ row }: { row: Row<T> }) => h(UCheckbox, {
-      'modelValue': row.getIsSelected(),
-      'onUpdate:modelValue': (value: boolean | 'indeterminate') => row.toggleSelected(!!value),
-      'ariaLabel': 'Selecionar linha'
-    })
+const changeColumns = buildChangeColumns({
+  onCopyId: (change) => {
+    navigator.clipboard.writeText(String(change.id))
+    toast.add({ title: 'ID copiado', color: 'success' })
   }
-}
+})
 
-function visibilityMenu(tableApi: SimpleTableApi<never> | null | undefined) {
-  return (tableApi?.getAllColumns() ?? []).filter(c => c.id !== 'select')
-}
-
-const snapshotColumns: TableColumn<Snapshot>[] = [
-  selectColumn<Snapshot>() as TableColumn<Snapshot>,
-  {
-    accessorKey: 'operation_code',
-    header: sortableHeader('Operação'),
-    cell: ({ row }) => h('p', { class: 'font-medium text-highlighted' }, row.original.operation_code)
-  },
-  {
-    accessorKey: 'family',
-    header: 'Família'
-  },
-  {
-    accessorKey: 'freshness',
-    header: 'Atualidade',
-    filterFn: 'equals',
-    cell: ({ row }) => h(UBadge, {
-      color: row.original.freshness === 'fresh' ? 'success' : 'warning',
-      variant: 'subtle'
-    }, () => row.original.freshness === 'fresh' ? 'Atual' : 'Desatualizado')
-  },
-  {
-    accessorKey: 'completeness',
-    header: 'Integridade',
-    cell: ({ row }) => h(UBadge, {
-      color: row.original.completeness === 'complete' ? 'success' : 'warning',
-      variant: 'subtle'
-    }, () => row.original.completeness === 'complete' ? 'Completo' : row.original.completeness === 'blocked' ? 'Bloqueado' : 'Incompleto')
-  },
-  {
-    accessorKey: 'verified_at',
-    header: sortableHeader('Verificado em'),
-    cell: ({ row }) => h('p', { class: 'text-sm text-muted' }, formatDateTime(row.original.verified_at))
-  },
-  {
-    id: 'actions',
-    cell: ({ row }) => h('div', { class: 'text-right' }, [
-      h(UDropdownMenu, {
-        content: { align: 'end' },
-        items: [
-          { type: 'label' as const, label: 'Ações' },
-          {
-            label: 'Copiar fingerprint',
-            icon: 'i-lucide-copy',
-            onSelect: () => {
-              navigator.clipboard.writeText(row.original.fingerprint)
-              toast.add({ title: 'Fingerprint copiado', color: 'success' })
-            }
-          }
-        ]
-      }, () => h(UButton, { icon: 'i-lucide-ellipsis-vertical', color: 'neutral', variant: 'ghost', class: 'ml-auto', ariaLabel: 'Ações do snapshot' }))
-    ])
-  }
-]
-
-const changeColumns: TableColumn<ChangeItem>[] = [
-  selectColumn<ChangeItem>() as TableColumn<ChangeItem>,
-  {
-    accessorKey: 'operation_code',
-    header: sortableHeader('Operação'),
-    cell: ({ row }) => h('p', { class: 'font-medium text-highlighted' }, row.original.operation_code)
-  },
-  {
-    accessorKey: 'normalized',
-    header: 'Normalizado',
-    filterFn: (row, _columnId, value) => {
-      if (value === undefined || value === 'all') return true
-      return String(row.original.normalized) === String(value)
-    },
-    cell: ({ row }) => h(UBadge, {
-      color: row.original.normalized ? 'success' : 'neutral',
-      variant: 'subtle'
-    }, () => row.original.normalized ? 'Sim' : 'Não')
-  },
-  {
-    accessorKey: 'created_at',
-    header: sortableHeader('Detectada em'),
-    cell: ({ row }) => h('p', { class: 'text-sm text-muted' }, formatDateTime(row.original.created_at))
-  },
-  {
-    id: 'actions',
-    cell: ({ row }) => h('div', { class: 'text-right' }, [
-      h(UDropdownMenu, {
-        content: { align: 'end' },
-        items: [
-          { type: 'label' as const, label: 'Ações' },
-          {
-            label: 'Copiar ID da mudança',
-            icon: 'i-lucide-copy',
-            onSelect: () => {
-              navigator.clipboard.writeText(String(row.original.id))
-              toast.add({ title: 'ID copiado', color: 'success' })
-            }
-          }
-        ]
-      }, () => h(UButton, { icon: 'i-lucide-ellipsis-vertical', color: 'neutral', variant: 'ghost', class: 'ml-auto', ariaLabel: 'Ações da mudança' }))
-    ])
-  }
-]
-
-const alertColumns: TableColumn<AlertItem>[] = [
-  selectColumn<AlertItem>() as TableColumn<AlertItem>,
-  {
-    accessorKey: 'status',
-    header: 'Estado',
-    filterFn: 'equals',
-    cell: ({ row }) => h(UBadge, {
-      color: row.original.status === 'pending' ? 'warning' : 'neutral',
-      variant: 'subtle'
-    }, () => row.original.status === 'pending' ? 'Pendente' : 'Reconhecido')
-  },
-  {
-    accessorKey: 'created_at',
-    header: sortableHeader('Criado em'),
-    cell: ({ row }) => h('p', { class: 'text-sm text-muted' }, formatDateTime(row.original.created_at))
-  },
-  {
-    accessorKey: 'acknowledged_at',
-    header: 'Reconhecido em',
-    cell: ({ row }) => h('p', { class: 'text-sm text-muted' }, formatDateTime(row.original.acknowledged_at))
-  },
-  {
-    id: 'actions',
-    cell: ({ row }) => row.original.status === 'pending' && canWrite.value
-      ? h('div', { class: 'text-right' }, [
-          h(UDropdownMenu, {
-            content: { align: 'end' },
-            items: [
-              { type: 'label' as const, label: 'Ações' },
-              { label: 'Reconhecer alerta', icon: 'i-lucide-check', onSelect: () => void acknowledge(row.original.id) }
-            ]
-          }, () => h(UButton, { icon: 'i-lucide-ellipsis-vertical', color: 'neutral', variant: 'ghost', class: 'ml-auto', ariaLabel: 'Ações do alerta' }))
-        ])
-      : null
-  }
-]
+const alertColumns = buildAlertColumns({
+  canWrite,
+  onAcknowledge: alertId => void acknowledge(alertId)
+})
 
 watch(() => snapshotFreshness.value, (newVal) => {
   const column = snapshotsTable.value?.tableApi?.getColumn('freshness')
@@ -387,15 +215,6 @@ function exportAlerts(): void {
   }
   exportToCsv('alertas', list.map(a => ({ id: a.id, estado: a.status === 'pending' ? 'Pendente' : 'Reconhecido', criado_em: a.created_at ?? '', reconhecido_em: a.acknowledged_at ?? '' })))
   toast.add({ title: 'CSV exportado', description: `${list.length} alerta(s) exportado(s).`, color: 'success' })
-}
-
-const tableUi = {
-  base: 'table-fixed border-separate border-spacing-0',
-  thead: '[&>tr]:bg-elevated/50 [&>tr]:after:content-none',
-  tbody: '[&>tr]:last:[&>td]:border-b-0',
-  th: 'py-2 first:rounded-l-lg last:rounded-r-lg border-y border-default first:border-l last:border-r',
-  td: 'border-b border-default',
-  separator: 'h-0'
 }
 </script>
 
@@ -503,62 +322,23 @@ const tableUi = {
             </p>
           </template>
           <div class="flex flex-col gap-4">
-            <UAlert
-              v-if="snapshotsError"
-              color="error"
+            <TablesTableStates
+              :error="snapshotsError"
               variant="subtle"
-              title="Snapshots indisponíveis"
-              :description="monitoringErrorMessage(backendErrorBody(snapshotsError))"
-              :actions="snapshotsRetryActions"
+              error-title="Snapshots indisponíveis"
+              :error-description="monitoringErrorMessage(backendErrorBody(snapshotsError))"
+              @retry="refreshSnapshots"
             />
-            <div class="flex flex-wrap items-center justify-between gap-1.5">
-              <UInput
-                v-model="snapshotSearch"
-                class="max-w-sm"
-                icon="i-lucide-search"
-                placeholder="Filtrar por operação..."
-              />
-              <div class="flex flex-wrap items-center gap-1.5">
-                <UButton
-                  label="Exportar CSV"
-                  color="neutral"
-                  variant="outline"
-                  icon="i-lucide-download"
-                  @click="exportSnapshots"
-                />
-                <USelect
-                  v-model="snapshotFreshness"
-                  :items="[
-                    { label: 'Todas', value: 'all' },
-                    { label: 'Atual', value: 'fresh' },
-                    { label: 'Desatualizado', value: 'stale' }
-                  ]"
-                  placeholder="Filtrar atualidade"
-                  class="min-w-28"
-                />
-                <UDropdownMenu
-                  :items="visibilityMenu(snapshotsTable?.tableApi as SimpleTableApi<never> | null | undefined).map(column => ({
-                    label: upperFirst(column.id),
-                    type: 'checkbox' as const,
-                    checked: snapshotsTable?.tableApi?.getAllColumns().find(c => c.id === column.id)?.getIsVisible() ?? true,
-                    onUpdateChecked(checked: boolean) {
-                      snapshotsTable?.tableApi?.getColumn(column.id)?.toggleVisibility(!!checked)
-                    },
-                    onSelect(e?: Event) {
-                      e?.preventDefault()
-                    }
-                  }))"
-                  :content="{ align: 'end' }"
-                >
-                  <UButton
-                    label="Exibir"
-                    color="neutral"
-                    variant="outline"
-                    trailing-icon="i-lucide-settings-2"
-                  />
-                </UDropdownMenu>
-              </div>
-            </div>
+            <TablesTableToolbar
+              v-model:search="snapshotSearch"
+              v-model:filter-value="snapshotFreshness"
+              search-placeholder="Filtrar por operação…"
+              :filter-items="snapshotFreshnessItems"
+              filter-placeholder="Filtrar atualidade"
+              :table-api="snapshotsTable?.tableApi"
+              :column-labels="SNAPSHOT_COLUMN_LABELS"
+              @export="exportSnapshots"
+            />
             <UTable
               ref="snapshotsTable"
               v-model:column-filters="snapshotFilters"
@@ -574,27 +354,19 @@ const tableUi = {
               :ui="tableUi"
             >
               <template #empty>
-                <div class="flex flex-col items-center justify-center gap-2 py-8 text-center">
-                  <p class="font-medium text-highlighted">
-                    Nenhum snapshot encontrado
-                  </p>
-                  <p class="text-sm text-muted">
-                    Ajuste a busca ou o filtro de atualidade.
-                  </p>
-                </div>
+                <TablesTableStates
+                  empty-title="Nenhum snapshot encontrado"
+                  empty-hint="Ajuste a busca ou o filtro de atualidade."
+                />
               </template>
             </UTable>
-            <div class="flex items-center justify-between gap-3 border-t border-default pt-4 mt-auto">
-              <div class="text-sm text-muted">
-                {{ snapshotSelected.length }} de {{ snapshotFiltered }} snapshot(s) selecionado(s).
-              </div>
-              <UPagination
-                :page="(snapshotsTable?.tableApi?.getState().pagination.pageIndex || 0) + 1"
-                :items-per-page="snapshotsTable?.tableApi?.getState().pagination.pageSize"
-                :total="snapshotFiltered"
-                @update:page="(p: number) => snapshotsTable?.tableApi?.setPageIndex(p - 1)"
-              />
-            </div>
+            <TablesTableFooter
+              :selected="snapshotSelected.length"
+              :total="snapshotFiltered"
+              unit="snapshot(s)"
+              :table-api="snapshotsTable?.tableApi"
+              @update:page="(p: number) => snapshotsTable?.tableApi?.setPageIndex(p - 1)"
+            />
           </div>
         </UCard>
 
@@ -605,62 +377,23 @@ const tableUi = {
             </p>
           </template>
           <div class="flex flex-col gap-4">
-            <UAlert
-              v-if="changesError"
-              color="error"
+            <TablesTableStates
+              :error="changesError"
               variant="subtle"
-              title="Mudanças indisponíveis"
-              :description="monitoringErrorMessage(backendErrorBody(changesError))"
-              :actions="changesRetryActions"
+              error-title="Mudanças indisponíveis"
+              :error-description="monitoringErrorMessage(backendErrorBody(changesError))"
+              @retry="refreshChanges"
             />
-            <div class="flex flex-wrap items-center justify-between gap-1.5">
-              <UInput
-                v-model="changeSearch"
-                class="max-w-sm"
-                icon="i-lucide-search"
-                placeholder="Filtrar por operação..."
-              />
-              <div class="flex flex-wrap items-center gap-1.5">
-                <UButton
-                  label="Exportar CSV"
-                  color="neutral"
-                  variant="outline"
-                  icon="i-lucide-download"
-                  @click="exportChanges"
-                />
-                <USelect
-                  v-model="changeNormalized"
-                  :items="[
-                    { label: 'Todos', value: 'all' },
-                    { label: 'Normalizados', value: 'true' },
-                    { label: 'Não normalizados', value: 'false' }
-                  ]"
-                  placeholder="Filtrar normalização"
-                  class="min-w-28"
-                />
-                <UDropdownMenu
-                  :items="visibilityMenu(changesTable?.tableApi as SimpleTableApi<never> | null | undefined).map(column => ({
-                    label: upperFirst(column.id),
-                    type: 'checkbox' as const,
-                    checked: changesTable?.tableApi?.getAllColumns().find(c => c.id === column.id)?.getIsVisible() ?? true,
-                    onUpdateChecked(checked: boolean) {
-                      changesTable?.tableApi?.getColumn(column.id)?.toggleVisibility(!!checked)
-                    },
-                    onSelect(e?: Event) {
-                      e?.preventDefault()
-                    }
-                  }))"
-                  :content="{ align: 'end' }"
-                >
-                  <UButton
-                    label="Exibir"
-                    color="neutral"
-                    variant="outline"
-                    trailing-icon="i-lucide-settings-2"
-                  />
-                </UDropdownMenu>
-              </div>
-            </div>
+            <TablesTableToolbar
+              v-model:search="changeSearch"
+              v-model:filter-value="changeNormalized"
+              search-placeholder="Filtrar por operação…"
+              :filter-items="changeNormalizedItems"
+              filter-placeholder="Filtrar normalização"
+              :table-api="changesTable?.tableApi"
+              :column-labels="CHANGE_COLUMN_LABELS"
+              @export="exportChanges"
+            />
             <UTable
               ref="changesTable"
               v-model:column-filters="changeFilters"
@@ -676,27 +409,20 @@ const tableUi = {
               :ui="tableUi"
             >
               <template #empty>
-                <div class="flex flex-col items-center justify-center gap-2 py-8 text-center">
-                  <p class="font-medium text-highlighted">
-                    Nenhuma mudança encontrada
-                  </p>
-                  <p class="text-sm text-muted">
-                    Ajuste a busca ou o filtro de normalização.
-                  </p>
-                </div>
+                <TablesTableStates
+                  empty-title="Nenhuma mudança encontrada"
+                  empty-hint="Ajuste a busca ou o filtro de normalização."
+                />
               </template>
             </UTable>
-            <div class="flex items-center justify-between gap-3 border-t border-default pt-4 mt-auto">
-              <div class="text-sm text-muted">
-                {{ changeSelected.length }} de {{ changeFiltered }} mudança(s) selecionada(s).
-              </div>
-              <UPagination
-                :page="(changesTable?.tableApi?.getState().pagination.pageIndex || 0) + 1"
-                :items-per-page="changesTable?.tableApi?.getState().pagination.pageSize"
-                :total="changeFiltered"
-                @update:page="(p: number) => changesTable?.tableApi?.setPageIndex(p - 1)"
-              />
-            </div>
+            <TablesTableFooter
+              :selected="changeSelected.length"
+              :total="changeFiltered"
+              unit="mudança(s)"
+              feminine
+              :table-api="changesTable?.tableApi"
+              @update:page="(p: number) => changesTable?.tableApi?.setPageIndex(p - 1)"
+            />
           </div>
         </UCard>
 
@@ -707,26 +433,27 @@ const tableUi = {
             </p>
           </template>
           <div class="flex flex-col gap-4">
-            <UAlert
-              v-if="alertsError"
-              color="error"
+            <TablesTableStates
+              :error="alertsError"
               variant="subtle"
-              title="Alertas indisponíveis"
-              :description="monitoringErrorMessage(backendErrorBody(alertsError))"
-              :actions="alertsRetryActions"
+              error-title="Alertas indisponíveis"
+              :error-description="monitoringErrorMessage(backendErrorBody(alertsError))"
+              @retry="refreshAlerts"
             />
-            <div class="flex flex-wrap items-center justify-between gap-1.5">
-              <USelect
-                v-model="alertStatus"
-                :items="[
-                  { label: 'Todos os estados', value: 'all' },
-                  { label: 'Pendentes', value: 'pending' },
-                  { label: 'Reconhecidos', value: 'acknowledged' }
-                ]"
-                placeholder="Filtrar estado"
-                class="min-w-28"
-              />
-              <div class="flex flex-wrap items-center gap-1.5">
+            <TablesTableToolbar
+              :table-api="alertsTable?.tableApi"
+              :column-labels="ALERT_COLUMN_LABELS"
+              @export="exportAlerts"
+            >
+              <template #leading>
+                <USelect
+                  v-model="alertStatus"
+                  :items="alertStatusItems"
+                  placeholder="Filtrar estado"
+                  class="min-w-28"
+                />
+              </template>
+              <template #bulk>
                 <UButton
                   v-if="canWrite && alertSelected.length"
                   :label="`Reconhecer (${alertSelected.length})`"
@@ -734,36 +461,8 @@ const tableUi = {
                   :loading="bulkAcknowledging"
                   @click="acknowledgeSelected"
                 />
-                <UButton
-                  label="Exportar CSV"
-                  color="neutral"
-                  variant="outline"
-                  icon="i-lucide-download"
-                  @click="exportAlerts"
-                />
-                <UDropdownMenu
-                  :items="visibilityMenu(alertsTable?.tableApi as SimpleTableApi<never> | null | undefined).map(column => ({
-                    label: upperFirst(column.id),
-                    type: 'checkbox' as const,
-                    checked: alertsTable?.tableApi?.getAllColumns().find(c => c.id === column.id)?.getIsVisible() ?? true,
-                    onUpdateChecked(checked: boolean) {
-                      alertsTable?.tableApi?.getColumn(column.id)?.toggleVisibility(!!checked)
-                    },
-                    onSelect(e?: Event) {
-                      e?.preventDefault()
-                    }
-                  }))"
-                  :content="{ align: 'end' }"
-                >
-                  <UButton
-                    label="Exibir"
-                    color="neutral"
-                    variant="outline"
-                    trailing-icon="i-lucide-settings-2"
-                  />
-                </UDropdownMenu>
-              </div>
-            </div>
+              </template>
+            </TablesTableToolbar>
             <UTable
               ref="alertsTable"
               v-model:column-filters="alertFilters"
@@ -779,27 +478,19 @@ const tableUi = {
               :ui="tableUi"
             >
               <template #empty>
-                <div class="flex flex-col items-center justify-center gap-2 py-8 text-center">
-                  <p class="font-medium text-highlighted">
-                    Nenhum alerta encontrado
-                  </p>
-                  <p class="text-sm text-muted">
-                    Ajuste o filtro de estado.
-                  </p>
-                </div>
+                <TablesTableStates
+                  empty-title="Nenhum alerta encontrado"
+                  empty-hint="Ajuste o filtro de estado."
+                />
               </template>
             </UTable>
-            <div class="flex items-center justify-between gap-3 border-t border-default pt-4 mt-auto">
-              <div class="text-sm text-muted">
-                {{ alertSelected.length }} de {{ alertFiltered }} alerta(s) selecionado(s).
-              </div>
-              <UPagination
-                :page="(alertsTable?.tableApi?.getState().pagination.pageIndex || 0) + 1"
-                :items-per-page="alertsTable?.tableApi?.getState().pagination.pageSize"
-                :total="alertFiltered"
-                @update:page="(p: number) => alertsTable?.tableApi?.setPageIndex(p - 1)"
-              />
-            </div>
+            <TablesTableFooter
+              :selected="alertSelected.length"
+              :total="alertFiltered"
+              unit="alerta(s)"
+              :table-api="alertsTable?.tableApi"
+              @update:page="(p: number) => alertsTable?.tableApi?.setPageIndex(p - 1)"
+            />
           </div>
         </UCard>
       </div>
