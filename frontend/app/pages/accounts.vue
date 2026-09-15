@@ -1,18 +1,12 @@
 <script setup lang="ts">
 import * as z from 'zod'
-import type { FormSubmitEvent, TableColumn } from '@nuxt/ui'
-import { upperFirst } from 'scule'
+import type { FormSubmitEvent } from '@nuxt/ui'
 import { getPaginationRowModel } from '@tanstack/table-core'
 import type { Row } from '@tanstack/table-core'
+import { TABLE_UI as tableUi, type TableApi } from '~/utils/table-chrome'
+import { buildAccountColumns, ACCOUNT_COLUMN_LABELS, profileItems, profileLabel, type AccountRow } from '~/components/tables/accounts/columns'
 
 definePageMeta({ middleware: 'super-admin' })
-
-interface AccountRow {
-  id: number
-  name: string
-  profile: string
-  plan?: { id: number, name: string } | null
-}
 
 interface AccountsResponse {
   data: AccountRow[]
@@ -22,23 +16,9 @@ interface AccountsResponse {
   total: number
 }
 
-const UBadge = resolveComponent('UBadge')
-const UButton = resolveComponent('UButton')
-const UCheckbox = resolveComponent('UCheckbox')
-const UDropdownMenu = resolveComponent('UDropdownMenu')
-
 const toast = useToast()
 
-interface AccountTableApi {
-  getFilteredSelectedRowModel: () => { rows: Row<AccountRow>[] }
-  getFilteredRowModel: () => { rows: Row<AccountRow>[] }
-  getColumn: (id: string) => { setFilterValue: (value: string | undefined) => void, getFilterValue: () => unknown, toggleVisibility: (value?: boolean) => void } | undefined
-  getAllColumns: () => { id: string, getCanHide: () => boolean, getIsVisible: () => boolean }[]
-  getState: () => { pagination: { pageIndex: number, pageSize: number } }
-  setPageIndex: (index: number) => void
-}
-
-const table = useTemplateRef<{ tableApi?: AccountTableApi | null }>('table')
+const table = useTemplateRef<{ tableApi?: TableApi<AccountRow> | null }>('table')
 const columnFilters = ref([{ id: 'name', value: '' }])
 const columnVisibility = ref()
 const rowSelection = ref<Record<string, boolean>>({})
@@ -53,66 +33,7 @@ const { data, error, status, refresh } = await useFetch<AccountsResponse>('/api/
 
 const accounts = computed(() => data.value?.data ?? [])
 
-function profileLabel(value: string): string {
-  if (value === 'A') return 'Central OneFisc'
-  if (value === 'B') return 'Escritório'
-  return value
-}
-
-const profileItems = [
-  { label: 'Todos os tipos', value: 'all' },
-  { label: 'Central OneFisc', value: 'A' },
-  { label: 'Escritório', value: 'B' }
-]
-
-function sortableHeader(label: string) {
-  return ({ column }: { column: { getIsSorted: () => false | 'asc' | 'desc', toggleSorting: (desc?: boolean) => void } }) => {
-    const isSorted = column.getIsSorted()
-    return h(UButton, {
-      color: 'neutral',
-      variant: 'ghost',
-      label,
-      icon: isSorted ? (isSorted === 'asc' ? 'i-lucide-arrow-up-narrow-wide' : 'i-lucide-arrow-down-wide-narrow') : 'i-lucide-arrow-up-down',
-      class: '-mx-2.5',
-      onClick: () => column.toggleSorting(column.getIsSorted() === 'asc')
-    })
-  }
-}
-
-const columns: TableColumn<AccountRow>[] = [
-  {
-    id: 'select',
-    header: ({ table: api }) => h(UCheckbox, {
-      'modelValue': api.getIsSomePageRowsSelected() ? 'indeterminate' : api.getIsAllPageRowsSelected(),
-      'onUpdate:modelValue': (value: boolean | 'indeterminate') => api.toggleAllPageRowsSelected(!!value),
-      'ariaLabel': 'Selecionar todos'
-    }),
-    cell: ({ row }) => h(UCheckbox, {
-      'modelValue': row.getIsSelected(),
-      'onUpdate:modelValue': (value: boolean | 'indeterminate') => row.toggleSelected(!!value),
-      'ariaLabel': 'Selecionar linha'
-    })
-  },
-  {
-    accessorKey: 'name',
-    header: sortableHeader('Nome')
-  },
-  {
-    accessorKey: 'profile',
-    header: 'Tipo',
-    filterFn: 'equals',
-    cell: ({ row }) => {
-      const central = row.original.profile === 'A'
-      return h(UBadge, { variant: 'subtle', color: central ? 'primary' : 'neutral' }, () => profileLabel(row.original.profile))
-    }
-  },
-  {
-    id: 'plan',
-    header: sortableHeader('Plano'),
-    sortingFn: (rowA, rowB) => (rowA.original.plan?.name ?? '').localeCompare(rowB.original.plan?.name ?? '', 'pt-BR'),
-    cell: ({ row }) => row.original.plan?.name ?? '—'
-  }
-]
+const columns = buildAccountColumns()
 
 watch(() => profileFilter.value, (newVal) => {
   if (!table?.value?.tableApi) return
@@ -148,13 +69,6 @@ function exportCsv() {
   })))
   toast.add({ title: 'CSV exportado', description: `${rows.length} conta(s) exportada(s).`, color: 'success' })
 }
-
-const retryActions = [{
-  label: 'Tentar novamente',
-  color: 'error' as const,
-  variant: 'outline' as const,
-  onClick: () => refresh()
-}]
 
 const schema = z.object({
   name: z.string().min(2, 'Informe o nome da conta'),
@@ -258,61 +172,24 @@ async function onSubmit(event: FormSubmitEvent<Schema>) {
     </template>
 
     <template #body>
-      <UAlert
-        v-if="error"
-        color="error"
-        title="Não foi possível carregar as contas"
-        :description="backendMessage(error)"
-        :actions="retryActions"
+      <TablesTableStates
+        :error="error"
+        error-title="Não foi possível carregar as contas"
+        :error-description="backendMessage(error)"
+        @retry="refresh"
       />
 
-      <div v-else class="flex flex-col gap-4">
-        <div class="flex flex-wrap items-center justify-between gap-1.5">
-          <UInput
-            v-model="search"
-            class="max-w-sm"
-            icon="i-lucide-search"
-            placeholder="Buscar por nome..."
-          />
-
-          <div class="flex flex-wrap items-center gap-1.5">
-            <UButton
-              label="Exportar CSV"
-              color="neutral"
-              variant="outline"
-              icon="i-lucide-download"
-              @click="exportCsv"
-            />
-            <USelect
-              v-model="profileFilter"
-              :items="profileItems"
-              value-key="value"
-              placeholder="Filtrar tipo"
-              class="min-w-28"
-            />
-            <UDropdownMenu
-              :items="table?.tableApi?.getAllColumns().filter((column: any) => column.getCanHide()).map((column: any) => ({
-                label: upperFirst(column.id),
-                type: 'checkbox' as const,
-                checked: column.getIsVisible(),
-                onUpdateChecked(checked: boolean) {
-                  table?.tableApi?.getColumn(column.id)?.toggleVisibility(!!checked)
-                },
-                onSelect(e?: Event) {
-                  e?.preventDefault()
-                }
-              }))"
-              :content="{ align: 'end' }"
-            >
-              <UButton
-                label="Exibir"
-                color="neutral"
-                variant="outline"
-                trailing-icon="i-lucide-settings-2"
-              />
-            </UDropdownMenu>
-          </div>
-        </div>
+      <div class="flex flex-col gap-4">
+        <TablesTableToolbar
+          v-model:search="search"
+          v-model:filter-value="profileFilter"
+          search-placeholder="Buscar por nome…"
+          :filter-items="profileItems"
+          filter-placeholder="Filtrar tipo"
+          :table-api="table?.tableApi"
+          :column-labels="ACCOUNT_COLUMN_LABELS"
+          @export="exportCsv"
+        />
 
         <UTable
           ref="table"
@@ -326,39 +203,24 @@ async function onSubmit(event: FormSubmitEvent<Schema>) {
           :data="accounts"
           :columns="columns"
           :loading="status === 'pending'"
-          :ui="{
-            base: 'table-fixed border-separate border-spacing-0',
-            thead: '[&>tr]:bg-elevated/50 [&>tr]:after:content-none',
-            tbody: '[&>tr]:last:[&>td]:border-b-0',
-            th: 'py-2 first:rounded-l-lg last:rounded-r-lg border-y border-default first:border-l last:border-r',
-            td: 'border-b border-default',
-            separator: 'h-0'
-          }"
+          :ui="tableUi"
         >
           <template #empty>
-            <div class="flex flex-col items-center justify-center gap-2 py-8 text-center">
-              <p class="font-medium text-highlighted">
-                Nenhuma conta encontrada
-              </p>
-              <p class="text-sm text-muted">
-                Ajuste a busca ou o filtro de tipo.
-              </p>
-            </div>
+            <TablesTableStates
+              empty-title="Nenhuma conta encontrada"
+              empty-hint="Ajuste a busca ou o filtro de tipo."
+            />
           </template>
         </UTable>
 
-        <div class="flex items-center justify-between gap-3 border-t border-default pt-4 mt-auto">
-          <div class="text-sm text-muted">
-            {{ selectedRows.length }} de {{ filteredCount }} conta(s) selecionada(s).
-          </div>
-
-          <UPagination
-            :page="(table?.tableApi?.getState().pagination.pageIndex || 0) + 1"
-            :items-per-page="table?.tableApi?.getState().pagination.pageSize"
-            :total="filteredCount"
-            @update:page="(p: number) => table?.tableApi?.setPageIndex(p - 1)"
-          />
-        </div>
+        <TablesTableFooter
+          :selected="selectedRows.length"
+          :total="filteredCount"
+          unit="conta(s)"
+          feminine
+          :table-api="table?.tableApi"
+          @update:page="(p: number) => table?.tableApi?.setPageIndex(p - 1)"
+        />
       </div>
     </template>
   </UDashboardPanel>
