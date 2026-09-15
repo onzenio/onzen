@@ -17,6 +17,7 @@ use App\Models\SerproContract;
 use App\Models\SerproRequestAuthor;
 use App\Models\SerproSettings;
 use App\Services\Monitoring\SerproExecutor;
+use App\Support\CurrentAccount;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\File;
@@ -838,6 +839,7 @@ final class SerproExecutionTest extends TestCase
      */
     private function enrollment(Account $account, string $operation, array $attributes = []): MonitoringEnrollment
     {
+        CurrentAccount::set($account->id);
         $client = Client::factory()->for($account, 'account')->create(['monitoring_enabled' => true]);
         $definition = MonitoringDefinition::factory()->create([
             'operations' => [$operation],

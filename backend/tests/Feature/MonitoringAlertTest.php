@@ -105,6 +105,9 @@ final class MonitoringAlertTest extends TestCase
         [$alert] = $this->context();
         $foreign = $this->createUser($this->createAccount(), ['role' => UserRole::Admin]);
 
+        // Como numa request do operador estrangeiro: a Account efetiva é a dele.
+        CurrentAccount::set($foreign->account_id);
+
         $this->expectException(AuthorizationException::class);
 
         app(MonitoringAlertService::class)->acknowledge($alert, $foreign);
@@ -153,6 +156,9 @@ final class MonitoringAlertTest extends TestCase
     private function context(): array
     {
         $account = $this->createAccount();
+        // Leituras diretas de relations honram o escopo fail-closed: fixa o
+        // contexto como faria o ResolveAccount numa request.
+        CurrentAccount::set($account->id);
         $client = Client::factory()->for($account, 'account')->create();
         $definition = MonitoringDefinition::factory()->create();
         $enrollment = MonitoringEnrollment::factory()->create([

@@ -414,7 +414,7 @@ final class SerproActionExecutor
             return self::ERROR_INSTALLMENT_REQUIRED;
         }
 
-        $modality = (string) ($installment->order?->modality ?? '');
+        $modality = (string) ($this->orderOf($installment)?->modality ?? '');
         $expected = ConsultCatalog::gerardasForModality($modality);
 
         if ($expected === null) {
@@ -438,7 +438,25 @@ final class SerproActionExecutor
             return $operationCode;
         }
 
-        return ConsultCatalog::gerardasForModality((string) ($installment->order?->modality ?? '')) ?? $operationCode;
+        return ConsultCatalog::gerardasForModality((string) ($this->orderOf($installment)?->modality ?? '')) ?? $operationCode;
+    }
+
+    /**
+     * A order da parcela sem depender da Account efetiva: o executor roda no
+     * worker (sem CurrentAccount) e a relation aplicaria o fail-closed. A
+     * tenancy segue pelo account_id da própria parcela.
+     */
+    private function orderOf(?ParcelmentInstallment $installment): ?ParcelmentOrder
+    {
+        if ($installment === null || $installment->order_id === null) {
+            return null;
+        }
+
+        return ParcelmentOrder::query()
+            ->withoutGlobalScope('account')
+            ->where('account_id', $installment->account_id)
+            ->whereKey($installment->order_id)
+            ->first();
     }
 
     /**

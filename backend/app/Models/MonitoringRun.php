@@ -101,8 +101,13 @@ class MonitoringRun extends Model
         }
 
         $fresh = DB::transaction(function () use ($status, $attributes): self {
+            // Releitura sem escopo global: transições rodam em jobs/console
+            // sem CurrentAccount (fail-closed retornaria 404 fantasma). A
+            // tenancy é preservada pelo account_id da própria linha.
             $fresh = static::query()
+                ->withoutGlobalScope('account')
                 ->whereKey($this->getKey())
+                ->where('account_id', $this->account_id)
                 ->lockForUpdate()
                 ->firstOrFail();
 

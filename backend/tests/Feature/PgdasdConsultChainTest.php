@@ -13,6 +13,7 @@ use App\Models\MonitoringRun;
 use App\Models\MonitoringSnapshot;
 use App\Services\Monitoring\PgdasdConsultChain;
 use App\Services\Monitoring\SerproExecutor;
+use App\Support\CurrentAccount;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Queue;
@@ -224,6 +225,7 @@ final class PgdasdConsultChainTest extends TestCase
     private function context(string $definitionId = 'pgdas-declaracoes', array $attributes = []): array
     {
         $account = $this->createAccount();
+        CurrentAccount::set($account->id);
         $client = Client::factory()->for($account, 'account')->create(['monitoring_enabled' => true]);
         $definition = MonitoringDefinition::factory()->create([
             'id' => $definitionId,

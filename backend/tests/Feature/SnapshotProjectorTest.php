@@ -13,6 +13,7 @@ use App\Models\MonitoringEnrollment;
 use App\Models\MonitoringRun;
 use App\Models\MonitoringSnapshot;
 use App\Services\Monitoring\SnapshotProjector;
+use App\Support\CurrentAccount;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Schema;
@@ -445,6 +446,7 @@ final class SnapshotProjectorTest extends TestCase
     private function context(): array
     {
         $account = $this->createAccount();
+        CurrentAccount::set($account->id);
         $client = Client::factory()->for($account, 'account')->create();
         $definition = MonitoringDefinition::factory()->create();
         $enrollment = MonitoringEnrollment::factory()->create([

@@ -39,6 +39,7 @@ final class MonitoringRunTest extends TestCase
     public function test_a_run_belongs_to_an_enrollment_and_has_many_attempts(): void
     {
         $enrollment = MonitoringEnrollment::factory()->create();
+        CurrentAccount::set($enrollment->account_id);
         $run = MonitoringRun::factory()->create([
             'account_id' => $enrollment->account_id,
             'enrollment_id' => $enrollment->id,

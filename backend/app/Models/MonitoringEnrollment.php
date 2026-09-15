@@ -177,8 +177,12 @@ class MonitoringEnrollment extends Model
     private function transition(Closure $resolve): bool
     {
         $changed = DB::transaction(function () use ($resolve): bool {
+            // Idem MonitoringRun::transitionTo: sem escopo global (jobs sem
+            // CurrentAccount) + account_id da própria linha como tenancy.
             $fresh = static::query()
+                ->withoutGlobalScope('account')
                 ->whereKey($this->getKey())
+                ->where('account_id', $this->account_id)
                 ->lockForUpdate()
                 ->firstOrFail();
 

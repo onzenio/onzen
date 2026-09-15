@@ -25,6 +25,7 @@ use App\Models\SerproRequestAuthor;
 use App\Models\SerproServiceRequest;
 use App\Models\SerproSettings;
 use App\Services\Monitoring\SerproActionExecutor;
+use App\Support\CurrentAccount;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Event;
@@ -1016,6 +1017,7 @@ final class SerproActionTest extends TestCase
     private function context(): array
     {
         $account = $this->createAccount();
+        CurrentAccount::set($account->id);
         $client = Client::factory()->for($account, 'account')->create(['monitoring_enabled' => true]);
         $enrollment = $this->pgdasEnrollment($account, $client);
 

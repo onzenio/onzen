@@ -10,6 +10,7 @@ use App\Models\MonitoringDefinition;
 use App\Models\MonitoringEnrollment;
 use App\Models\User;
 use App\Services\Monitoring\MonitoringEnrollmentService;
+use App\Support\CurrentAccount;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
@@ -728,6 +729,8 @@ final class MonitoringEnrollmentTest extends TestCase
         ?MonitoringDefinition $definition,
         array $attributes = [],
     ): MonitoringEnrollment {
+        CurrentAccount::set($account->id);
+
         return MonitoringEnrollment::factory()->create([
             'account_id' => $account->id,
             'client_id' => $client?->id ?? Client::factory()->for($account, 'account')->create()->id,

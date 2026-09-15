@@ -49,6 +49,25 @@ class SwitchTest extends TestCase
         ]);
     }
 
+    /**
+     * @param  array{cookies: array<string, string>, xsrf: string}  $jar
+     * @return array{cookies: array<string, string>, xsrf: string}
+     */
+    private function refreshJar($response, array $jar): array
+    {
+        // Como um browser: o switch regenera o ID de sessão (anti-fixação),
+        // então o jar acompanha os Set-Cookie de cada resposta.
+        foreach ($response->headers->getCookies() as $cookie) {
+            $jar['cookies'][$cookie->getName()] = $cookie->getValue();
+
+            if ($cookie->getName() === 'XSRF-TOKEN') {
+                $jar['xsrf'] = urldecode($cookie->getValue());
+            }
+        }
+
+        return $jar;
+    }
+
     public function test_super_admin_enters_switch_with_real_cookie_session(): void
     {
         $home = $this->createAccount();
@@ -98,13 +117,93 @@ class SwitchTest extends TestCase
         $target = $this->createAccount();
         $jar = $this->loginAndCaptureCookies($admin->email);
 
-        $this->withSessionJar($jar)->postJson('/api/switch', ['account_id' => $target->id])->assertOk();
+        // Cada resposta pode emitir um ID de sessão novo (anti-fixação); o
+        // jar acompanha como um browser.
+        $enter = $this->withSessionJar($jar)->postJson('/api/switch', ['account_id' => $target->id]);
+        $enter->assertOk();
+        $jar = $this->refreshJar($enter, $jar);
+
         $this->withSessionJar($jar)->getJson('/api/me')->assertJsonPath('account.id', $target->id);
 
-        $this->withSessionJar($jar)->deleteJson('/api/switch')
+        $exit = $this->withSessionJar($jar)->deleteJson('/api/switch');
+        $exit->assertOk()
+            ->assertJsonPath('account.id', $home->id)
+            ->assertJsonPath('acting_as', null);
+        $jar = $this->refreshJar($exit, $jar);
+
+        $this->withSessionJar($jar)->getJson('/api/me')
             ->assertOk()
             ->assertJsonPath('account.id', $home->id)
             ->assertJsonPath('acting_as', null);
+    }
+
+    /**
+     * O cookie de sessão pode carregar `id|fingerprint`; o id é a parte que
+     * casa com a coluna `sessions.id`.
+     */
+    private static function sessionIdFromCookie(string $cookie): string
+    {
+        $raw = decrypt($cookie, false);
+
+        return str_contains($raw, '|') ? (string) explode('|', $raw)[1] : $raw;
+    }
+
+    public function test_stale_session_id_is_rejected_after_switch(): void
+    {
+        // Anti-fixação: entrar no switch emite um ID novo e DESTRÓI o antigo
+        // no storage (regenerate(true) — regenerate() sem args manteria o ID
+        // anterior válido com o switch ativo). Prova no storage porque o
+        // driver array dos testes compartilha o store na memória e não isola
+        // por cookie entre requests.
+        config(['session.driver' => 'database']);
+        app('session')->forgetDrivers();
+
+        $home = $this->createAccount();
+        $admin = $this->createUser($home, ['role' => UserRole::SuperAdmin]);
+        $target = $this->createAccount();
+        $jar = $this->loginAndCaptureCookies($admin->email);
+
+        $oldId = self::sessionIdFromCookie($jar['cookies'][config('session.cookie')]);
+        $this->assertDatabaseHas('sessions', ['id' => $oldId]);
+
+        $response = $this->withSessionJar($jar)->postJson('/api/switch', ['account_id' => $target->id]);
+        $response->assertOk();
+
+        $newId = null;
+
+        foreach ($response->headers->getCookies() as $cookie) {
+            if ($cookie->getName() === config('session.cookie')) {
+                $newId = self::sessionIdFromCookie($cookie->getValue());
+            }
+        }
+
+        $this->assertNotNull($newId);
+        $this->assertNotSame($oldId, $newId);
+        $this->assertDatabaseMissing('sessions', ['id' => $oldId]);
+        $this->assertDatabaseHas('sessions', ['id' => $newId]);
+    }
+
+    public function test_switch_regenerates_the_session_id(): void
+    {
+        $home = $this->createAccount();
+        $admin = $this->createUser($home, ['role' => UserRole::SuperAdmin]);
+        $target = $this->createAccount();
+        $jar = $this->loginAndCaptureCookies($admin->email);
+        $before = $jar['cookies'][config('session.cookie')];
+
+        $response = $this->withSessionJar($jar)->postJson('/api/switch', ['account_id' => $target->id]);
+        $response->assertOk();
+        $jar = $this->refreshJar($response, $jar);
+
+        // Anti-fixação: entrar no switch emite um ID de sessão novo.
+        $this->assertNotSame($before, $jar['cookies'][config('session.cookie')]);
+
+        // O jar atualizado segue válido e enxerga a Account alvo.
+        $this->withSessionJar($jar)->getJson('/api/me')->assertJsonPath('account.id', $target->id);
+
+        $exit = $this->withSessionJar($jar)->deleteJson('/api/switch');
+        $exit->assertOk()->assertJsonPath('account.id', $home->id);
+        $jar = $this->refreshJar($exit, $jar);
 
         $this->withSessionJar($jar)->getJson('/api/me')
             ->assertOk()

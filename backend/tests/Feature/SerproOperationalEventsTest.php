@@ -25,6 +25,7 @@ use App\Services\Monitoring\MonitoringScheduler;
 use App\Services\Monitoring\QueryQuotaService;
 use App\Services\Monitoring\SerproEventEmitter;
 use App\Services\Monitoring\SerproExecutor;
+use App\Support\CurrentAccount;
 use DateTimeInterface;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
@@ -447,6 +448,7 @@ final class SerproOperationalEventsTest extends TestCase
      */
     private function enrollment(Account $account, string $operation, array $attributes = []): MonitoringEnrollment
     {
+        CurrentAccount::set($account->id);
         $client = Client::factory()->for($account, 'account')->create(['monitoring_enabled' => true]);
         $definition = MonitoringDefinition::factory()->create([
             'operations' => [$operation],

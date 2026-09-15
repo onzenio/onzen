@@ -7,6 +7,7 @@ use App\Models\MonitoringDefinition;
 use App\Models\MonitoringEnrollment;
 use App\Models\MonitoringRun;
 use App\Services\Monitoring\MonitoringScheduler;
+use App\Support\CurrentAccount;
 use Illuminate\Console\Command;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Validation\ValidationException;
@@ -54,12 +55,16 @@ class RunMonthlyMonitoringCycle extends Command
         // Eligibility that can live in SQL is pushed down so the cap counts
         // only rows the cycle can actually consider: an active association of
         // an active Client under an automatic production definition.
+        // Console varre TODAS as Accounts por design: sem CurrentAccount o
+        // escopo fail-closed esconderia tudo. Tenancy segue por linha nos
+        // services (scheduler/enrollment já operam sem escopo global).
         $query = MonitoringEnrollment::query()
+            ->withoutGlobalScope('account')
             ->with(['client', 'definition'])
             ->where('status', MonitoringEnrollment::STATUS_ACTIVE)
             ->whereIn('definition_id', $definitionIds)
             ->whereHas('client', function (Builder $client): void {
-                $client->where('monitoring_enabled', true);
+                $client->withoutGlobalScope('account')->where('monitoring_enabled', true);
             });
 
         $matched = (int) $query->count();
@@ -72,6 +77,14 @@ class RunMonthlyMonitoringCycle extends Command
             $considered++;
 
             $accountId = (int) $enrollment->account_id;
+
+            // Contexto de tenant por linha: os services (ineligibility,
+            // quota, executor) leem via escopo/account efetiva; sem isto o
+            // fail-closed esconderia client/quota no console. As relations
+            // vindas no `with()` da query global nasceram com escopo vazio e
+            // precisam ser recarregadas neste contexto.
+            CurrentAccount::set($accountId);
+            $enrollment->unsetRelation('client')->unsetRelation('definition');
 
             if (! $confirm) {
                 $scheduler->ineligibility($enrollment, MonitoringRun::TRIGGER_AUTOMATIC) === null

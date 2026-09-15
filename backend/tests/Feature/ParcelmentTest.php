@@ -28,6 +28,7 @@ use App\Models\SerproRequestAuthor;
 use App\Models\SerproSettings;
 use App\Services\Monitoring\ParcelmentConsultProjector;
 use App\Services\Monitoring\SerproExecutor;
+use App\Support\CurrentAccount;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
@@ -764,6 +765,7 @@ final class ParcelmentTest extends TestCase
     private function context(): array
     {
         $account = $this->createAccount();
+        CurrentAccount::set($account->id);
         $client = Client::factory()->for($account, 'account')->create(['monitoring_enabled' => true]);
         $definition = MonitoringDefinition::factory()->create([
             'operations' => ['PEDIDOSPARC163'],
@@ -870,6 +872,7 @@ final class ParcelmentTest extends TestCase
      */
     private function enrollment(Account $account, Client $client, string $operation, array $attributes = []): MonitoringEnrollment
     {
+        CurrentAccount::set($account->id);
         $definition = MonitoringDefinition::factory()->create([
             'operations' => [$operation],
             'person_types' => ['PF', 'PJ'],
