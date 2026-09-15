@@ -26,7 +26,10 @@ final class Redactor
     /**
      * @var list<string>
      */
-    private const SENSITIVE_KEY_FRAGMENTS = ['password', 'secret', 'pfx', 'token'];
+    private const SENSITIVE_KEY_FRAGMENTS = [
+        'password', 'senha', 'secret', 'segredo', 'pfx', 'token',
+        'cnpj', 'cpf', 'document', 'contratante',
+    ];
 
     /**
      * @param  array<array-key, mixed>  $data
@@ -64,6 +67,19 @@ final class Redactor
         if (str_contains($text, '<?xml') || preg_match('/<\/[A-Za-z0-9_:.-]+>/', $text) === 1) {
             return self::REDACTED;
         }
+
+        // Documentos fiscais (CNPJ/CPF, com ou sem máscara): preserva só os
+        // últimos 4 dígitos para correlação operacional sem expor o titular.
+        $text = preg_replace_callback(
+            [
+                '/\b\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}\b/',
+                '/\b\d{3}\.\d{3}\.\d{3}-\d{2}\b/',
+                '/\b\d{11}\b/',
+                '/\b\d{14}\b/',
+            ],
+            static fn (array $m): string => '***'.substr(preg_replace('/\D/', '', $m[0]), -4),
+            $text,
+        );
 
         $redacted = preg_replace(
             [
