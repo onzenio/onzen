@@ -40,6 +40,13 @@ const { data: enrollments, status: tableStatus, error: enrollmentsError, refresh
 
 const rows = computed((): Enrollment[] => enrollments.value?.data ?? [])
 
+const enrollmentsRetryActions = [{
+  label: 'Tentar novamente',
+  color: 'error' as const,
+  variant: 'outline' as const,
+  onClick: () => refreshEnrollments()
+}]
+
 const runTarget = ref<Enrollment | null>(null)
 const runOpen = computed({
   get: () => runTarget.value !== null,
@@ -370,6 +377,7 @@ async function syncNow(): Promise<void> {
               variant="subtle"
               title="Associações indisponíveis"
               :description="monitoringErrorMessage(backendErrorBody(enrollmentsError))"
+              :actions="enrollmentsRetryActions"
             />
 
             <div class="flex flex-wrap items-center justify-between gap-1.5">

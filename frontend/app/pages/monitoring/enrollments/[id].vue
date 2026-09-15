@@ -49,7 +49,7 @@ const alertSorting = ref<{ id: string, desc: boolean }[]>([])
 const alertPagination = ref({ pageIndex: 0, pageSize: 10 })
 const alertStatus = ref('all')
 
-const { data: enrollment, status: enrollmentStatus, error: enrollmentError } = await useFetch<{ data: Enrollment }>(
+const { data: enrollment, status: enrollmentStatus, error: enrollmentError, refresh: refreshEnrollment } = await useFetch<{ data: Enrollment }>(
   () => `/api/monitoring/enrollments/${enrollmentId.value}`,
   { lazy: true }
 )
@@ -75,17 +75,17 @@ watch(clientId, async (id) => {
   }
 }, { immediate: true })
 
-const { data: snapshots, status: snapshotsStatus } = await useFetch<SnapshotsResponse>(
+const { data: snapshots, status: snapshotsStatus, error: snapshotsError, refresh: refreshSnapshots } = await useFetch<SnapshotsResponse>(
   () => `/api/monitoring/enrollments/${enrollmentId.value}/snapshots`,
   { lazy: true, query: { per_page: 100 } }
 )
 
-const { data: changes, status: changesStatus } = await useFetch<Paginated<ChangeItem>>(
+const { data: changes, status: changesStatus, error: changesError, refresh: refreshChanges } = await useFetch<Paginated<ChangeItem>>(
   () => `/api/monitoring/enrollments/${enrollmentId.value}/changes`,
   { lazy: true, query: { per_page: 100 } }
 )
 
-const { data: alerts, status: alertsStatus, refresh: refreshAlerts } = await useFetch<Paginated<AlertItem>>('/api/monitoring/alerts', {
+const { data: alerts, status: alertsStatus, error: alertsError, refresh: refreshAlerts } = await useFetch<Paginated<AlertItem>>('/api/monitoring/alerts', {
   lazy: true,
   query: { enrollment_id: enrollmentId, per_page: 100 }
 })
@@ -93,6 +93,20 @@ const { data: alerts, status: alertsStatus, refresh: refreshAlerts } = await use
 const snapshotRows = computed((): Snapshot[] => snapshots.value?.data ?? [])
 const changeRows = computed((): ChangeItem[] => changes.value?.data ?? [])
 const alertRows = computed((): AlertItem[] => alerts.value?.data ?? [])
+
+function tableRetryActions(retry: () => void) {
+  return [{
+    label: 'Tentar novamente',
+    color: 'error' as const,
+    variant: 'outline' as const,
+    onClick: () => retry()
+  }]
+}
+
+const enrollmentRetryActions = tableRetryActions(() => refreshEnrollment())
+const snapshotsRetryActions = tableRetryActions(() => refreshSnapshots())
+const changesRetryActions = tableRetryActions(() => refreshChanges())
+const alertsRetryActions = tableRetryActions(() => refreshAlerts())
 
 const acknowledging = ref<number | null>(null)
 const bulkAcknowledging = ref(false)
@@ -489,6 +503,14 @@ const tableUi = {
             </p>
           </template>
           <div class="flex flex-col gap-4">
+            <UAlert
+              v-if="snapshotsError"
+              color="error"
+              variant="subtle"
+              title="Snapshots indisponíveis"
+              :description="monitoringErrorMessage(backendErrorBody(snapshotsError))"
+              :actions="snapshotsRetryActions"
+            />
             <div class="flex flex-wrap items-center justify-between gap-1.5">
               <UInput
                 v-model="snapshotSearch"
@@ -583,6 +605,14 @@ const tableUi = {
             </p>
           </template>
           <div class="flex flex-col gap-4">
+            <UAlert
+              v-if="changesError"
+              color="error"
+              variant="subtle"
+              title="Mudanças indisponíveis"
+              :description="monitoringErrorMessage(backendErrorBody(changesError))"
+              :actions="changesRetryActions"
+            />
             <div class="flex flex-wrap items-center justify-between gap-1.5">
               <UInput
                 v-model="changeSearch"
@@ -677,6 +707,14 @@ const tableUi = {
             </p>
           </template>
           <div class="flex flex-col gap-4">
+            <UAlert
+              v-if="alertsError"
+              color="error"
+              variant="subtle"
+              title="Alertas indisponíveis"
+              :description="monitoringErrorMessage(backendErrorBody(alertsError))"
+              :actions="alertsRetryActions"
+            />
             <div class="flex flex-wrap items-center justify-between gap-1.5">
               <USelect
                 v-model="alertStatus"
@@ -780,6 +818,7 @@ const tableUi = {
         variant="subtle"
         title="Associação indisponível"
         description="Não foi possível carregar o painel do cliente agora. Tente novamente."
+        :actions="enrollmentRetryActions"
       />
     </template>
   </UDashboardPanel>

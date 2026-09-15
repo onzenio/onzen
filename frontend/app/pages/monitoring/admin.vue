@@ -32,7 +32,14 @@ interface CredentialTableApi {
   setPageIndex: (index: number) => void
 }
 
-const { data: overview, refresh: refreshOverview } = await useFetch<{ data: SerproAdminOverview }>('/api/admin/serpro', { lazy: true })
+const { data: overview, status: overviewStatus, error: overviewError, refresh: refreshOverview } = await useFetch<{ data: SerproAdminOverview }>('/api/admin/serpro', { lazy: true })
+
+const overviewRetryActions = [{
+  label: 'Tentar novamente',
+  color: 'error' as const,
+  variant: 'outline' as const,
+  onClick: () => refreshOverview()
+}]
 
 const credentialsOpen = ref(false)
 const credentialErrors = ref<string[]>([])
@@ -369,6 +376,15 @@ function openTransport() {
           </UCard>
         </div>
 
+        <UAlert
+          v-if="overviewError"
+          color="error"
+          variant="subtle"
+          title="Credenciais indisponíveis"
+          :description="monitoringErrorMessage(backendErrorBody(overviewError))"
+          :actions="overviewRetryActions"
+        />
+
         <UCard>
           <template #header>
             <p class="font-medium text-highlighted">
@@ -435,6 +451,7 @@ function openTransport() {
               class="shrink-0"
               :data="credentialRows"
               :columns="credentialColumns"
+              :loading="overviewStatus === 'pending'"
               :ui="{
                 base: 'table-fixed border-separate border-spacing-0',
                 thead: '[&>tr]:bg-elevated/50 [&>tr]:after:content-none',

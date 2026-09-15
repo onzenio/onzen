@@ -31,7 +31,14 @@ const pagination = ref({ pageIndex: 0, pageSize: 10 })
 const statusFilter = ref('all')
 
 const { data: certificate, refresh: refreshCertificate } = await useFetch<{ data: CertificateState }>('/api/monitoring/certificate', { lazy: true })
-const { data: authors, refresh: refreshAuthors } = await useFetch<{ data: RequestAuthor[] }>('/api/monitoring/authors', { lazy: true })
+const { data: authors, status: authorsStatus, error: authorsError, refresh: refreshAuthors } = await useFetch<{ data: RequestAuthor[] }>('/api/monitoring/authors', { lazy: true })
+
+const authorsRetryActions = [{
+  label: 'Tentar novamente',
+  color: 'error' as const,
+  variant: 'outline' as const,
+  onClick: () => refreshAuthors()
+}]
 
 const certificateOpen = ref(false)
 const certificateErrors = ref<string[]>([])
@@ -320,6 +327,14 @@ async function submitTerm(authorId: number) {
         </div>
       </template>
       <div class="flex flex-col gap-4">
+        <UAlert
+          v-if="authorsError"
+          color="error"
+          variant="subtle"
+          title="Autores indisponíveis"
+          :description="monitoringErrorMessage(backendErrorBody(authorsError))"
+          :actions="authorsRetryActions"
+        />
         <div class="flex flex-wrap items-center justify-between gap-1.5">
           <UInput
             v-model="search"
@@ -386,6 +401,7 @@ async function submitTerm(authorId: number) {
           class="shrink-0"
           :data="authorRows"
           :columns="authorColumns"
+          :loading="authorsStatus === 'pending'"
           :ui="{
             base: 'table-fixed border-separate border-spacing-0',
             thead: '[&>tr]:bg-elevated/50 [&>tr]:after:content-none',

@@ -63,12 +63,19 @@ const query = computed(() => ({
   per_page: 500
 }))
 
-const { data, status, refresh } = await useFetch<AuditResponse>('/api/audit', {
+const { data, error, status, refresh } = await useFetch<AuditResponse>('/api/audit', {
   key: 'audit-list',
   query
 })
 
 const logs = computed(() => data.value?.data ?? [])
+
+const retryActions = [{
+  label: 'Tentar novamente',
+  color: 'error' as const,
+  variant: 'outline' as const,
+  onClick: () => refresh()
+}]
 
 function applyFilters() {
   pagination.value.pageIndex = 0
@@ -205,6 +212,14 @@ function exportCsv() {
     </template>
 
     <template #body>
+      <UAlert
+        v-if="error"
+        color="error"
+        title="Não foi possível carregar os registros"
+        :description="backendMessage(error)"
+        :actions="retryActions"
+      />
+
       <div class="flex flex-wrap items-end gap-1.5">
         <UFormField label="Conta" class="min-w-28">
           <UInput

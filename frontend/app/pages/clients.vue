@@ -46,12 +46,19 @@ const sorting = ref<{ id: string, desc: boolean }[]>([])
 const pagination = ref({ pageIndex: 0, pageSize: 10 })
 const regimeFilter = ref('all')
 
-const { data, status, refresh } = await useFetch<ClientsResponse>('/api/clients', {
+const { data, error, status, refresh } = await useFetch<ClientsResponse>('/api/clients', {
   key: 'clients-list',
   query: { per_page: 500 }
 })
 
 const clients = computed(() => data.value?.data ?? [])
+
+const retryActions = [{
+  label: 'Tentar novamente',
+  color: 'error' as const,
+  variant: 'outline' as const,
+  onClick: () => refresh()
+}]
 
 function getRowItems(row: Row<ClientRow>) {
   const client = row.original
@@ -344,6 +351,14 @@ async function onSubmit(event: FormSubmitEvent<Schema>) {
     </template>
 
     <template #body>
+      <UAlert
+        v-if="error"
+        color="error"
+        title="Não foi possível carregar os clientes"
+        :description="backendMessage(error)"
+        :actions="retryActions"
+      />
+
       <div class="flex flex-wrap items-center justify-between gap-1.5">
         <UInput
           v-model="search"

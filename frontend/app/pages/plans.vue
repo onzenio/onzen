@@ -58,7 +58,7 @@ const sorting = ref<{ id: string, desc: boolean }[]>([])
 const pagination = ref({ pageIndex: 0, pageSize: 10 })
 const defaultFilter = ref('all')
 
-const { data, status, refresh } = await useFetch<PlansResponse>('/api/plans', {
+const { data, error, status, refresh } = await useFetch<PlansResponse>('/api/plans', {
   key: 'plans-list',
   query: { per_page: 500 }
 })
@@ -69,6 +69,13 @@ const { data: accountsData, refresh: refreshAccounts } = await useFetch<Accounts
 
 const plans = computed(() => data.value?.data ?? [])
 const accounts = computed(() => accountsData.value?.data ?? [])
+
+const retryActions = [{
+  label: 'Tentar novamente',
+  color: 'error' as const,
+  variant: 'outline' as const,
+  onClick: () => refresh()
+}]
 
 function formatPrice(cents: number): string {
   return (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -319,6 +326,14 @@ async function onSwitchPlan() {
     </template>
 
     <template #body>
+      <UAlert
+        v-if="error"
+        color="error"
+        title="Não foi possível carregar os planos"
+        :description="backendMessage(error)"
+        :actions="retryActions"
+      />
+
       <div class="flex flex-wrap items-center justify-between gap-1.5">
         <UInput
           v-model="search"

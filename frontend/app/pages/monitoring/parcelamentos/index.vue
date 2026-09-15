@@ -31,12 +31,19 @@ const sorting = ref<{ id: string, desc: boolean }[]>([])
 const pagination = ref({ pageIndex: 0, pageSize: 10 })
 const modality = ref('all')
 
-const { data: orders, status, error } = await useFetch<Paginated<ParcelmentOrder>>('/api/monitoring/parcelamentos', {
+const { data: orders, status, error, refresh } = await useFetch<Paginated<ParcelmentOrder>>('/api/monitoring/parcelamentos', {
   lazy: true,
   query: { per_page: 500 }
 })
 
 const rows = computed((): ParcelmentOrder[] => orders.value?.data ?? [])
+
+const retryActions = [{
+  label: 'Tentar novamente',
+  color: 'error' as const,
+  variant: 'outline' as const,
+  onClick: () => refresh()
+}]
 
 function getRowItems(row: Row<ParcelmentOrder>) {
   return [
@@ -196,6 +203,7 @@ function exportCsv(): void {
             variant="subtle"
             title="Parcelamentos indisponíveis"
             :description="monitoringErrorMessage(backendErrorBody(error))"
+            :actions="retryActions"
           />
 
           <div class="flex flex-wrap items-center justify-between gap-1.5">

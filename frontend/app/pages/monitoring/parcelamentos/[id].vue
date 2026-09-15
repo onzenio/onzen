@@ -41,7 +41,7 @@ const paymentSorting = ref<{ id: string, desc: boolean }[]>([])
 const paymentPagination = ref({ pageIndex: 0, pageSize: 10 })
 const paymentStatus = ref('all')
 
-const { data: order, status: orderStatus, error: orderError } = await useFetch<{ data: ParcelmentOrderDetail }>(
+const { data: order, status: orderStatus, error: orderError, refresh: refreshOrder } = await useFetch<{ data: ParcelmentOrderDetail }>(
   () => `/api/monitoring/parcelamentos/${orderId.value}`,
   { lazy: true }
 )
@@ -69,6 +69,22 @@ async function selectInstallment(installment: Installment): Promise<void> {
 
 const installmentRows = computed((): Installment[] => order.value?.data.installments ?? [])
 const paymentRows = computed((): Payment[] => payments.value?.data ?? [])
+
+const orderRetryActions = [{
+  label: 'Tentar novamente',
+  color: 'error' as const,
+  variant: 'outline' as const,
+  onClick: () => refreshOrder()
+}]
+
+const paymentsRetryActions = [{
+  label: 'Tentar novamente',
+  color: 'error' as const,
+  variant: 'outline' as const,
+  onClick: () => {
+    if (selectedInstallment.value) void selectInstallment(selectedInstallment.value)
+  }
+}]
 
 function sortableHeader(label: string) {
   return ({ column }: { column: { getIsSorted: () => false | 'asc' | 'desc', toggleSorting: (desc?: boolean) => void } }) => {
@@ -391,6 +407,7 @@ const tableUi = {
               class="shrink-0"
               :data="installmentRows"
               :columns="installmentColumns"
+              :loading="orderStatus === 'pending'"
               :ui="tableUi"
             >
               <template #empty>
@@ -511,6 +528,7 @@ const tableUi = {
             variant="subtle"
             title="Pagamentos indisponíveis"
             description="Não foi possível carregar os pagamentos desta parcela."
+            :actions="paymentsRetryActions"
           />
         </UCard>
       </div>
@@ -529,6 +547,7 @@ const tableUi = {
         variant="subtle"
         title="Parcelamento indisponível"
         description="Não foi possível carregar o parcelamento agora. Tente novamente."
+        :actions="orderRetryActions"
       />
     </template>
   </UDashboardPanel>
