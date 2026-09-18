@@ -19,7 +19,7 @@ Frontend (`frontend/`, pnpm `12.3.4` — pinned in `package.json`):
 - `pnpm dev` (`:3000`) / `pnpm build` / `pnpm preview`
 - `pnpm run lint` (`eslint .`) / `pnpm run typecheck` (`nuxt typecheck`) — this is the CI gate (`frontend/.github/workflows/ci.yml`; no root `.github/`, no frontend tests)
 
-Full stack: `docker-compose.yml` at root — postgres:18, redis:8, nats:2 (JetStream), backend `:8000`, queue worker, frontend `:3000`. Compose overrides backend env to pgsql/redis/nats; local default is sqlite.
+Full stack: `docker-compose.yml` at root — postgres:18, redis:8, nats:2 (JetStream), backend `:8000`, queue worker, frontend `:3000`. Compose overrides backend env to pgsql/redis/nats; local default is sqlite. **Dev profile: always add `-f docker-compose.dev.yml`** (host ports `5433/6380/4223/8223` to avoid colliding with the wzap stack on `5432/4222/8222/8081`; app ports stay `8000/3000`). Live bind mounts (`./backend:/app` + `backend-vendor` for vendor, `./frontend:/app` + node_modules volume) — local edits reflect without rebuild. See `README.md` for up/logs/artisan/pnpm usage.
 
 ## Architecture notes
 

@@ -3,6 +3,7 @@
 /node_modules
 /vendor
 docs/research
+research/
 .env
 .env.*
 !.env.example
