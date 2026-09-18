@@ -21,3 +21,11 @@ yarn-error.log*
 
 # Git worktrees
 /.worktrees/
+
+# Agent/tooling local (não é produto: skills, hooks e comandos do ambiente)
+.codex/
+.opencode/
+.agents/
+.github/agents/
+.github/hooks/
+.github/skills/
