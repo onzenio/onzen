@@ -1,8 +1,8 @@
 ## 1. Sessão e downloads pelo BFF
 
-- [ ] 1.1 Unificar o transporte das server routes autenticadas para restaurar sessão e CSRF, verificando com testes automatizados que consulta do User e mutação específica chegam autenticadas ao backend.
-- [ ] 1.2 Entregar artefatos por link assinado na origem do frontend, verificando com testes automatizados download válido, assinatura alterada, expiração e isolamento entre Accounts.
-- [ ] 1.3 Consolidar a configuração da origem do backend no frontend e no Compose, verificando com configuração renderizada que o container recebe o valor esperado.
+- [x] 1.1 Unificar o transporte das server routes autenticadas para restaurar sessão e CSRF, verificando com testes automatizados que consulta do User e mutação específica chegam autenticadas ao backend.
+- [x] 1.2 Entregar artefatos por link assinado na origem do frontend, verificando com testes automatizados download válido, assinatura alterada, expiração e isolamento entre Accounts.
+- [x] 1.3 Consolidar a configuração da origem do backend no frontend e no Compose, verificando com configuração renderizada que o container recebe o valor esperado.
 
 ## 2. Entitlement de Modules
 

@@ -1,4 +1,4 @@
 export default defineEventHandler((event) => {
   const id = getRouterParam(event, 'id')
-  return proxyToBackend(event, `/monitoring/clients/${id}/cnd`)
+  return backendProxy(event, `/monitoring/clients/${id}/cnd`)
 })
