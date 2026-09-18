@@ -59,6 +59,12 @@ final class ExecuteSerproActionJob implements ShouldQueue
 
         $action = $recovery->recoverAction($action);
 
+        if ($action->status === SerproActionStatus::Running) {
+            $this->release($recovery->releaseDelayFor($action->updated_at));
+
+            return;
+        }
+
         $executed = $executor->execute($action);
 
         if (! $executed->status->isRetryable()) {

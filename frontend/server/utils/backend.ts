@@ -222,6 +222,7 @@ async function bootstrapCsrf(base: string, origin: string): Promise<SessionPaylo
 }
 
 export async function backendFetch<T = unknown>(event: H3Event, path: string, init: BackendFetchOptions = {}): Promise<T> {
+  // path inclui o prefixo /api (ex.: '/api/me'); use backendProxy para caminhos curtos.
   const base = backendBaseUrl(event)
   const method = init.method ?? 'GET'
   const origin = frontendOrigin(event)
@@ -335,18 +336,21 @@ export async function proxyBinaryToBackend(event: H3Event, path: string, query?:
  * Multipart (upload de certificado) segue como corpo bruto com content-type.
  */
 export async function backendProxy<T>(event: H3Event, path: string): Promise<T> {
+  // O backend Laravel serve routes/api.php sob /api; normaliza aqui para
+  // que os call sites passem o caminho curto ('/me', '/monitoring/...').
+  const apiPath = path.startsWith('/api/') ? path : `/api${path.startsWith('/') ? path : `/${path}`}`
   const method = getMethod(event).toUpperCase() as BackendMethod
   const query = { ...getQuery(event) }
 
   if (method === 'GET' || method === 'HEAD') {
-    return backendFetch<T>(event, path, { method, query })
+    return backendFetch<T>(event, apiPath, { method, query })
   }
 
   const contentType = getRequestHeader(event, 'content-type') ?? ''
 
   if (contentType.includes('multipart/form-data')) {
     const raw = await readRawBody(event, false).catch(() => undefined)
-    return backendFetch<T>(event, path, {
+    return backendFetch<T>(event, apiPath, {
       method,
       query,
       body: raw ?? undefined,
@@ -355,5 +359,5 @@ export async function backendProxy<T>(event: H3Event, path: string): Promise<T> 
   }
 
   const body = await readBody(event).catch(() => undefined)
-  return backendFetch<T>(event, path, { method, query, body })
+  return backendFetch<T>(event, apiPath, { method, query, body })
 }

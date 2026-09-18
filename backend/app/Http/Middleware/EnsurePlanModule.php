@@ -25,9 +25,14 @@ class EnsurePlanModule
         $accountId = CurrentAccount::get() ?? $request->user()?->account_id;
         $account = is_numeric($accountId) ? Account::query()->find($accountId) : null;
 
-        $denied = $account !== null
-            ? $this->limits->canAccessModule($account, $module)
-            : null;
+        if ($account === null) {
+            return response()->json([
+                'message' => 'Conta da sessão não localizada.',
+                'code' => 'ACCOUNT_NOT_FOUND',
+            ], 403);
+        }
+
+        $denied = $this->limits->canAccessModule($account, $module);
 
         if ($denied !== null) {
             return response()->json([

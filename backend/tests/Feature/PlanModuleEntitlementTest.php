@@ -100,7 +100,7 @@ class PlanModuleEntitlementTest extends TestCase
 
         foreach (Route::getRoutes() as $route) {
             $uri = $route->uri();
-            if (! str_starts_with($uri, 'api/clients') && ! str_starts_with($uri, 'api/monitoring')) {
+            if (! str_starts_with($uri, 'api/clients') && ! str_starts_with($uri, 'api/monitoring') && ! str_starts_with($uri, 'api/admin')) {
                 continue;
             }
             $covered = false;

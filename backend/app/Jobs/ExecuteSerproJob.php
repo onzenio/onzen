@@ -63,6 +63,14 @@ final class ExecuteSerproJob implements ShouldQueue
 
         $run = $recovery->recoverRun($run);
 
+        if ($run->status === MonitoringRunStatus::Running) {
+            // Outro worker está ativo dentro da janela: aguarda nova
+            // tentativa em vez de concluir o job e orfanar o run.
+            $this->release($recovery->releaseDelayFor($run->updated_at));
+
+            return;
+        }
+
         $executed = $executor->execute($run);
 
         if (! in_array($executed->status, [

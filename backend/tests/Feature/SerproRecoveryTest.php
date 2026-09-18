@@ -4,8 +4,12 @@ namespace Tests\Feature;
 
 use App\Enums\MonitoringRunStatus;
 use App\Enums\SerproActionStatus;
+use App\Jobs\ExecuteSerproActionJob;
+use App\Jobs\ExecuteSerproJob;
 use App\Models\MonitoringRun;
 use App\Models\SerproServiceRequest;
+use App\Services\Monitoring\SerproActionExecutor;
+use App\Services\Monitoring\SerproExecutor;
 use App\Services\Monitoring\SerproRecovery;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -130,5 +134,29 @@ final class SerproRecoveryTest extends TestCase
         $recovered = $this->recovery()->recoverRun($run->refresh());
 
         $this->assertSame(MonitoringRunStatus::Running, $recovered->status);
+    }
+
+    public function test_job_releases_fresh_running_run_for_a_later_attempt(): void
+    {
+        $run = MonitoringRun::factory()->create(['status' => MonitoringRunStatus::Running]);
+
+        $job = (new ExecuteSerproJob($run->id))->withFakeQueueInteractions();
+        $job->handle(app(SerproExecutor::class), app(SerproRecovery::class));
+
+        $job->assertReleased();
+        $job->assertNotDeleted();
+        $this->assertSame(MonitoringRunStatus::Running, $run->refresh()->status);
+    }
+
+    public function test_job_releases_fresh_running_action_for_a_later_attempt(): void
+    {
+        $action = SerproServiceRequest::factory()->create(['status' => SerproActionStatus::Running]);
+
+        $job = (new ExecuteSerproActionJob($action->id))->withFakeQueueInteractions();
+        $job->handle(app(SerproActionExecutor::class), app(SerproRecovery::class));
+
+        $job->assertReleased();
+        $job->assertNotDeleted();
+        $this->assertSame(SerproActionStatus::Running, $action->refresh()->status);
     }
 }

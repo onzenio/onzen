@@ -32,6 +32,15 @@ class SerproRecovery
         return $updatedAt->diffInSeconds(now()) > $this->windowSeconds();
     }
 
+    /**
+     * Delay para aguardar nova tentativa quando outro worker está ativo
+     * dentro da janela: o restante da janela, nunca menor que 1s.
+     */
+    public function releaseDelayFor(Carbon $updatedAt): int
+    {
+        return max(1, $this->windowSeconds() - (int) $updatedAt->diffInSeconds(now()));
+    }
+
     public function recoverRun(MonitoringRun $run): MonitoringRun
     {
         $run->refresh();
@@ -81,11 +90,17 @@ class SerproRecovery
 
     private function persistAction(SerproServiceRequest $action, SerproActionStatus $status): SerproServiceRequest
     {
-        $action->forceFill([
-            'status' => $status,
-            'metadata' => [...(array) $action->metadata, 'error_code' => self::ERROR_WORKER_INTERRUPTED],
-        ])->save();
+        // Condicional a `running`: entrega duplicada concorrente que chega
+        // depois perde sem sobrescrever o assentamento do outro worker.
+        SerproServiceRequest::query()
+            ->withoutGlobalScope('account')
+            ->whereKey($action->getKey())
+            ->where('status', SerproActionStatus::Running)
+            ->update([
+                'status' => $status,
+                'metadata' => [...(array) $action->metadata, 'error_code' => self::ERROR_WORKER_INTERRUPTED],
+            ]);
 
-        return $action;
+        return $action->refresh();
     }
 }
