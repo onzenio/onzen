@@ -7,6 +7,7 @@ use App\Contracts\SerproEvents;
 use App\Enums\SerproActionStatus;
 use App\Models\SerproServiceRequest;
 use App\Services\Monitoring\SerproActionExecutor;
+use App\Services\Monitoring\SerproRecovery;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -48,13 +49,15 @@ final class ExecuteSerproActionJob implements ShouldQueue
         return array_values((array) config('monitoring.limits.retry_backoff', [15, 60, 300, 900]));
     }
 
-    public function handle(SerproActionExecutor $executor): void
+    public function handle(SerproActionExecutor $executor, SerproRecovery $recovery): void
     {
         $action = $this->action();
 
         if ($action === null) {
             return;
         }
+
+        $action = $recovery->recoverAction($action);
 
         $executed = $executor->execute($action);
 

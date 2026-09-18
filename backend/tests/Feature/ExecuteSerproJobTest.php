@@ -11,6 +11,7 @@ use App\Models\MonitoringDefinition;
 use App\Models\MonitoringEnrollment;
 use App\Models\MonitoringRun;
 use App\Services\Monitoring\SerproExecutor;
+use App\Services\Monitoring\SerproRecovery;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Queue;
@@ -75,7 +76,7 @@ final class ExecuteSerproJobTest extends TestCase
         $run = $this->claim($this->createAccount(), 'CONSDECLARACAO13', 'handle-key');
 
         $job = (new ExecuteSerproJob($run->id))->withFakeQueueInteractions();
-        $job->handle(app(SerproExecutor::class));
+        $job->handle(app(SerproExecutor::class), app(SerproRecovery::class));
 
         $run->refresh();
 
@@ -103,7 +104,7 @@ final class ExecuteSerproJobTest extends TestCase
             $run = $this->claim($this->createAccount(), 'CONSDECLARACAO13', 'eta-release-key');
 
             $job = (new ExecuteSerproJob($run->id))->withFakeQueueInteractions();
-            $job->handle(app(SerproExecutor::class));
+            $job->handle(app(SerproExecutor::class), app(SerproRecovery::class));
 
             $this->assertSame(MonitoringRunStatus::AwaitingProtocol, $run->refresh()->status);
             $job->assertReleased(900);
@@ -117,7 +118,7 @@ final class ExecuteSerproJobTest extends TestCase
         $run = $this->claim($this->createAccount(), 'SOLICITARPROTOCOLO91', 'protocol-release-key');
 
         $job = (new ExecuteSerproJob($run->id))->withFakeQueueInteractions();
-        $job->handle(app(SerproExecutor::class));
+        $job->handle(app(SerproExecutor::class), app(SerproRecovery::class));
 
         $this->assertSame(MonitoringRunStatus::AwaitingProtocol, $run->refresh()->status);
         $job->assertReleased(15);
@@ -134,7 +135,7 @@ final class ExecuteSerproJobTest extends TestCase
         $run = $this->claim($this->createAccount(), 'CONSDECLARACAO13', 'transient-release-key');
 
         $job = (new ExecuteSerproJob($run->id))->withFakeQueueInteractions();
-        $job->handle(app(SerproExecutor::class));
+        $job->handle(app(SerproExecutor::class), app(SerproRecovery::class));
 
         $this->assertSame(MonitoringRunStatus::Transient, $run->refresh()->status);
         $job->assertReleased(15);
@@ -149,7 +150,7 @@ final class ExecuteSerproJobTest extends TestCase
 
         $job = (new ExecuteSerproJob($run->id))->withFakeQueueInteractions();
         $job->job->attempts = 2;
-        $job->handle(app(SerproExecutor::class));
+        $job->handle(app(SerproExecutor::class), app(SerproRecovery::class));
 
         $this->assertSame(MonitoringRunStatus::AwaitingProtocol, $run->refresh()->status);
         $job->assertReleased(60);
@@ -166,7 +167,7 @@ final class ExecuteSerproJobTest extends TestCase
         $run = $this->claim($this->createAccount(), 'CONSDECLARACAO13', 'limited-release-key');
 
         $job = (new ExecuteSerproJob($run->id))->withFakeQueueInteractions();
-        $job->handle(app(SerproExecutor::class));
+        $job->handle(app(SerproExecutor::class), app(SerproRecovery::class));
 
         $this->assertSame(MonitoringRunStatus::Limited, $run->refresh()->status);
         $job->assertReleased(45);

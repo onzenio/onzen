@@ -12,9 +12,9 @@
 
 ## 3. Recuperação de workers
 
-- [ ] 3.1 Recuperar execuções SERPRO com reserva válida, expirada e protocolo persistido, verificando com testes de fila que não há envio concorrente nem repetição da solicitação original de resultado desconhecido.
-- [ ] 3.2 Recuperar ações SERPRO com reserva válida, expirada e protocolo persistido, verificando com testes de fila que apenas polling seguro pode prosseguir após interrupção.
-- [ ] 3.3 Tornar a janela de processamento coerente com timeout e redelivery, verificando com teste de configuração que uma execução ativa não é classificada como abandonada prematuramente.
+- [x] 3.1 Recuperar execuções SERPRO com reserva válida, expirada e protocolo persistido, verificando com testes de fila que não há envio concorrente nem repetição da solicitação original de resultado desconhecido.
+- [x] 3.2 Recuperar ações SERPRO com reserva válida, expirada e protocolo persistido, verificando com testes de fila que apenas polling seguro pode prosseguir após interrupção.
+- [x] 3.3 Tornar a janela de processamento coerente com timeout e redelivery, verificando com teste de configuração que uma execução ativa não é classificada como abandonada prematuramente.
 
 ## 4. Scheduler operacional
 

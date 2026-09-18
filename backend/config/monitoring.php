@@ -25,4 +25,11 @@ return [
         // tabela como fallback de release.
         'retry_backoff' => [15, 60, 300, 900],
     ],
+    'recovery' => [
+        // Janela de processamento (segundos): um trabalho em `running` só é
+        // considerado abandonado além dela. DEVE exceder o retry_after da
+        // fila (300s, que por sua vez excede o --timeout 270s do worker)
+        // para que execução ativa nunca seja classificada prematuramente.
+        'processing_window' => (int) env('MONITORING_SERPRO_PROCESSING_WINDOW', 600),
+    ],
 ];
