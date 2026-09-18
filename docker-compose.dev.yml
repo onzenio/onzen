@@ -1,0 +1,47 @@
+# Perfil de desenvolvimento local (onzen) — sem colisão com a stack wzap.
+#
+# A stack wzap ocupa no host 5432 (postgres), 4222/8222 (nats) e 8081 (app).
+# Este override SUBSTITUI (`!reset`) as portas publicadas no host; dentro da
+# rede `app` os serviços continuam se falando pelas portas padrão
+# (postgres:5432, redis:6379, nats:4222, backend:8000, frontend:3000),
+# então nenhum env interno precisa mudar.
+#
+# Bind mounts live (definidos no docker-compose.yml base):
+#   backend   ./backend:/app   + vendor em volume nomeado backend-vendor
+#   frontend  ./frontend:/app  + node_modules em frontend-node-modules
+# Editar arquivos locais reflete automaticamente, sem rebuild.
+#
+# Uso:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+#   curl http://127.0.0.1:8000/up          # backend
+#   curl -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3000/  # frontend
+#
+# Portas no host (perfil dev):
+#   backend   8000  (mantida — wzap usa 8081, sem colisão)
+#   frontend  3000  (mantida)
+#   postgres  5433  (wzap usa 5432)
+#   redis     6380  (base usava 6379, ocupada)
+#   nats      4223  (wzap usa 4222)
+#   nats mgmt  8223  (wzap usa 8222)
+
+services:
+  postgres:
+    ports: !override
+      - "127.0.0.1:5433:5432"
+
+  redis:
+    ports: !override
+      - "127.0.0.1:6380:6379"
+
+  nats:
+    ports: !override
+      - "127.0.0.1:4223:4222"
+      - "127.0.0.1:8223:8222"
+
+  backend:
+    ports: !override
+      - "127.0.0.1:8000:8000"
+
+  frontend:
+    ports: !override
+      - "127.0.0.1:3000:3000"
