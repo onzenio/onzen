@@ -23,8 +23,8 @@
 
 ## 5. Onboarding atômico
 
-- [ ] 5.1 Garantir no banco no máximo uma Account A sem impedir múltiplas Accounts B, verificando com testes de migração os casos íntegro, concorrente e base previamente inconsistente.
-- [ ] 5.2 Tratar duas conclusões concorrentes do Onboarding como uma criação e um conflito, verificando com teste de integração que nenhum Account ou User adicional é persistido ou autenticado.
+- [x] 5.1 Garantir no banco no máximo uma Account A sem impedir múltiplas Accounts B, verificando com testes de migração os casos íntegro, concorrente e base previamente inconsistente.
+- [x] 5.2 Tratar duas conclusões concorrentes do Onboarding como uma criação e um conflito, verificando com teste de integração que nenhum Account ou User adicional é persistido ou autenticado.
 
 ## 6. Verificação integrada
 
