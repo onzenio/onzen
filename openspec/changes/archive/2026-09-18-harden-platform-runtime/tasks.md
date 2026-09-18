@@ -28,6 +28,6 @@
 
 ## 6. Verificação integrada
 
-- [ ] 6.1 Executar toda a suíte PHPUnit e o Pint manual no backend, verificando que testes e estilo passam sem regressões.
-- [ ] 6.2 Executar lint, typecheck e build no frontend, verificando que os três comandos concluem sem erros.
-- [ ] 6.3 Validar sessão, entitlement, recuperação, scheduler e Onboarding contra os delta specs, verificando que todos os cenários possuem evidência automatizada ou operacional registrada.
+- [x] 6.1 Executar toda a suíte PHPUnit e o Pint manual no backend, verificando que testes e estilo passam sem regressões.
+- [x] 6.2 Executar lint, typecheck e build no frontend, verificando que os três comandos concluem sem erros.
+- [x] 6.3 Validar sessão, entitlement, recuperação, scheduler e Onboarding contra os delta specs, verificando que todos os cenários possuem evidência automatizada ou operacional registrada.
