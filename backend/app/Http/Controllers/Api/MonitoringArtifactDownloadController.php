@@ -13,6 +13,7 @@ use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\URL;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -25,6 +26,38 @@ use Symfony\Component\HttpFoundation\Response;
 class MonitoringArtifactDownloadController extends Controller
 {
     use AuthorizesRequests;
+
+    public function link(Request $request, string $ref): JsonResponse
+    {
+        /** @var User|null $user */
+        $user = $request->user();
+
+        if ($user === null) {
+            return $this->notFound();
+        }
+
+        $accountId = CurrentAccount::get() ?? $user->account_id;
+
+        $artifact = MonitoringArtifact::query()
+            ->where('ref', $ref)
+            ->where('account_id', $accountId)
+            ->first();
+
+        if ($artifact === null) {
+            return $this->notFound();
+        }
+
+        $this->authorize('download', $artifact);
+
+        return response()->json([
+            'url' => URL::temporarySignedRoute(
+                'monitoring.artifacts.download',
+                now()->addMinutes(15),
+                ['ref' => $artifact->ref],
+            ),
+            'expires_in_minutes' => 15,
+        ]);
+    }
 
     public function __invoke(Request $request, string $ref, ArtifactStore $store, AuditService $audit): Response
     {

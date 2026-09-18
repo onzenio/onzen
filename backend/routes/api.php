@@ -174,6 +174,11 @@ Route::middleware('auth:sanctum')->group(function (): void {
         ->name('admin.serpro.transport');
 });
 
+Route::middleware('auth:sanctum')
+    ->get('/monitoring/artifacts/{ref}/url', [MonitoringArtifactDownloadController::class, 'link'])
+    ->where('ref', '[A-Za-z0-9_-]+')
+    ->name('monitoring.artifacts.link');
+
 Route::middleware(['auth:sanctum', 'signed'])
     ->get('/monitoring/artifacts/{ref}/download', MonitoringArtifactDownloadController::class)
     ->where('ref', '[A-Za-z0-9_-]+')

@@ -381,4 +381,66 @@ class ArtifactTest extends TestCase
             'hash_sha256' => $result['hash_sha256'],
         ]);
     }
+
+    public function test_link_endpoint_requires_authentication(): void
+    {
+        Storage::fake('local');
+        $account = $this->createAccount();
+        $result = $this->createArtifact($account, 'link-auth-canary');
+
+        $this->getJson("/api/monitoring/artifacts/{$result['ref']}/url")->assertUnauthorized();
+    }
+
+    public function test_link_endpoint_returns_a_signed_download_url(): void
+    {
+        Storage::fake('local');
+        $account = $this->createAccount();
+        $user = $this->createUser($account, ['role' => UserRole::Admin]);
+        $result = $this->createArtifact($account, 'link-canary');
+
+        $response = $this->actingAs($user)->getJson("/api/monitoring/artifacts/{$result['ref']}/url");
+
+        $response->assertOk()
+            ->assertJsonPath('expires_in_minutes', 15)
+            ->assertJsonStructure(['url', 'expires_in_minutes']);
+
+        $url = (string) $response->json('url');
+        $this->assertStringContainsString($result['ref'], $url);
+        $this->assertStringContainsString('signature=', $url);
+
+        $this->actingAs($user)->get($url)->assertOk();
+    }
+
+    public function test_link_endpoint_returns_indistinguishable_404_for_unknown_and_cross_account_refs(): void
+    {
+        Storage::fake('local');
+        $owner = $this->createAccount();
+        $intruder = $this->createAccount();
+        $user = $this->createUser($intruder, ['role' => UserRole::Admin]);
+        $result = $this->createArtifact($owner, 'link-cross-account-secret');
+
+        $unknown = $this->actingAs($user)
+            ->getJson('/api/monitoring/artifacts/ref-inexistente-123/url')
+            ->assertNotFound()
+            ->json();
+
+        $crossAccount = $this->actingAs($user)
+            ->getJson("/api/monitoring/artifacts/{$result['ref']}/url")
+            ->assertNotFound()
+            ->json();
+
+        $this->assertSame($unknown, $crossAccount);
+    }
+
+    public function test_link_endpoint_denies_roles_without_download_permission(): void
+    {
+        Storage::fake('local');
+        $account = $this->createAccount();
+        $user = $this->createUser($account, ['role' => UserRole::User]);
+        $result = $this->createArtifact($account, 'link-role-denied-canary');
+
+        $this->actingAs($user)
+            ->getJson("/api/monitoring/artifacts/{$result['ref']}/url")
+            ->assertForbidden();
+    }
 }
