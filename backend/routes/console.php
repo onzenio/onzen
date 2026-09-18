@@ -8,9 +8,6 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
-Schedule::command('monitoring:cycle')->monthlyOn(1, '03:00');
-Schedule::command('monitoring:renew-terms')->dailyAt('04:00');
-
 // Ciclo automático mensal: dia 1 às 06:00 America/Sao_Paulo, apenas
 // definições marcadas como automáticas e operações de consulta (Task 18).
 Schedule::command('monitoring:run-monthly-cycle --confirm')

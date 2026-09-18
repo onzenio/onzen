@@ -156,6 +156,27 @@ services:
             retries: 3
             start_period: 30s
 
+    # Dedicated Laravel scheduler: runs `schedule:work` continuously so the
+    # monthly cycle and the daily renewal actually fire in Compose. Uses the
+    # backend image/config; withoutOverlapping on both routines prevents
+    # duplicate runs.
+    scheduler:
+        <<: *backend
+        command: ["php", "artisan", "schedule:work"]
+        environment:
+            <<: *backend-env
+        depends_on:
+            backend:
+                condition: service_healthy
+        healthcheck:
+            # schedule:work serves no HTTP either: probe the process the same
+            # way as the queue workers.
+            test: ['CMD-SHELL', 'for f in /proc/[0-9]*/cmdline; do grep -qaE "[s]chedule:work" "$$f" 2>/dev/null && exit 0; done; exit 1']
+            interval: 30s
+            timeout: 5s
+            retries: 3
+            start_period: 30s
+
     frontend:
         <<: *frontend
         command: ["pnpm", "dev", "--host", "0.0.0.0", "--port", "3000"]

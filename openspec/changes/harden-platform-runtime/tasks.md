@@ -18,8 +18,8 @@
 
 ## 4. Scheduler operacional
 
-- [ ] 4.1 Remover os agendamentos legados e manter somente as rotinas atuais sem sobreposição, verificando com teste de console e `php artisan schedule:list` que existem apenas o ciclo mensal e a renovação diária suportados.
-- [ ] 4.2 Executar continuamente o scheduler no ambiente Compose, verificando com `docker compose config` e o healthcheck que o processo dedicado usa a configuração do backend.
+- [x] 4.1 Remover os agendamentos legados e manter somente as rotinas atuais sem sobreposição, verificando com teste de console e `php artisan schedule:list` que existem apenas o ciclo mensal e a renovação diária suportados.
+- [x] 4.2 Executar continuamente o scheduler no ambiente Compose, verificando com `docker compose config` e o healthcheck que o processo dedicado usa a configuração do backend.
 
 ## 5. Onboarding atômico
 
