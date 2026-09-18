@@ -24,11 +24,15 @@ Todo artefato gerado por consulta ou ação SHALL ser guardado em armazenamento 
 
 ### Requirement: Download autorizado e auditado
 
-O download SHALL ser permitido somente a usuários autorizados da Account do Client e SHALL ser auditado com identificador do artefato, autor e data; referência de outra Account SHALL responder 404 indistinguível.
+O download SHALL ser permitido somente a usuários autorizados da Account do Client, SHALL ocorrer pela origem do frontend com a sessão intermediada pelo BFF e SHALL ser auditado com identificador do artefato, autor e data; a assinatura e a expiração SHALL permanecer válidas até o backend, e referência de outra Account SHALL responder 404 indistinguível.
 
 #### Scenario: Download da própria Account
 - **WHEN** um usuário autorizado baixa um artefato da sua Account
 - **THEN** o arquivo é entregue e o Audit registra o acesso
+
+#### Scenario: Download autenticado na mesma origem
+- **WHEN** o browser segue o link de download fornecido pela API com uma sessão válida no frontend
+- **THEN** a requisição permanece na origem do frontend e o backend reconhece o usuário autenticado
 
 #### Scenario: Cross-account responde 404
 - **WHEN** um usuário solicita artefato de outra Account
@@ -36,6 +40,10 @@ O download SHALL ser permitido somente a usuários autorizados da Account do Cli
 
 #### Scenario: Link expirado responde 403
 - **WHEN** o link de download assinado está expirado
+- **THEN** a resposta é 403 e nenhum arquivo é entregue
+
+#### Scenario: Assinatura alterada responde 403
+- **WHEN** o caminho, a referência ou os parâmetros assinados do link são alterados
 - **THEN** a resposta é 403 e nenhum arquivo é entregue
 
 ### Requirement: Disponibilidade do armazenamento observável
