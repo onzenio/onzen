@@ -6,9 +6,9 @@
 
 ## 2. Entitlement de Modules
 
-- [ ] 2.1 Aplicar no backend o entitlement de `clients` às operações de Clients, verificando com testes de API que Plan sem o Module é negado antes de ler ou alterar dados.
-- [ ] 2.2 Aplicar no backend os Modules equivalentes de monitoramento às operações correspondentes, verificando com testes de API os casos liberado, bloqueado e chamada direta.
-- [ ] 2.3 Cobrir o agrupamento completo das rotas protegidas, verificando com teste de arquitetura que novos endpoints de Clients e monitoramento não escapam do entitlement.
+- [x] 2.1 Aplicar no backend o entitlement de `clients` às operações de Clients, verificando com testes de API que Plan sem o Module é negado antes de ler ou alterar dados.
+- [x] 2.2 Aplicar no backend os Modules equivalentes de monitoramento às operações correspondentes, verificando com testes de API os casos liberado, bloqueado e chamada direta.
+- [x] 2.3 Cobrir o agrupamento completo das rotas protegidas, verificando com teste de arquitetura que novos endpoints de Clients e monitoramento não escapam do entitlement.
 
 ## 3. Recuperação de workers
 

@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\EnsurePlanModule;
 use App\Http\Middleware\ResolveAccount;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -32,6 +33,7 @@ return Application::configure(basePath: dirname(__DIR__))
             EnsureFrontendRequestsAreStateful::class,
             ResolveAccount::class,
         ]);
+        $middleware->alias(['plan.module' => EnsurePlanModule::class]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
