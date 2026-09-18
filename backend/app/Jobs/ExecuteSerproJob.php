@@ -8,6 +8,7 @@ use App\Enums\MonitoringRunStatus;
 use App\Exceptions\InvalidRunTransitionException;
 use App\Models\MonitoringRun;
 use App\Services\Monitoring\SerproExecutor;
+use App\Services\Monitoring\SerproRecovery;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -52,11 +53,21 @@ final class ExecuteSerproJob implements ShouldQueue
         return array_values((array) config('monitoring.limits.retry_backoff', [15, 60, 300, 900]));
     }
 
-    public function handle(SerproExecutor $executor): void
+    public function handle(SerproExecutor $executor, SerproRecovery $recovery): void
     {
         $run = $this->run();
 
         if ($run === null) {
+            return;
+        }
+
+        $run = $recovery->recoverRun($run);
+
+        if ($run->status === MonitoringRunStatus::Running) {
+            // Outro worker está ativo dentro da janela: aguarda nova
+            // tentativa em vez de concluir o job e orfanar o run.
+            $this->release($recovery->releaseDelayFor($run->updated_at));
+
             return;
         }
 

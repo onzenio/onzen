@@ -43,12 +43,14 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::patch('/plans/{plan}', [PlanController::class, 'update']);
     Route::patch('/accounts/{account}/plan', [AccountController::class, 'updatePlan']);
 
-    Route::get('/clients', [ClientController::class, 'index']);
-    Route::post('/clients', [ClientController::class, 'store']);
-    Route::get('/clients/{id}', [ClientController::class, 'show']);
-    Route::patch('/clients/{id}', [ClientController::class, 'update']);
-    Route::delete('/clients/{id}', [ClientController::class, 'destroy']);
-    Route::patch('/clients/{id}/monitoring', [ClientController::class, 'updateMonitoring']);
+    Route::middleware('plan.module:clients')->group(function (): void {
+        Route::get('/clients', [ClientController::class, 'index']);
+        Route::post('/clients', [ClientController::class, 'store']);
+        Route::get('/clients/{id}', [ClientController::class, 'show']);
+        Route::patch('/clients/{id}', [ClientController::class, 'update']);
+        Route::delete('/clients/{id}', [ClientController::class, 'destroy']);
+        Route::patch('/clients/{id}/monitoring', [ClientController::class, 'updateMonitoring']);
+    });
 });
 
 Route::middleware('auth:sanctum')->group(function (): void {
@@ -64,11 +66,11 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::get('/audit', [AuditController::class, 'index']);
 });
 
-Route::middleware('auth:sanctum')
+Route::middleware(['auth:sanctum', 'plan.module:clients'])
     ->get('/monitoring/health', MonitoringHealthController::class)
     ->name('monitoring.health');
 
-Route::middleware('auth:sanctum')->group(function (): void {
+Route::middleware(['auth:sanctum', 'plan.module:clients'])->group(function (): void {
     Route::get('/monitoring/dashboard', MonitoringDashboardController::class)
         ->name('monitoring.dashboard');
 
@@ -174,7 +176,12 @@ Route::middleware('auth:sanctum')->group(function (): void {
         ->name('admin.serpro.transport');
 });
 
-Route::middleware(['auth:sanctum', 'signed'])
+Route::middleware(['auth:sanctum', 'plan.module:clients'])
+    ->get('/monitoring/artifacts/{ref}/url', [MonitoringArtifactDownloadController::class, 'link'])
+    ->where('ref', '[A-Za-z0-9_-]+')
+    ->name('monitoring.artifacts.link');
+
+Route::middleware(['auth:sanctum', 'signed', 'plan.module:clients'])
     ->get('/monitoring/artifacts/{ref}/download', MonitoringArtifactDownloadController::class)
     ->where('ref', '[A-Za-z0-9_-]+')
     ->name('monitoring.artifacts.download');

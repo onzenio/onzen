@@ -1,38 +1,18 @@
 <script setup lang="ts">
 import * as z from 'zod'
-import type { FormSubmitEvent, TableColumn } from '@nuxt/ui'
-import { upperFirst } from 'scule'
+import type { FormSubmitEvent } from '@nuxt/ui'
 import { getPaginationRowModel } from '@tanstack/table-core'
-import type { Row } from '@tanstack/table-core'
+import { TABLE_UI as tableUi, type TableApi } from '~/utils/table-chrome'
+import { useTableCsv } from '~/composables/tables/useTableCsv'
+import { useTableState } from '~/composables/tables/useTableState'
+import { buildCredentialColumns, CREDENTIAL_COLUMN_LABELS, credentialValidityItems, type CredentialRow } from '~/components/tables/monitoring/credentialColumns'
 import type { SerproAdminOverview } from '~/types/monitoring'
 
 definePageMeta({ middleware: ['super-admin'] })
 
-const UBadge = resolveComponent('UBadge')
-const UButton = resolveComponent('UButton')
-const UCheckbox = resolveComponent('UCheckbox')
-const UDropdownMenu = resolveComponent('UDropdownMenu')
-
 const toast = useToast()
 
-interface CredentialRow {
-  environment: string
-  identifier: string | null
-  resolved: boolean
-  has_certificate: boolean
-  updated_at: string | null
-}
-
-interface CredentialTableApi {
-  getFilteredSelectedRowModel: () => { rows: Row<CredentialRow>[] }
-  getFilteredRowModel: () => { rows: Row<CredentialRow>[] }
-  getColumn: (id: string) => { setFilterValue: (value: string | undefined) => void, getFilterValue: () => unknown, toggleVisibility: (value?: boolean) => void } | undefined
-  getAllColumns: () => { id: string, getCanHide: () => boolean, getIsVisible: () => boolean }[]
-  getState: () => { pagination: { pageIndex: number, pageSize: number } }
-  setPageIndex: (index: number) => void
-}
-
-const { data: overview, refresh: refreshOverview } = await useFetch<{ data: SerproAdminOverview }>('/api/admin/serpro', { lazy: true })
+const { data: overview, status: overviewStatus, error: overviewError, refresh: refreshOverview } = await useFetch<{ data: SerproAdminOverview }>('/api/admin/serpro', { lazy: true })
 
 const credentialsOpen = ref(false)
 const credentialErrors = ref<string[]>([])
@@ -82,127 +62,44 @@ const transportState = reactive({
 
 const environmentBadgeColor = computed(() => overview.value?.data.environment === 'producao' ? 'error' : 'info')
 
-const credentialTable = useTemplateRef<{ tableApi?: CredentialTableApi | null }>('credentialTable')
-const credentialFilters = ref([{ id: 'identifier', value: '' }])
-const credentialVisibility = ref()
-const credentialSelection = ref<Record<string, boolean>>({})
-const credentialSorting = ref<{ id: string, desc: boolean }[]>([])
-const credentialPagination = ref({ pageIndex: 0, pageSize: 10 })
-const credentialValidity = ref('all')
+const credentialTable = useTemplateRef<{ tableApi?: TableApi<CredentialRow> | null }>('credentialTable')
+const {
+  columnFilters: credentialFilters,
+  columnVisibility: credentialVisibility,
+  rowSelection: credentialSelection,
+  sorting: credentialSorting,
+  pagination: credentialPagination,
+  search: credentialSearch,
+  filterValue: credentialValidity,
+  selectedRows: credentialSelected,
+  filteredCount: credentialFiltered
+} = useTableState<CredentialRow>(() => credentialTable.value?.tableApi, {
+  searchColumn: 'identifier',
+  filterColumn: 'resolved',
+  getTotal: () => credentialRows.value.length
+})
+const { exportCsv: exportCredentialCsv } = useTableCsv<CredentialRow>(() => credentialTable.value?.tableApi)
 
 const credentialRows = computed((): CredentialRow[] => overview.value ? Object.entries(overview.value.data.credentials).map(([env, cred]) => ({ environment: env, ...cred })) : [])
 
-function credentialSortable(label: string) {
-  return ({ column }: { column: { getIsSorted: () => false | 'asc' | 'desc', toggleSorting: (desc?: boolean) => void } }) => {
-    const isSorted = column.getIsSorted()
-    return h(UButton, {
-      color: 'neutral',
-      variant: 'ghost',
-      label,
-      icon: isSorted ? (isSorted === 'asc' ? 'i-lucide-arrow-up-narrow-wide' : 'i-lucide-arrow-down-wide-narrow') : 'i-lucide-arrow-up-down',
-      class: '-mx-2.5',
-      onClick: () => column.toggleSorting(column.getIsSorted() === 'asc')
-    })
-  }
-}
-
-const credentialColumns: TableColumn<CredentialRow>[] = [
-  {
-    id: 'select',
-    header: ({ table: api }) => h(UCheckbox, {
-      'modelValue': api.getIsSomePageRowsSelected() ? 'indeterminate' : api.getIsAllPageRowsSelected(),
-      'onUpdate:modelValue': (value: boolean | 'indeterminate') => api.toggleAllPageRowsSelected(!!value),
-      'ariaLabel': 'Selecionar todos'
-    }),
-    cell: ({ row }) => h(UCheckbox, {
-      'modelValue': row.getIsSelected(),
-      'onUpdate:modelValue': (value: boolean | 'indeterminate') => row.toggleSelected(!!value),
-      'ariaLabel': 'Selecionar linha'
-    })
-  },
-  {
-    accessorKey: 'environment',
-    header: credentialSortable('Ambiente'),
-    cell: ({ row }) => h('p', { class: 'font-medium text-highlighted' }, row.original.environment === 'producao' ? 'Produção' : row.original.environment === 'homologacao' ? 'Homologação' : row.original.environment)
-  },
-  {
-    accessorKey: 'identifier',
-    header: credentialSortable('Identificador'),
-    cell: ({ row }) => h('p', { class: 'text-sm text-muted' }, row.original.identifier ?? '—')
-  },
-  {
-    accessorKey: 'resolved',
-    header: 'Válidas',
-    filterFn: (row, _columnId, value) => {
-      if (value === undefined || value === 'all') return true
-      return String(row.original.resolved) === String(value)
-    },
-    cell: ({ row }) => h(UBadge, { color: row.original.resolved ? 'success' : 'neutral', variant: 'subtle' }, () => row.original.resolved ? 'Sim' : 'Não')
-  },
-  {
-    accessorKey: 'has_certificate',
-    header: 'Certificado mTLS',
-    cell: ({ row }) => h(UBadge, { color: row.original.has_certificate ? 'success' : 'neutral', variant: 'subtle' }, () => row.original.has_certificate ? 'Sim' : 'Não')
-  },
-  {
-    accessorKey: 'updated_at',
-    header: credentialSortable('Atualizadas em'),
-    cell: ({ row }) => h('p', { class: 'text-sm text-muted' }, formatDateTime(row.original.updated_at))
-  },
-  {
-    id: 'actions',
-    cell: ({ row }) => h('div', { class: 'text-right' }, [
-      h(UDropdownMenu, {
-        content: { align: 'end' },
-        items: [
-          { type: 'label' as const, label: 'Ações' },
-          {
-            label: 'Copiar identificador',
-            icon: 'i-lucide-copy',
-            onSelect: () => {
-              navigator.clipboard.writeText(row.original.identifier ?? '')
-              toast.add({ title: 'Identificador copiado', color: 'success' })
-            }
-          }
-        ]
-      }, () => h(UButton, { icon: 'i-lucide-ellipsis-vertical', color: 'neutral', variant: 'ghost', class: 'ml-auto', ariaLabel: 'Ações da credencial' }))
-    ])
-  }
-]
-
-watch(() => credentialValidity.value, (newVal) => {
-  const column = credentialTable.value?.tableApi?.getColumn('resolved')
-  if (!column) return
-  if (newVal === 'all') column.setFilterValue(undefined)
-  else column.setFilterValue(newVal)
-  credentialPagination.value.pageIndex = 0
-})
-
-const credentialSearch = computed({
-  get: (): string => (credentialTable.value?.tableApi?.getColumn('identifier')?.getFilterValue() as string) || '',
-  set: (value: string) => {
-    credentialTable.value?.tableApi?.getColumn('identifier')?.setFilterValue(value || undefined)
-    credentialPagination.value.pageIndex = 0
+const credentialColumns = buildCredentialColumns({
+  onCopyIdentifier: (identifier) => {
+    navigator.clipboard.writeText(identifier ?? '')
+    toast.add({ title: 'Identificador copiado', color: 'success' })
   }
 })
-
-const credentialSelected = computed((): Row<CredentialRow>[] => credentialTable.value?.tableApi?.getFilteredSelectedRowModel().rows ?? [])
-const credentialFiltered = computed((): number => credentialTable.value?.tableApi?.getFilteredRowModel().rows.length ?? credentialRows.value.length)
 
 function exportCredentials(): void {
-  const list = (credentialSelected.value.length > 0 ? credentialSelected.value : (credentialTable.value?.tableApi?.getFilteredRowModel().rows ?? [])).map((r: Row<CredentialRow>) => r.original)
-  if (list.length === 0) {
-    toast.add({ title: 'Nada para exportar', description: 'Ajuste os filtros de credenciais.', color: 'warning' })
-    return
-  }
-  exportToCsv('credenciais-serpro', list.map(c => ({
+  exportCredentialCsv('credenciais-serpro', c => ({
     ambiente: c.environment,
     identificador: c.identifier ?? '',
     validas: c.resolved ? 'Sim' : 'Não',
     certificado_mtls: c.has_certificate ? 'Sim' : 'Não',
     atualizadas_em: c.updated_at ?? ''
-  })))
-  toast.add({ title: 'CSV exportado', description: `${list.length} credencial(is) exportada(s).`, color: 'success' })
+  }), {
+    emptyDescription: 'Ajuste os filtros de credenciais.',
+    exportedUnit: 'credencial(is) exportada(s)'
+  })
 }
 
 function readFileAsBase64(file: File): Promise<string> {
@@ -369,6 +266,14 @@ function openTransport() {
           </UCard>
         </div>
 
+        <TablesTableStates
+          :error="overviewError"
+          variant="subtle"
+          error-title="Credenciais indisponíveis"
+          :error-description="monitoringErrorMessage(backendErrorBody(overviewError))"
+          @retry="refreshOverview"
+        />
+
         <UCard>
           <template #header>
             <p class="font-medium text-highlighted">
@@ -376,54 +281,16 @@ function openTransport() {
             </p>
           </template>
           <div class="flex flex-col gap-4">
-            <div class="flex flex-wrap items-center justify-between gap-1.5">
-              <UInput
-                v-model="credentialSearch"
-                class="max-w-sm"
-                icon="i-lucide-search"
-                placeholder="Filtrar por identificador..."
-              />
-              <div class="flex flex-wrap items-center gap-1.5">
-                <UButton
-                  label="Exportar CSV"
-                  color="neutral"
-                  variant="outline"
-                  icon="i-lucide-download"
-                  @click="exportCredentials"
-                />
-                <USelect
-                  v-model="credentialValidity"
-                  :items="[
-                    { label: 'Todas', value: 'all' },
-                    { label: 'Válidas', value: 'true' },
-                    { label: 'Inválidas', value: 'false' }
-                  ]"
-                  placeholder="Filtrar validade"
-                  class="min-w-28"
-                />
-                <UDropdownMenu
-                  :items="credentialTable?.tableApi?.getAllColumns().filter((column: any) => column.getCanHide()).map((column: any) => ({
-                    label: upperFirst(column.id),
-                    type: 'checkbox' as const,
-                    checked: column.getIsVisible(),
-                    onUpdateChecked(checked: boolean) {
-                      credentialTable?.tableApi?.getColumn(column.id)?.toggleVisibility(!!checked)
-                    },
-                    onSelect(e?: Event) {
-                      e?.preventDefault()
-                    }
-                  }))"
-                  :content="{ align: 'end' }"
-                >
-                  <UButton
-                    label="Exibir"
-                    color="neutral"
-                    variant="outline"
-                    trailing-icon="i-lucide-settings-2"
-                  />
-                </UDropdownMenu>
-              </div>
-            </div>
+            <TablesTableToolbar
+              v-model:search="credentialSearch"
+              v-model:filter-value="credentialValidity"
+              search-placeholder="Filtrar por identificador…"
+              :filter-items="credentialValidityItems"
+              filter-placeholder="Filtrar validade"
+              :table-api="credentialTable?.tableApi"
+              :column-labels="CREDENTIAL_COLUMN_LABELS"
+              @export="exportCredentials"
+            />
             <UTable
               ref="credentialTable"
               v-model:column-filters="credentialFilters"
@@ -435,37 +302,24 @@ function openTransport() {
               class="shrink-0"
               :data="credentialRows"
               :columns="credentialColumns"
-              :ui="{
-                base: 'table-fixed border-separate border-spacing-0',
-                thead: '[&>tr]:bg-elevated/50 [&>tr]:after:content-none',
-                tbody: '[&>tr]:last:[&>td]:border-b-0',
-                th: 'py-2 first:rounded-l-lg last:rounded-r-lg border-y border-default first:border-l last:border-r',
-                td: 'border-b border-default',
-                separator: 'h-0'
-              }"
+              :loading="overviewStatus === 'pending'"
+              :ui="tableUi"
             >
               <template #empty>
-                <div class="flex flex-col items-center justify-center gap-2 py-8 text-center">
-                  <p class="font-medium text-highlighted">
-                    Nenhuma credencial encontrada
-                  </p>
-                  <p class="text-sm text-muted">
-                    Ajuste a busca ou o filtro de validade.
-                  </p>
-                </div>
+                <TablesTableStates
+                  empty-title="Nenhuma credencial encontrada"
+                  empty-hint="Ajuste a busca ou o filtro de validade."
+                />
               </template>
             </UTable>
-            <div class="flex items-center justify-between gap-3 border-t border-default pt-4 mt-auto">
-              <div class="text-sm text-muted">
-                {{ credentialSelected.length }} de {{ credentialFiltered }} credencial(is) selecionada(s).
-              </div>
-              <UPagination
-                :page="(credentialTable?.tableApi?.getState().pagination.pageIndex || 0) + 1"
-                :items-per-page="credentialTable?.tableApi?.getState().pagination.pageSize"
-                :total="credentialFiltered"
-                @update:page="(p: number) => credentialTable?.tableApi?.setPageIndex(p - 1)"
-              />
-            </div>
+            <TablesTableFooter
+              :selected="credentialSelected.length"
+              :total="credentialFiltered"
+              unit="credencial(is)"
+              feminine
+              :table-api="credentialTable?.tableApi"
+              @update:page="(p: number) => credentialTable?.tableApi?.setPageIndex(p - 1)"
+            />
           </div>
           <p class="mt-2 text-xs text-muted">
             Identificadores mascarados. Segredos nunca são exibidos.

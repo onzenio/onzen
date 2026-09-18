@@ -1,22 +1,13 @@
 <script setup lang="ts">
 import * as z from 'zod'
-import type { FormSubmitEvent, TableColumn } from '@nuxt/ui'
-import { upperFirst } from 'scule'
+import type { FormSubmitEvent } from '@nuxt/ui'
 import { getPaginationRowModel } from '@tanstack/table-core'
-import type { Row } from '@tanstack/table-core'
+import { TABLE_UI as tableUi, type TableApi } from '~/utils/table-chrome'
+import { useTableCsv } from '~/composables/tables/useTableCsv'
+import { useTableState } from '~/composables/tables/useTableState'
+import { buildPlanColumns, PLAN_COLUMN_LABELS, defaultItems, formatPlanPrice, type PlanRow } from '~/components/tables/plans/columns'
 
 definePageMeta({ middleware: 'super-admin' })
-
-interface PlanRow {
-  id: number
-  name: string
-  price_cents: number
-  max_users: number
-  max_clients: number
-  modules: string[]
-  monthly_query_volume: number
-  is_default: boolean
-}
 
 interface PlansResponse {
   data: PlanRow[]
@@ -34,31 +25,27 @@ interface AccountsResponse {
   data: AccountOption[]
 }
 
-const UBadge = resolveComponent('UBadge')
-const UButton = resolveComponent('UButton')
-const UCheckbox = resolveComponent('UCheckbox')
-const UDropdownMenu = resolveComponent('UDropdownMenu')
-
 const toast = useToast()
 
-interface PlanTableApi {
-  getFilteredSelectedRowModel: () => { rows: Row<PlanRow>[] }
-  getFilteredRowModel: () => { rows: Row<PlanRow>[] }
-  getColumn: (id: string) => { setFilterValue: (value: string | undefined) => void, getFilterValue: () => unknown, toggleVisibility: (value?: boolean) => void } | undefined
-  getAllColumns: () => { id: string, getCanHide: () => boolean, getIsVisible: () => boolean }[]
-  getState: () => { pagination: { pageIndex: number, pageSize: number } }
-  setPageIndex: (index: number) => void
-}
+const table = useTemplateRef<{ tableApi?: TableApi<PlanRow> | null }>('table')
+const {
+  columnFilters,
+  columnVisibility,
+  rowSelection,
+  sorting,
+  pagination,
+  search,
+  filterValue: defaultFilter,
+  selectedRows,
+  filteredCount
+} = useTableState<PlanRow>(() => table.value?.tableApi, {
+  searchColumn: 'name',
+  filterColumn: 'is_default',
+  getTotal: () => plans.value.length
+})
+const { exportCsv: exportTableCsv } = useTableCsv<PlanRow>(() => table.value?.tableApi)
 
-const table = useTemplateRef<{ tableApi?: PlanTableApi | null }>('table')
-const columnFilters = ref([{ id: 'name', value: '' }])
-const columnVisibility = ref()
-const rowSelection = ref<Record<string, boolean>>({})
-const sorting = ref<{ id: string, desc: boolean }[]>([])
-const pagination = ref({ pageIndex: 0, pageSize: 10 })
-const defaultFilter = ref('all')
-
-const { data, status, refresh } = await useFetch<PlansResponse>('/api/plans', {
+const { data, error, status, refresh } = await useFetch<PlansResponse>('/api/plans', {
   key: 'plans-list',
   query: { per_page: 500 }
 })
@@ -70,9 +57,7 @@ const { data: accountsData, refresh: refreshAccounts } = await useFetch<Accounts
 const plans = computed(() => data.value?.data ?? [])
 const accounts = computed(() => accountsData.value?.data ?? [])
 
-function formatPrice(cents: number): string {
-  return (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-}
+const columns = buildPlanColumns({ onEdit: openEdit })
 
 const editing = ref<PlanRow | null>(null)
 const open = ref(false)
@@ -157,115 +142,19 @@ async function onSubmit(event: FormSubmitEvent<Schema>) {
   }
 }
 
-const columns: TableColumn<PlanRow>[] = [
-  {
-    id: 'select',
-    header: ({ table: api }) => h(UCheckbox, {
-      'modelValue': api.getIsSomePageRowsSelected() ? 'indeterminate' : api.getIsAllPageRowsSelected(),
-      'onUpdate:modelValue': (value: boolean | 'indeterminate') => api.toggleAllPageRowsSelected(!!value),
-      'ariaLabel': 'Selecionar todos'
-    }),
-    cell: ({ row }) => h(UCheckbox, {
-      'modelValue': row.getIsSelected(),
-      'onUpdate:modelValue': (value: boolean | 'indeterminate') => row.toggleSelected(!!value),
-      'ariaLabel': 'Selecionar linha'
-    })
-  },
-  {
-    accessorKey: 'name',
-    header: sortableHeader('Nome'),
-    cell: ({ row }) => h('span', { class: 'font-medium' }, row.original.name)
-  },
-  {
-    accessorKey: 'price_cents',
-    header: sortableHeader('Preço'),
-    cell: ({ row }) => formatPrice(row.original.price_cents)
-  },
-  {
-    accessorKey: 'is_default',
-    header: 'Padrão',
-    filterFn: (row, _columnId, value) => {
-      if (value === undefined || value === 'all') return true
-      return String(row.original.is_default) === String(value)
-    },
-    cell: ({ row }) => row.original.is_default ? h(UBadge, { variant: 'subtle', color: 'success' }, () => 'Padrão') : h('p', { class: 'text-sm text-muted' }, '—')
-  },
-  { accessorKey: 'max_users', header: sortableHeader('Usuários') },
-  { accessorKey: 'max_clients', header: sortableHeader('Clientes') },
-  {
-    id: 'modules',
-    header: 'Módulos',
-    cell: ({ row }) => row.original.modules.join(', ')
-  },
-  {
-    id: 'actions',
-    cell: ({ row }) => {
-      return h('div', { class: 'text-right' }, h(UButton, {
-        icon: 'i-lucide-pencil',
-        color: 'neutral',
-        variant: 'ghost',
-        ariaLabel: `Editar plano ${row.original.name}`,
-        onClick: () => openEdit(row.original)
-      }))
-    }
-  }
-]
-
-function sortableHeader(label: string) {
-  return ({ column }: { column: { getIsSorted: () => false | 'asc' | 'desc', toggleSorting: (desc?: boolean) => void } }) => {
-    const isSorted = column.getIsSorted()
-    return h(UButton, {
-      color: 'neutral',
-      variant: 'ghost',
-      label,
-      icon: isSorted ? (isSorted === 'asc' ? 'i-lucide-arrow-up-narrow-wide' : 'i-lucide-arrow-down-wide-narrow') : 'i-lucide-arrow-up-down',
-      class: '-mx-2.5',
-      onClick: () => column.toggleSorting(column.getIsSorted() === 'asc')
-    })
-  }
-}
-
-const defaultItems = [
-  { label: 'Todos os planos', value: 'all' },
-  { label: 'Somente padrão', value: 'true' }
-]
-
-watch(() => defaultFilter.value, (newVal) => {
-  if (!table?.value?.tableApi) return
-  const column = table.value.tableApi.getColumn('is_default')
-  if (!column) return
-  if (newVal === 'all') column.setFilterValue(undefined)
-  else column.setFilterValue(newVal)
-  pagination.value.pageIndex = 0
-})
-
-const search = computed({
-  get: (): string => (table.value?.tableApi?.getColumn('name')?.getFilterValue() as string) || '',
-  set: (value: string) => {
-    table.value?.tableApi?.getColumn('name')?.setFilterValue(value || undefined)
-    pagination.value.pageIndex = 0
-  }
-})
-
-const selectedRows = computed((): Row<PlanRow>[] => table.value?.tableApi?.getFilteredSelectedRowModel().rows ?? [])
-const filteredCount = computed((): number => table.value?.tableApi?.getFilteredRowModel().rows.length ?? plans.value.length)
-
 function exportCsv() {
-  const rows = (selectedRows.value.length > 0 ? selectedRows.value : (table.value?.tableApi?.getFilteredRowModel().rows ?? [])).map((r: Row<PlanRow>) => r.original)
-  if (rows.length === 0) {
-    toast.add({ title: 'Nada para exportar', description: 'Ajuste os filtros ou selecione ao menos um plano.', color: 'warning' })
-    return
-  }
-  exportToCsv('planos', rows.map((p: PlanRow) => ({
+  exportTableCsv('planos', (p: PlanRow) => ({
     id: p.id,
     nome: p.name,
-    preco: formatPrice(p.price_cents),
+    preco: formatPlanPrice(p.price_cents),
     max_usuarios: p.max_users,
     max_clientes: p.max_clients,
     modulos: p.modules.join(', '),
     padrao: p.is_default ? 'Sim' : 'Não'
-  })))
-  toast.add({ title: 'CSV exportado', description: `${rows.length} plano(s) exportado(s).`, color: 'success' })
+  }), {
+    emptyDescription: 'Ajuste os filtros ou selecione ao menos um plano.',
+    exportedUnit: 'plano(s) exportado(s)'
+  })
 }
 
 const switchAccountId = ref<number | undefined>(undefined)
@@ -319,52 +208,23 @@ async function onSwitchPlan() {
     </template>
 
     <template #body>
-      <div class="flex flex-wrap items-center justify-between gap-1.5">
-        <UInput
-          v-model="search"
-          class="max-w-sm"
-          icon="i-lucide-search"
-          placeholder="Buscar por nome..."
-        />
+      <TablesTableStates
+        :error="error"
+        error-title="Não foi possível carregar os planos"
+        :error-description="backendMessage(error)"
+        @retry="refresh"
+      />
 
-        <div class="flex flex-wrap items-center gap-1.5">
-          <UButton
-            label="Exportar CSV"
-            color="neutral"
-            variant="outline"
-            icon="i-lucide-download"
-            @click="exportCsv"
-          />
-          <USelect
-            v-model="defaultFilter"
-            :items="defaultItems"
-            value-key="value"
-            placeholder="Filtrar padrão"
-            class="min-w-28"
-          />
-          <UDropdownMenu
-            :items="table?.tableApi?.getAllColumns().filter((column: any) => column.getCanHide()).map((column: any) => ({
-              label: upperFirst(column.id),
-              type: 'checkbox' as const,
-              checked: column.getIsVisible(),
-              onUpdateChecked(checked: boolean) {
-                table?.tableApi?.getColumn(column.id)?.toggleVisibility(!!checked)
-              },
-              onSelect(e?: Event) {
-                e?.preventDefault()
-              }
-            }))"
-            :content="{ align: 'end' }"
-          >
-            <UButton
-              label="Exibir"
-              color="neutral"
-              variant="outline"
-              trailing-icon="i-lucide-settings-2"
-            />
-          </UDropdownMenu>
-        </div>
-      </div>
+      <TablesTableToolbar
+        v-model:search="search"
+        v-model:filter-value="defaultFilter"
+        search-placeholder="Buscar por nome…"
+        :filter-items="defaultItems"
+        filter-placeholder="Filtrar padrão"
+        :table-api="table?.tableApi"
+        :column-labels="PLAN_COLUMN_LABELS"
+        @export="exportCsv"
+      />
 
       <UTable
         ref="table"
@@ -378,39 +238,23 @@ async function onSwitchPlan() {
         :data="plans"
         :columns="columns"
         :loading="status === 'pending'"
-        :ui="{
-          base: 'table-fixed border-separate border-spacing-0',
-          thead: '[&>tr]:bg-elevated/50 [&>tr]:after:content-none',
-          tbody: '[&>tr]:last:[&>td]:border-b-0',
-          th: 'py-2 first:rounded-l-lg last:rounded-r-lg border-y border-default first:border-l last:border-r',
-          td: 'border-b border-default',
-          separator: 'h-0'
-        }"
+        :ui="tableUi"
       >
         <template #empty>
-          <div class="flex flex-col items-center justify-center gap-2 py-8 text-center">
-            <p class="font-medium text-highlighted">
-              Nenhum plano encontrado
-            </p>
-            <p class="text-sm text-muted">
-              Ajuste a busca ou o filtro de padrão.
-            </p>
-          </div>
+          <TablesTableStates
+            empty-title="Nenhum plano encontrado"
+            empty-hint="Ajuste a busca ou o filtro de padrão."
+          />
         </template>
       </UTable>
 
-      <div class="flex items-center justify-between gap-3 border-t border-default pt-4">
-        <div class="text-sm text-muted">
-          {{ selectedRows.length }} de {{ filteredCount }} plano(s) selecionado(s).
-        </div>
-
-        <UPagination
-          :page="(table?.tableApi?.getState().pagination.pageIndex || 0) + 1"
-          :items-per-page="table?.tableApi?.getState().pagination.pageSize"
-          :total="filteredCount"
-          @update:page="(p: number) => table?.tableApi?.setPageIndex(p - 1)"
-        />
-      </div>
+      <TablesTableFooter
+        :selected="selectedRows.length"
+        :total="filteredCount"
+        unit="plano(s)"
+        :table-api="table?.tableApi"
+        @update:page="(p: number) => table?.tableApi?.setPageIndex(p - 1)"
+      />
 
       <UPageCard
         title="Trocar plano da conta"
@@ -478,7 +322,7 @@ async function onSwitchPlan() {
               />
             </UFormField>
             <UFormField label="Módulos (separados por vírgula)" name="modules_text" required>
-              <UInput v-model="state.modules_text" placeholder="clients" class="w-full" />
+              <UInput v-model="state.modules_text" placeholder="ex.: clients, monitoring" class="w-full" />
             </UFormField>
             <UFormField label="Volume mensal de consultas" name="monthly_query_volume" required>
               <UInput

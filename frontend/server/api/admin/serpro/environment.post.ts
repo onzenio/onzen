@@ -1,1 +1,1 @@
-export default defineEventHandler(event => proxyToBackend(event, '/admin/serpro/environment'))
+export default defineEventHandler(event => backendProxy(event, '/admin/serpro/environment'))

@@ -75,6 +75,11 @@ O acesso a um Module SHALL depender de o Plan vigente liberá-lo.
 - **WHEN** um User acessa um Module ausente do Plan da sua Account
 - **THEN** o acesso SHALL ser negado com aviso de upgrade
 
+#### Scenario: Chamada direta ao backend
+
+- **WHEN** um User solicita diretamente ao backend uma operação de um Module ausente do Plan vigente
+- **THEN** o backend SHALL negar a operação sem consultar, criar ou alterar dados desse Module
+
 ### Requirement: Troca de Plan pela A
 
 Somente um super_admin da Account A SHALL trocar o Plan de uma Account, com efeito imediato.

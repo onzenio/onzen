@@ -1,37 +1,38 @@
 <script setup lang="ts">
 import * as z from 'zod'
-import type { FormSubmitEvent, TableColumn } from '@nuxt/ui'
-import { upperFirst } from 'scule'
+import type { FormSubmitEvent } from '@nuxt/ui'
 import { getPaginationRowModel } from '@tanstack/table-core'
 import type { Row } from '@tanstack/table-core'
+import { TABLE_UI as tableUi, type TableApi } from '~/utils/table-chrome'
+import { useTableCsv } from '~/composables/tables/useTableCsv'
+import { useTableState } from '~/composables/tables/useTableState'
+import { AUTHOR_COLUMN_LABELS, authorStatusItems, buildAuthorColumns } from '~/components/tables/monitoring/authorColumns'
 import type { CertificateState, RequestAuthor } from '~/types/monitoring'
 
-const UBadge = resolveComponent('UBadge')
-const UButton = resolveComponent('UButton')
-const UCheckbox = resolveComponent('UCheckbox')
-const UDropdownMenu = resolveComponent('UDropdownMenu')
-
 const toast = useToast()
+const { canManageSensitive } = useSession()
 
-interface AuthorTableApi {
-  getFilteredSelectedRowModel: () => { rows: Row<RequestAuthor>[] }
-  getFilteredRowModel: () => { rows: Row<RequestAuthor>[] }
-  getColumn: (id: string) => { setFilterValue: (value: string | undefined) => void, getFilterValue: () => unknown, toggleVisibility: (value?: boolean) => void } | undefined
-  getAllColumns: () => { id: string, getCanHide: () => boolean, getIsVisible: () => boolean }[]
-  getState: () => { pagination: { pageIndex: number, pageSize: number } }
-  setPageIndex: (index: number) => void
-}
-
-const table = useTemplateRef<{ tableApi?: AuthorTableApi | null }>('table')
-const columnFilters = ref([{ id: 'name', value: '' }])
-const columnVisibility = ref()
-const rowSelection = ref<Record<string, boolean>>({})
-const sorting = ref<{ id: string, desc: boolean }[]>([])
-const pagination = ref({ pageIndex: 0, pageSize: 10 })
-const statusFilter = ref('all')
+const table = useTemplateRef<{ tableApi?: TableApi<RequestAuthor> | null }>('table')
+const {
+  columnFilters,
+  columnVisibility,
+  rowSelection,
+  sorting,
+  pagination,
+  search,
+  filterValue: statusFilter,
+  selectedRows,
+  filteredCount,
+  clearSelection
+} = useTableState<RequestAuthor>(() => table.value?.tableApi, {
+  searchColumn: 'name',
+  filterColumn: 'status',
+  getTotal: () => authorRows.value.length
+})
+const { exportCsv: exportTableCsv } = useTableCsv<RequestAuthor>(() => table.value?.tableApi)
 
 const { data: certificate, refresh: refreshCertificate } = await useFetch<{ data: CertificateState }>('/api/monitoring/certificate', { lazy: true })
-const { data: authors, refresh: refreshAuthors } = await useFetch<{ data: RequestAuthor[] }>('/api/monitoring/authors', { lazy: true })
+const { data: authors, status: authorsStatus, error: authorsError, refresh: refreshAuthors } = await useFetch<{ data: RequestAuthor[] }>('/api/monitoring/authors', { lazy: true })
 
 const certificateOpen = ref(false)
 const certificateErrors = ref<string[]>([])
@@ -57,114 +58,25 @@ const bulkTerm = ref(false)
 
 const authorRows = computed((): RequestAuthor[] => authors.value?.data ?? [])
 
-function sortableHeader(label: string) {
-  return ({ column }: { column: { getIsSorted: () => false | 'asc' | 'desc', toggleSorting: (desc?: boolean) => void } }) => {
-    const isSorted = column.getIsSorted()
-    return h(UButton, {
-      color: 'neutral',
-      variant: 'ghost',
-      label,
-      icon: isSorted ? (isSorted === 'asc' ? 'i-lucide-arrow-up-narrow-wide' : 'i-lucide-arrow-down-wide-narrow') : 'i-lucide-arrow-up-down',
-      class: '-mx-2.5',
-      onClick: () => column.toggleSorting(column.getIsSorted() === 'asc')
-    })
-  }
-}
-
-const authorColumns: TableColumn<RequestAuthor>[] = [
-  {
-    id: 'select',
-    header: ({ table: api }) => h(UCheckbox, {
-      'modelValue': api.getIsSomePageRowsSelected() ? 'indeterminate' : api.getIsAllPageRowsSelected(),
-      'onUpdate:modelValue': (value: boolean | 'indeterminate') => api.toggleAllPageRowsSelected(!!value),
-      'ariaLabel': 'Selecionar todos'
-    }),
-    cell: ({ row }) => h(UCheckbox, {
-      'modelValue': row.getIsSelected(),
-      'onUpdate:modelValue': (value: boolean | 'indeterminate') => row.toggleSelected(!!value),
-      'ariaLabel': 'Selecionar linha'
-    })
-  },
-  {
-    accessorKey: 'name',
-    header: sortableHeader('Nome'),
-    filterFn: (row, _columnId, value) => {
-      const term = String(value ?? '').toLowerCase()
-      if (!term) return true
-      return row.original.name.toLowerCase().includes(term) || (row.original.document ?? '').toLowerCase().includes(term)
-    },
-    cell: ({ row }) => h('p', { class: 'font-medium text-highlighted' }, row.original.name)
-  },
-  {
-    accessorKey: 'document',
-    header: 'Documento',
-    cell: ({ row }) => h('p', { class: 'text-sm text-muted' }, row.original.document ?? '—')
-  },
-  {
-    accessorKey: 'status',
-    header: 'Estado',
-    filterFn: 'equals',
-    cell: ({ row }) => h(UBadge, { color: row.original.status === 'active' ? 'success' : 'neutral', variant: 'subtle' }, () => row.original.status === 'active' ? 'Ativo' : 'Inelegível')
-  },
-  {
-    accessorKey: 'certificate_expires_at',
-    header: sortableHeader('Cert. válido até'),
-    cell: ({ row }) => h('p', { class: 'text-sm text-muted' }, formatDateTime(row.original.certificate_expires_at))
-  },
-  {
-    id: 'actions',
-    cell: ({ row }) => h('div', { class: 'text-right' }, [
-      h(UDropdownMenu, {
-        content: { align: 'end' },
-        items: [
-          { type: 'label' as const, label: 'Ações' },
-          { label: 'Enviar termo', icon: 'i-lucide-send', onSelect: () => void submitTerm(row.original.id) },
-          {
-            label: 'Copiar documento',
-            icon: 'i-lucide-copy',
-            onSelect: () => {
-              navigator.clipboard.writeText(row.original.document ?? '')
-              toast.add({ title: 'Documento copiado', color: 'success' })
-            }
-          }
-        ]
-      }, () => h(UButton, { icon: 'i-lucide-ellipsis-vertical', color: 'neutral', variant: 'ghost', class: 'ml-auto', ariaLabel: 'Ações do autor' }))
-    ])
-  }
-]
-
-watch(() => statusFilter.value, (newVal) => {
-  const column = table.value?.tableApi?.getColumn('status')
-  if (!column) return
-  if (newVal === 'all') column.setFilterValue(undefined)
-  else column.setFilterValue(newVal)
-  pagination.value.pageIndex = 0
-})
-
-const search = computed({
-  get: (): string => (table.value?.tableApi?.getColumn('name')?.getFilterValue() as string) || '',
-  set: (value: string) => {
-    table.value?.tableApi?.getColumn('name')?.setFilterValue(value || undefined)
-    pagination.value.pageIndex = 0
+const authorColumns = buildAuthorColumns({
+  canManage: canManageSensitive,
+  onSendTerm: authorId => void submitTerm(authorId),
+  onCopyDocument: (author) => {
+    navigator.clipboard.writeText(author.document ?? '')
+    toast.add({ title: 'Documento copiado', color: 'success' })
   }
 })
-
-const selectedRows = computed((): Row<RequestAuthor>[] => table.value?.tableApi?.getFilteredSelectedRowModel().rows ?? [])
-const filteredCount = computed((): number => table.value?.tableApi?.getFilteredRowModel().rows.length ?? authorRows.value.length)
 
 function exportCsv(): void {
-  const list = (selectedRows.value.length > 0 ? selectedRows.value : (table.value?.tableApi?.getFilteredRowModel().rows ?? [])).map((r: Row<RequestAuthor>) => r.original)
-  if (list.length === 0) {
-    toast.add({ title: 'Nada para exportar', description: 'Ajuste os filtros ou selecione ao menos um autor.', color: 'warning' })
-    return
-  }
-  exportToCsv('autores', list.map(a => ({
+  exportTableCsv('autores', a => ({
     nome: a.name,
     documento: a.document ?? '',
     estado: a.status === 'active' ? 'Ativo' : 'Inelegível',
     certificado_valido_ate: a.certificate_expires_at ?? ''
-  })))
-  toast.add({ title: 'CSV exportado', description: `${list.length} autor(es) exportado(s).`, color: 'success' })
+  }), {
+    emptyDescription: 'Ajuste os filtros ou selecione ao menos um autor.',
+    exportedUnit: 'autor(es) exportado(s)'
+  })
 }
 
 async function submitTermBulk(): Promise<void> {
@@ -176,7 +88,7 @@ async function submitTermBulk(): Promise<void> {
       await $fetch(`/api/monitoring/authors/${author.id}/term`, { method: 'POST' })
     }
     toast.add({ title: 'Termos enviados', description: `${list.length} termo(s) enviado(s).`, color: 'success' })
-    rowSelection.value = {}
+    clearSelection()
     await refreshAuthors()
   } catch (error: unknown) {
     toast.add({ title: 'Envio recusado', description: monitoringErrorMessage(backendErrorBody(error)), color: 'error' })
@@ -264,7 +176,7 @@ async function submitTerm(authorId: number) {
           </p>
           <div class="flex gap-2">
             <UButton
-              v-if="certificate?.data.state === 'present'"
+              v-if="certificate?.data.state === 'present' && canManageSensitive"
               label="Remover"
               color="error"
               variant="ghost"
@@ -272,6 +184,7 @@ async function submitTerm(authorId: number) {
               @click="removeCertificateOpen = true"
             />
             <UButton
+              v-if="canManageSensitive"
               :label="certificate?.data.state === 'present' ? 'Substituir' : 'Cadastrar'"
               variant="outline"
               size="sm"
@@ -312,6 +225,7 @@ async function submitTerm(authorId: number) {
             Autores do Pedido de Dados
           </p>
           <UButton
+            v-if="canManageSensitive"
             label="Novo autor"
             icon="i-lucide-plus"
             size="sm"
@@ -320,61 +234,33 @@ async function submitTerm(authorId: number) {
         </div>
       </template>
       <div class="flex flex-col gap-4">
-        <div class="flex flex-wrap items-center justify-between gap-1.5">
-          <UInput
-            v-model="search"
-            class="max-w-sm"
-            icon="i-lucide-search"
-            placeholder="Buscar por nome ou documento..."
-          />
-          <div class="flex flex-wrap items-center gap-1.5">
+        <TablesTableStates
+          :error="authorsError"
+          variant="subtle"
+          error-title="Autores indisponíveis"
+          :error-description="monitoringErrorMessage(backendErrorBody(authorsError))"
+          @retry="refreshAuthors"
+        />
+        <TablesTableToolbar
+          v-model:search="search"
+          v-model:filter-value="statusFilter"
+          search-placeholder="Buscar por nome ou documento…"
+          :filter-items="authorStatusItems"
+          filter-placeholder="Filtrar estado"
+          :table-api="table?.tableApi"
+          :column-labels="AUTHOR_COLUMN_LABELS"
+          @export="exportCsv"
+        >
+          <template #bulk>
             <UButton
-              v-if="selectedRows.length"
+              v-if="canManageSensitive && selectedRows.length"
               :label="`Enviar termo (${selectedRows.length})`"
               icon="i-lucide-send"
               :loading="bulkTerm"
               @click="submitTermBulk"
             />
-            <UButton
-              label="Exportar CSV"
-              color="neutral"
-              variant="outline"
-              icon="i-lucide-download"
-              @click="exportCsv"
-            />
-            <USelect
-              v-model="statusFilter"
-              :items="[
-                { label: 'Todos os estados', value: 'all' },
-                { label: 'Ativos', value: 'active' },
-                { label: 'Inelegíveis', value: 'ineligible' }
-              ]"
-              placeholder="Filtrar estado"
-              class="min-w-28"
-            />
-            <UDropdownMenu
-              :items="table?.tableApi?.getAllColumns().filter((column: any) => column.getCanHide()).map((column: any) => ({
-                label: upperFirst(column.id),
-                type: 'checkbox' as const,
-                checked: column.getIsVisible(),
-                onUpdateChecked(checked: boolean) {
-                  table?.tableApi?.getColumn(column.id)?.toggleVisibility(!!checked)
-                },
-                onSelect(e?: Event) {
-                  e?.preventDefault()
-                }
-              }))"
-              :content="{ align: 'end' }"
-            >
-              <UButton
-                label="Exibir"
-                color="neutral"
-                variant="outline"
-                trailing-icon="i-lucide-settings-2"
-              />
-            </UDropdownMenu>
-          </div>
-        </div>
+          </template>
+        </TablesTableToolbar>
         <UTable
           ref="table"
           v-model:column-filters="columnFilters"
@@ -386,37 +272,23 @@ async function submitTerm(authorId: number) {
           class="shrink-0"
           :data="authorRows"
           :columns="authorColumns"
-          :ui="{
-            base: 'table-fixed border-separate border-spacing-0',
-            thead: '[&>tr]:bg-elevated/50 [&>tr]:after:content-none',
-            tbody: '[&>tr]:last:[&>td]:border-b-0',
-            th: 'py-2 first:rounded-l-lg last:rounded-r-lg border-y border-default first:border-l last:border-r',
-            td: 'border-b border-default',
-            separator: 'h-0'
-          }"
+          :loading="authorsStatus === 'pending'"
+          :ui="tableUi"
         >
           <template #empty>
-            <div class="flex flex-col items-center justify-center gap-2 py-8 text-center">
-              <p class="font-medium text-highlighted">
-                Nenhum autor encontrado
-              </p>
-              <p class="text-sm text-muted">
-                Ajuste a busca ou o filtro de estado.
-              </p>
-            </div>
+            <TablesTableStates
+              empty-title="Nenhum autor encontrado"
+              empty-hint="Ajuste a busca ou o filtro de estado."
+            />
           </template>
         </UTable>
-        <div class="flex items-center justify-between gap-3 border-t border-default pt-4 mt-auto">
-          <div class="text-sm text-muted">
-            {{ selectedRows.length }} de {{ filteredCount }} autor(es) selecionado(s).
-          </div>
-          <UPagination
-            :page="(table?.tableApi?.getState().pagination.pageIndex || 0) + 1"
-            :items-per-page="table?.tableApi?.getState().pagination.pageSize"
-            :total="filteredCount"
-            @update:page="(p: number) => table?.tableApi?.setPageIndex(p - 1)"
-          />
-        </div>
+        <TablesTableFooter
+          :selected="selectedRows.length"
+          :total="filteredCount"
+          unit="autor(es)"
+          :table-api="table?.tableApi"
+          @update:page="(p: number) => table?.tableApi?.setPageIndex(p - 1)"
+        />
       </div>
       <div
         v-for="author in (authors?.data ?? [])"
@@ -427,6 +299,7 @@ async function submitTerm(authorId: number) {
           Termo de autorização — {{ author.name }}
         </p>
         <UButton
+          v-if="canManageSensitive"
           label="Enviar termo"
           size="xs"
           variant="outline"

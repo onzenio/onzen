@@ -1,1 +1,1 @@
-export default defineEventHandler(event => proxyToBackend(event, '/monitoring/sync'))
+export default defineEventHandler(event => backendProxy(event, '/monitoring/sync'))

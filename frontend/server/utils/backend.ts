@@ -16,7 +16,7 @@ export interface SessionPayload {
 
 export interface BackendFetchOptions {
   method?: BackendMethod
-  body?: Record<string, unknown>
+  body?: Record<string, unknown> | Uint8Array
   query?: Record<string, unknown>
   headers?: Record<string, string>
 }
@@ -222,6 +222,7 @@ async function bootstrapCsrf(base: string, origin: string): Promise<SessionPaylo
 }
 
 export async function backendFetch<T = unknown>(event: H3Event, path: string, init: BackendFetchOptions = {}): Promise<T> {
+  // path inclui o prefixo /api (ex.: '/api/me'); use backendProxy para caminhos curtos.
   const base = backendBaseUrl(event)
   const method = init.method ?? 'GET'
   const origin = frontendOrigin(event)
@@ -268,7 +269,7 @@ export async function backendFetch<T = unknown>(event: H3Event, path: string, in
  * com os cabeçalhos de download do backend. Erros JSON do backend são
  * repassados com o status original.
  */
-export async function proxyBinaryToBackend(event: H3Event, path: string): Promise<unknown> {
+export async function proxyBinaryToBackend(event: H3Event, path: string, query?: Record<string, unknown>): Promise<unknown> {
   let base: string
   try {
     base = backendBaseUrl(event)
@@ -298,6 +299,7 @@ export async function proxyBinaryToBackend(event: H3Event, path: string): Promis
     const res = await $fetch.raw<ArrayBuffer>(`${base}/api${path}`, {
       method: 'GET',
       responseType: 'arrayBuffer',
+      query,
       headers
     })
     for (const [key, value] of res.headers.entries()) {
@@ -328,66 +330,34 @@ export async function proxyBinaryToBackend(event: H3Event, path: string): Promis
   }
 }
 /**
- * BFF mínimo do monitoramento: repassa método, query, corpo e cookies de
- * sessão para o Laravel e devolve o corpo do backend sem alterações, de modo
- * que o contrato consumido pelas páginas seja exatamente o da API.
- *
- * Sem backend alcançável, responde 503 factual em vez de estourar.
+ * Transporte unificado das server routes autenticadas: deriva método, query e
+ * corpo do evento e delega ao backendFetch, de modo que toda chamada ao
+ * backend restaure a sessão selada e preserve sessão/CSRF por um único caminho.
+ * Multipart (upload de certificado) segue como corpo bruto com content-type.
  */
-export async function proxyToBackend<T>(event: H3Event, path: string): Promise<T> {
-  let base: string
-  try {
-    base = backendBaseUrl(event)
-  } catch {
-    setResponseStatus(event, 503)
-    return { message: 'Backend não configurado (BACKEND_URL).', code: 'BACKEND_UNAVAILABLE' } as T
+export async function backendProxy<T>(event: H3Event, path: string): Promise<T> {
+  // O backend Laravel serve routes/api.php sob /api; normaliza aqui para
+  // que os call sites passem o caminho curto ('/me', '/monitoring/...').
+  const apiPath = path.startsWith('/api/') ? path : `/api${path.startsWith('/') ? path : `/${path}`}`
+  const method = getMethod(event).toUpperCase() as BackendMethod
+  const query = { ...getQuery(event) }
+
+  if (method === 'GET' || method === 'HEAD') {
+    return backendFetch<T>(event, apiPath, { method, query })
   }
 
-  const method = getMethod(event)
-  const origin = frontendOrigin(event)
-  let session = readSession(event)
-  if (!session && method !== 'GET' && method !== 'HEAD') {
-    session = await bootstrapCsrf(base, origin)
-  }
+  const contentType = getRequestHeader(event, 'content-type') ?? ''
 
-  let body: unknown
-
-  if (method !== 'GET' && method !== 'HEAD') {
-    const contentType = getRequestHeader(event, 'content-type') ?? ''
-
-    body = contentType.includes('multipart/form-data')
-      ? await readRawBody(event, false)
-      : await readBody(event).catch(() => undefined)
-  }
-
-  try {
-    const res = await $fetch.raw(`${base}/api${path}`, {
+  if (contentType.includes('multipart/form-data')) {
+    const raw = await readRawBody(event, false).catch(() => undefined)
+    return backendFetch<T>(event, apiPath, {
       method,
-      query: getQuery(event),
-      body: body as BodyInit | Record<string, unknown> | undefined,
-      headers: {
-        'Accept': 'application/json',
-        'X-Requested-With': 'XMLHttpRequest',
-        'Origin': origin,
-        ...(session && session.cookies.length > 0 ? { cookie: session.cookies.join('; ') } : {}),
-        ...(session?.xsrf ? { 'X-XSRF-TOKEN': session.xsrf } : {}),
-        ...(typeof body !== 'undefined' && getRequestHeader(event, 'content-type')
-          ? { 'content-type': getRequestHeader(event, 'content-type') as string }
-          : {})
-      }
+      query,
+      body: raw ?? undefined,
+      headers: { 'content-type': contentType }
     })
-    relaySetCookies(event, getSetCookieHeaders(res.headers), session)
-    return res._data as T
-  } catch (error: unknown) {
-    const fetchError = error as { response?: { status?: number, _data?: unknown } }
-    const status = fetchError?.response?.status
-
-    if (status) {
-      setResponseStatus(event, status)
-      return (fetchError.response?._data ?? { message: 'Falha no backend.' }) as T
-    }
-
-    setResponseStatus(event, 503)
-    return { message: 'Não foi possível falar com o backend. Tente novamente.', code: 'BACKEND_UNAVAILABLE' } as T
   }
+
+  const body = await readBody(event).catch(() => undefined)
+  return backendFetch<T>(event, apiPath, { method, query, body })
 }

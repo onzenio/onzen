@@ -25,6 +25,7 @@ use App\Models\SerproRequestAuthor;
 use App\Models\SerproServiceRequest;
 use App\Models\SerproSettings;
 use App\Services\Monitoring\SerproActionExecutor;
+use App\Services\Monitoring\SerproRecovery;
 use App\Support\CurrentAccount;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
@@ -914,7 +915,7 @@ final class SerproActionTest extends TestCase
         );
 
         $job = (new ExecuteSerproActionJob($action->id))->withFakeQueueInteractions();
-        $job->handle($this->executor());
+        $job->handle($this->executor(), app(SerproRecovery::class));
 
         $action->refresh();
 
@@ -943,7 +944,7 @@ final class SerproActionTest extends TestCase
             );
 
             $job = (new ExecuteSerproActionJob($action->id))->withFakeQueueInteractions();
-            $job->handle($this->executor());
+            $job->handle($this->executor(), app(SerproRecovery::class));
 
             $this->assertSame(SerproActionStatus::RateLimited, $action->refresh()->status);
             $job->assertReleased(45);

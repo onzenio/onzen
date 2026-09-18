@@ -20,6 +20,7 @@ use App\Models\SerproRequestAuthor;
 use App\Models\SerproSettings;
 use App\Services\Monitoring\QueryQuotaService;
 use App\Services\Monitoring\SerproExecutor;
+use App\Services\Monitoring\SerproRecovery;
 use App\Support\CurrentAccount;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -276,7 +277,7 @@ final class QueryQuotaTest extends TestCase
         $run = app(SerproExecutor::class)->claim($enrollment, 'job-blocked-key');
 
         $job = (new ExecuteSerproJob($run->id))->withFakeQueueInteractions();
-        $job->handle(app(SerproExecutor::class));
+        $job->handle(app(SerproExecutor::class), app(SerproRecovery::class));
 
         $run->refresh();
 
